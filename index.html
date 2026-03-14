@@ -399,6 +399,119 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
   .mc-stat, .mc-info { aspect-ratio: unset; min-height: 120px; }
 }
 
+
+/* ── HAMBURGUESA & MENÚ MÓVIL ── */
+.nav-hamburger {
+  display: none;
+  flex-direction: column;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: .4rem;
+  z-index: 300;
+}
+.nav-hamburger span {
+  display: block;
+  width: 24px;
+  height: 2px;
+  background: var(--ink);
+  transition: all .3s ease;
+  transform-origin: center;
+}
+.nav-hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.nav-hamburger.open span:nth-child(2) { opacity: 0; transform: scaleX(0); }
+.nav-hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+.mobile-menu {
+  display: none;
+  position: fixed;
+  top: 56px;
+  left: 0; right: 0;
+  background: var(--bg);
+  border-bottom: 3px solid var(--r);
+  z-index: 199;
+  padding: 1.5rem 1.25rem 2rem;
+  transform: translateY(-100%);
+  opacity: 0;
+  transition: transform .35s ease, opacity .35s ease;
+  pointer-events: none;
+}
+.mobile-menu.open {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: all;
+}
+.mobile-menu ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--t15);
+}
+.mobile-menu ul li a {
+  display: block;
+  padding: 1rem 0;
+  font-size: .92rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink2);
+  text-decoration: none;
+  border-bottom: 1px solid var(--t08);
+  font-weight: 500;
+  transition: color .2s, padding-left .2s;
+}
+.mobile-menu ul li a:hover { color: var(--r); padding-left: .5rem; }
+.mobile-menu ul li a.mm-acceso { color: var(--r); font-weight: 700; }
+.mm-tel {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 2.5rem;
+  color: var(--ink);
+  letter-spacing: .05em;
+  margin-top: 1.5rem;
+  line-height: 1;
+}
+.mm-tel::before {
+  content: '';
+  display: inline-block;
+  width: 8px; height: 8px;
+  background: var(--r);
+  border-radius: 50%;
+  margin-right: .5rem;
+  vertical-align: middle;
+  animation: baliza 2s infinite;
+}
+.mm-cta {
+  margin-top: 1rem;
+  width: 100%;
+  background: var(--r);
+  color: #fff;
+  padding: .9rem;
+  font-size: .82rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  border: none;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  .nav-hamburger { display: flex; }
+  .mobile-menu { display: block; }
+  /* Overlay oscuro detrás del menú */
+  .mobile-menu::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.3);
+    z-index: -1;
+    opacity: 0;
+    transition: opacity .35s;
+  }
+  .mobile-menu.open::before { opacity: 1; }
+}
+
 </style>
 </head>
 <body>
@@ -418,7 +531,25 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
     <div class="nav-tel"><span>443044</span></div>
     <button class="nav-cta">Afiliarme</button>
   </div>
+
+  <button class="nav-hamburger" id="navToggle" aria-label="Menú">
+    <span></span><span></span><span></span>
+  </button>
 </nav>
+
+<div class="mobile-menu" id="mobileMenu">
+  <ul>
+    <li><a href="#quienes" onclick="closeMenu()">Quiénes somos</a></li>
+    <li><a href="#historia" onclick="closeMenu()">Historia</a></li>
+    <li><a href="#servicios" onclick="closeMenu()">Servicios</a></li>
+    <li><a href="#planes" onclick="closeMenu()">Planes</a></li>
+    <li><a href="#contacto" onclick="closeMenu()">Contacto</a></li>
+    <li><a href="#acceso" onclick="closeMenu()" class="mm-acceso">Acceso</a></li>
+  </ul>
+  <div class="mm-tel">443044</div>
+  <button class="mm-cta" onclick="closeMenu(); document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Quiero afiliarme</button>
+</div>
+
 
 <!-- HERO -->
 <section class="hero">
@@ -705,6 +836,32 @@ if (accentCard) {
   }, { threshold: .5 });
   accentObs.observe(accentCard);
 }
+</script>
+
+
+<script>
+const toggle = document.getElementById('navToggle');
+const menu = document.getElementById('mobileMenu');
+toggle.addEventListener('click', () => {
+  const isOpen = menu.classList.contains('open');
+  if (isOpen) closeMenu();
+  else {
+    menu.classList.add('open');
+    toggle.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+});
+function closeMenu() {
+  menu.classList.remove('open');
+  toggle.classList.remove('open');
+  document.body.style.overflow = '';
+}
+// Cerrar al clickear fuera
+document.addEventListener('click', (e) => {
+  if (menu.classList.contains('open') && !menu.contains(e.target) && !toggle.contains(e.target)) {
+    closeMenu();
+  }
+});
 </script>
 
 </body>
