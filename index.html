@@ -512,6 +512,55 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
   .mobile-menu.open::before { opacity: 1; }
 }
 
+
+.mm-tel-cta {
+  margin-top: 1.5rem;
+  background: var(--r);
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+.mm-tel-label {
+  font-size: .65rem;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.75);
+  font-weight: 600;
+}
+.mm-tel-num {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 3.5rem;
+  color: #fff;
+  line-height: 1;
+  letter-spacing: .05em;
+}
+.mm-tel-num::before {
+  content: '';
+  display: inline-block;
+  width: 10px; height: 10px;
+  background: #fff;
+  border-radius: 50%;
+  margin-right: .5rem;
+  vertical-align: middle;
+  animation: baliza 1.5s infinite;
+  opacity: .9;
+}
+.mm-cta-sec {
+  margin-top: .75rem;
+  width: 100%;
+  background: transparent;
+  color: var(--ink2);
+  padding: .8rem;
+  font-size: .78rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  border: 1px solid var(--t15);
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 500;
+}
+
 </style>
 </head>
 <body>
@@ -528,7 +577,7 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
       <li><a href="#contacto">Contacto</a></li>
       <li><a href="#acceso" style="color:var(--r);font-weight:700">Acceso</a></li>
     </ul>
-    <div class="nav-tel"><span>443044</span></div>
+    <a href="tel:443044" style="text-decoration:none"><div class="nav-tel"><span>443044</span></div></a>
     <button class="nav-cta">Afiliarme</button>
   </div>
 
@@ -546,8 +595,13 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
     <li><a href="#contacto" onclick="closeMenu()">Contacto</a></li>
     <li><a href="#acceso" onclick="closeMenu()" class="mm-acceso">Acceso</a></li>
   </ul>
-  <div class="mm-tel">443044</div>
-  <button class="mm-cta" onclick="closeMenu(); document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Quiero afiliarme</button>
+  <a href="tel:443044" style="text-decoration:none">
+    <div class="mm-tel-cta">
+      <div class="mm-tel-label">Emergencias · llamar ahora</div>
+      <div class="mm-tel-num">443044</div>
+    </div>
+  </a>
+  <button class="mm-cta-sec" onclick="closeMenu(); document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Quiero afiliarme</button>
 </div>
 
 
