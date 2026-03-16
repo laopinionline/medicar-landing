@@ -155,10 +155,6 @@ const IC={"home":String.raw`<svg viewBox="0 0 24 24" fill="none" stroke="current
 
 const USERS=[
   {id:1,email:'afiliado@demo.com',pw:'1234',rol:'afiliado',nombre:'Carlos Rodríguez',dni:'28.445.123',plan:'Familiar',tel:'2477-123456',dir:'Av. San Martín 1240, Pergamino'},
-  {id:4,email:'joven@demo.com',pw:'1234',rol:'afiliado',nombre:'Sofía Martínez',dni:'42.100.200',plan:'Joven',tel:'2477-654321',dir:'Belgrano 540, Pergamino'},
-  {id:5,email:'senior@demo.com',pw:'1234',rol:'afiliado',nombre:'Roberto Giménez',dni:'18.220.110',plan:'Senior',tel:'2477-111222',dir:'San Lorenzo 890, Pergamino'},
-  {id:6,email:'area@demo.com',pw:'1234',rol:'afiliado',nombre:'Tienda El Sol',dni:'30.445.667',plan:'Area Protegida',tel:'2477-333444',dir:'Av. Alsina 120, Pergamino'},
-  {id:7,email:'corp@demo.com',pw:'1234',rol:'afiliado',nombre:'Agronasaja SA',dni:'33.100.200',plan:'Corporativo',tel:'2477-100200',dir:'Ruta 8 Km 265, Pergamino'},
   {id:2,email:'medico@demo.com',pw:'1234',rol:'medico',nombre:'Dra. Laura Gómez',matricula:'MP 18.432',esp:'Médica de guardia',unidad:'Unidad 05'},
   {id:3,email:'admin@demo.com',pw:'1234',rol:'admin',nombre:'Victoriano Marino',cargo:'Administrador general'},
 ];
@@ -213,12 +209,8 @@ function login(){
     <button class="btn-r" onclick="doLogin()">Ingresar</button>
     <div class="demo">
       <div class="demo-lbl">Acceso rápido demo</div>
-      <div class="demo-pills" style="flex-wrap:wrap;gap:.4rem">
-        <div class="pill" onclick="quick('afiliado@demo.com')">Familiar</div>
-        <div class="pill" onclick="quick('joven@demo.com')">Joven</div>
-        <div class="pill" onclick="quick('senior@demo.com')">Senior</div>
-        <div class="pill" onclick="quick('area@demo.com')">Área Prot.</div>
-        <div class="pill" onclick="quick('corp@demo.com')">Corporativo</div>
+      <div class="demo-pills">
+        <div class="pill" onclick="quick('afiliado@demo.com')">Afiliado</div>
         <div class="pill" onclick="quick('medico@demo.com')">Médico</div>
         <div class="pill" onclick="quick('admin@demo.com')">Admin</div>
       </div>
@@ -326,6 +318,20 @@ function plan(){
   const costo=planCosto();
   const costoStr=costo!==null?`$${costo.toLocaleString('es-AR')}`:'A definir por admin';
 
+  const selectorPlanes=`
+  <div class="card" style="padding:.9rem 1rem">
+    <div class="ch" style="margin-bottom:.75rem">Tipo de plan</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+      ${Object.entries(PLANES_CONFIG).map(([nombre,c])=>{
+        const sel=u.plan===nombre;
+        return`<button onclick="S.user.plan='${nombre}';S.planExtras={integrantes:0,domicilioLocal:'',responsable:''};render()" style="padding:.65rem .5rem;border-radius:10px;border:${sel?'2px solid '+c.color:'1.5px solid var(--border)'};background:${sel?'rgba(0,0,0,.04)':'var(--card)'};text-align:left;cursor:pointer">
+          <div style="font-size:.78rem;font-weight:700;color:${sel?c.color:'var(--ink)'}">${nombre}</div>
+          <div style="font-size:.65rem;color:var(--ink3);margin-top:.15rem">${c.base?'$'+c.base.toLocaleString('es-AR'):'Admin'}</div>
+        </button>`;
+      }).join('')}
+    </div>
+  </div>`;
+
   let extras='';
   if(u.plan==='Familiar'){
     extras=`
@@ -358,6 +364,7 @@ function plan(){
   }
 
   return`
+  ${selectorPlanes}
   <div class="card">
     <div class="ch">Cobertura activa</div>
     <div style="text-align:center;padding:1rem 0 .5rem">
