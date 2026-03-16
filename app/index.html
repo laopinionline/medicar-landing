@@ -316,7 +316,7 @@ function planCosto(){
   const u=S.user;
   const cfg=PLANES_CONFIG[u.plan];
   if(!cfg||cfg.base===null) return null;
-  if(u.plan==='Familiar') return cfg.base + (S.planExtras.integrantesDatos||[]).length * cfg.extra;
+  if(u.plan==='Familiar') return cfg.base + Math.max(0,(S.planExtras.integrantesDatos||[]).length - 1) * cfg.extra;
   return cfg.base;
 }
 
@@ -368,11 +368,11 @@ function plan(){
     <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
         <div style="font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)">Integrantes adicionales</div>
-        <span style="font-size:.75rem;font-weight:700;color:var(--ink)">${S.planExtras.integrantes} persona${S.planExtras.integrantes!==1?'s':''}</span>
+        <span style="font-size:.75rem;font-weight:700;color:var(--ink)">${Math.max(0,(S.planExtras.integrantesDatos||[]).length-1)} persona${Math.max(0,(S.planExtras.integrantesDatos||[]).length-1)!==1?'s':''}</span>
       </div>
       ${intRows}
       <button onclick="S.planExtras.integrantesDatos.push({nombre:'',dni:'',fnac:'',parentesco:''});S.planExtras.integrantes++;render()" style="width:100%;margin-top:.75rem;padding:.6rem;border-radius:10px;border:1.5px dashed var(--border);background:none;color:var(--ink2);font-size:.8rem;font-weight:600;cursor:pointer">+ Agregar integrante · $10.000/mes</button>
-      <div style="text-align:center;margin-top:.5rem;font-size:.72rem;color:var(--ink3)">${2+S.planExtras.integrantes} personas cubiertas en total</div>
+      <div style="text-align:center;margin-top:.5rem;font-size:.72rem;color:var(--ink3)">${1+(S.planExtras.integrantesDatos||[]).length} personas cubiertas en total</div>
       <button class="btn-r" style="margin-top:1rem;width:100%" onclick="alert('Integrantes guardados correctamente.')">Guardar integrantes</button>
     </div>`;
   }
