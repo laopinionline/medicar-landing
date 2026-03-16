@@ -224,7 +224,14 @@ function doLogin(){
   const e=document.getElementById('em').value.trim();
   const p=document.getElementById('pw').value;
   const u=USERS.find(x=>x.email===e&&x.pw===p);
-  if(u){S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};S.fotoPerfilUrl=null;set({user:u,tab:'home',step:0})}
+  if(u){
+    const extrasBase = u.plan==='Familiar'
+      ? {integrantes:1,integrantesDatos:[{nombre:'',dni:'',fnac:'',parentesco:''}],domicilioLocal:'',responsable:''}
+      : {integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
+    S.planExtras=extrasBase;
+    S.fotoPerfilUrl=null;
+    set({user:u,tab:'home',step:0});
+  }
   else{const el=document.getElementById('err');el.textContent='Email o contraseña incorrectos';el.style.display='block'}
 }
 
@@ -325,7 +332,7 @@ function plan(){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
       ${Object.entries(PLANES_CONFIG).map(([nombre,c])=>{
         const sel=u.plan===nombre;
-        return`<button onclick="S.user.plan='${nombre}';S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};render()" style="padding:.65rem .5rem;border-radius:10px;border:${sel?'2px solid '+c.color:'1.5px solid var(--border)'};background:${sel?'rgba(0,0,0,.04)':'var(--card)'};text-align:left;cursor:pointer">
+        return`<button onclick="cambiarPlan('${nombre}')" style="padding:.65rem .5rem;border-radius:10px;border:${sel?'2px solid '+c.color:'1.5px solid var(--border)'};background:${sel?'rgba(0,0,0,.04)':'var(--card)'};text-align:left;cursor:pointer">
           <div style="font-size:.78rem;font-weight:700;color:${sel?c.color:'var(--ink)'}">${nombre}</div>
           <div style="font-size:.65rem;color:var(--ink3);margin-top:.15rem">${c.base?'$'+c.base.toLocaleString('es-AR'):'Admin'}</div>
         </button>`;
@@ -339,10 +346,10 @@ function plan(){
     if(!S.planExtras.integrantesDatos) S.planExtras.integrantesDatos=[];
 
     const intRows=S.planExtras.integrantesDatos.map((ig,i)=>`
-      <div style="border:1px solid var(--border);border-radius:10px;padding:.75rem;margin-top:.65rem;background:var(--bg)">
+      <div style="border:1px solid ${i===0?'var(--r)':'var(--border)'};border-radius:10px;padding:.75rem;margin-top:.65rem;background:var(--bg)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
-          <span style="font-size:.75rem;font-weight:700;color:var(--ink2)">Integrante ${i+1}</span>
-          <button onclick="S.planExtras.integrantesDatos.splice(${i},1);S.planExtras.integrantes--;render()" style="font-size:.68rem;color:var(--r);background:none;border:none;cursor:pointer">Eliminar</button>
+          <span style="font-size:.75rem;font-weight:700;color:${i===0?'var(--r)':'var(--ink2)'}">${i===0?'2.º integrante (obligatorio)':'Integrante '+(i+1)}</span>
+          ${i===0?'<span style="font-size:.65rem;color:var(--r)">requerido</span>':`<button onclick="S.planExtras.integrantesDatos.splice(${i},1);S.planExtras.integrantes--;render()" style="font-size:.68rem;color:var(--r);background:none;border:none;cursor:pointer">Eliminar</button>`}
         </div>
         <div class="field" style="margin-bottom:.4rem"><label>Nombre completo</label><input type="text" value="${ig.nombre||''}" placeholder="Nombre y apellido" oninput="S.planExtras.integrantesDatos[${i}].nombre=this.value"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem">
@@ -418,18 +425,12 @@ function perfilA(){
     </div>
     <div class="pname">${u.nombre}</div>
     <div class="psub">Afiliado · Plan ${u.plan}</div>
-    <div style="margin-top:.65rem;width:100%;max-width:320px">
-      <div style="font-size:.68rem;color:var(--ink3);margin-bottom:.3rem">URL de foto de perfil</div>
-      <div style="display:flex;gap:.5rem">
-        <input id="inp-foto-url" type="url" placeholder="https://..." value="${foto||''}" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.45rem .65rem;font-size:.75rem;color:var(--ink)">
-        <button onclick="const v=document.getElementById('inp-foto-url').value.trim();S.fotoPerfilUrl=v||null;render()" style="background:var(--r);color:#fff;border:none;border-radius:8px;padding:.45rem .75rem;font-size:.75rem;font-weight:600;cursor:pointer">OK</button>
-      </div>
-    </div>
   </div>
   <div class="card"><div class="ch">Datos personales</div>
     <div class="field"><label>Nombre completo</label><input type="text" value="${u.nombre}" oninput="S.user.nombre=this.value"></div>
     <div class="field"><label>DNI</label><input type="text" value="${u.dni}" oninput="S.user.dni=this.value"></div>
     <div class="field"><label>Email</label><input type="email" value="${u.email}" oninput="S.user.email=this.value"></div>
+    <div class="field"><label>Foto de perfil (URL)</label><input type="url" id="inp-foto-url" placeholder="https://..." value="${foto||''}" oninput="S.fotoPerfilUrl=this.value.trim()||null;render()"></div>
     <div class="field"><label>WhatsApp / Teléfono</label><input type="tel" value="${u.tel}" oninput="S.user.tel=this.value"></div>
     <div class="field"><label>Domicilio</label><input type="text" value="${u.dir}" oninput="S.user.dir=this.value"></div>
   </div>
@@ -570,6 +571,14 @@ function perfilM(){
     <div class="ir"><span class="il">Unidad</span><span class="iv">${u.unidad}</span></div>
   </div>
   <button class="btn-o" onclick="set({user:null})">Cerrar sesión</button>`;
+}
+
+function cambiarPlan(nombre){
+  S.user.plan=nombre;
+  S.planExtras=nombre==='Familiar'
+    ? {integrantes:1,integrantesDatos:[{nombre:'',dni:'',fnac:'',parentesco:''}],domicilioLocal:'',responsable:''}
+    : {integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
+  render();
 }
 
 /* ADMIN */
