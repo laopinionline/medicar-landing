@@ -256,16 +256,16 @@ function shell(){
 }
 
 function getTabs(rol){
-  if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},{id:'perfil',icon:'settings',lbl:'Config'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},{id:'perfil',icon:'settings',lbl:'Config'}];
 }
 
 function pg(){
   const r=S.user.rol,t=S.tab;
-  if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='perfil')return perfilA();}
+  if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return perfilA();}
   if(r==='medico'){if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='perfil')return perfilM();}
-  if(r==='admin'){if(t==='home')return adHome();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return adConf();}
+  if(r==='admin'){if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return adConf();}
   return '';
 }
 
@@ -533,6 +533,200 @@ function perfilM(){
 }
 
 /* ADMIN */
+
+/* ── DATOS MÉDICOS Y GUARDIAS ── */
+const MEDICOS_STAFF=[
+  {id:'m1',nombre:'Dra. Laura Gómez',    matricula:'MP 18.432',esp:'Médica de guardia'},
+  {id:'m2',nombre:'Dr. Marcos Díaz',     matricula:'MP 21.100',esp:'Médico de guardia'},
+  {id:'m3',nombre:'Dra. Ana Torres',     matricula:'MP 15.880',esp:'Médica de guardia'},
+  {id:'m4',nombre:'Dr. Héctor Vidal',    matricula:'MP 19.540',esp:'Médico de guardia'},
+  {id:'m5',nombre:'Dra. Cecilia Ríos',   matricula:'MP 24.010',esp:'Médica de guardia'},
+];
+
+/* Estado guardias — se modifica en runtime */
+if(!S.guardias) S.guardias={
+  activa1: {medico:'m1', unidad:'Unidad 05'},
+  activa2: {medico:'m2', unidad:'Unidad 07'},
+  activa3: {medico:null,  unidad:'Unidad 03'},
+  pasiva:  {medico:'m3'},
+};
+
+/* ── TURNOS — estado global ── */
+if(!S.turnosReservados) S.turnosReservados=[];
+
+function formatHora(h,m){return`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;}
+
+function getSlotsDisponibles(fecha){
+  const slots=[];
+  for(let h=9;h<21;h++){
+    for(let m=0;m<60;m+=15){
+      const key=`${fecha}-${formatHora(h,m)}`;
+      const reservado=S.turnosReservados.find(t=>t.key===key);
+      slots.push({hora:formatHora(h,m),key,reservado:reservado||null});
+    }
+  }
+  return slots;
+}
+
+function fechaDisplay(f){
+  const [y,mo,d]=f.split('-');
+  const meses=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  return`${parseInt(d)} ${meses[parseInt(mo)-1]}`;
+}
+
+/* ── TURNOS (afiliado) ── */
+function turnos(){
+  const u=S.user;
+  const hoy=new Date();
+  const sel=S.turnoFecha||hoy.toISOString().split('T')[0];
+
+  // Generar próximos 7 días
+  const dias=[];
+  for(let i=0;i<7;i++){
+    const d=new Date(hoy);d.setDate(hoy.getDate()+i);
+    dias.push(d.toISOString().split('T')[0]);
+  }
+
+  const slots=getSlotsDisponibles(sel);
+  const misReservas=S.turnosReservados.filter(t=>t.afiliadoId===u.id);
+
+  /* Guardia pasiva activa */
+  const gpId=S.guardias.pasiva.medico;
+  const gpMed=MEDICOS_STAFF.find(m=>m.id===gpId);
+
+  return`
+  <div class="card" style="padding:.85rem 1rem">
+    <div class="ch">Consulta programada</div>
+    <p style="font-size:.8rem;color:var(--ink3);margin:.4rem 0 0">Guardia pasiva · videollamada · turnos de 15 min · 09:00–21:00</p>
+    ${gpMed?`<div style="margin-top:.65rem;display:flex;align-items:center;gap:.65rem"><div style="width:32px;height:32px;border-radius:50%;background:var(--r);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:.8rem">${gpMed.nombre.split(' ').slice(-1)[0][0]}G</div><div><div style="font-size:.82rem;font-weight:600">${gpMed.nombre}</div><div style="font-size:.72rem;color:var(--ink3)">${gpMed.esp} · ${gpMed.matricula}</div></div></div>`:`<div style="margin-top:.5rem;font-size:.8rem;color:var(--r)">Sin guardia pasiva asignada</div>`}
+  </div>
+
+  <div class="card" style="padding:.85rem 1rem">
+    <div class="ch" style="margin-bottom:.75rem">Elegí un día</div>
+    <div style="display:flex;gap:.5rem;overflow-x:auto;padding-bottom:.25rem">
+      ${dias.map(d=>{
+        const isHoy=d===hoy.toISOString().split('T')[0];
+        const isSel=d===sel;
+        return`<button onclick="S.turnoFecha='${d}';render()" style="min-width:52px;padding:.5rem .3rem;border-radius:10px;border:${isSel?'none':'1.5px solid var(--border)'};background:${isSel?'var(--r)':'var(--card)'};color:${isSel?'#fff':'var(--ink)'};font-size:.72rem;font-weight:${isSel?700:500};cursor:pointer;text-align:center">
+          <div style="font-size:.65rem;opacity:.7">${isHoy?'Hoy':'    '}</div>
+          <div style="font-weight:700;font-size:.88rem">${fechaDisplay(d)}</div>
+        </button>`;
+      }).join('')}
+    </div>
+  </div>
+
+  <div class="card" style="padding:.85rem 1rem">
+    <div class="ch" style="margin-bottom:.75rem">Horarios disponibles — ${fechaDisplay(sel)}</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem">
+      ${slots.map(s=>{
+        const esMio=s.reservado&&s.reservado.afiliadoId===u.id;
+        const ocupado=s.reservado&&!esMio;
+        return`<button
+          onclick="${ocupado?'':'esMio'+s.key+'?cancelarTurno(\''+s.key+'\'):reservarTurno(\''+s.key+'\')'}"
+          id="slot-${s.key}"
+          style="padding:.45rem .25rem;border-radius:8px;border:${esMio?'2px solid var(--r)':ocupado?'1.5px solid var(--border)':'1.5px solid var(--border)'};background:${esMio?'rgba(220,20,0,.08)':ocupado?'var(--bg)':'var(--card)'};color:${ocupado?'var(--ink3)':'var(--ink)'};font-size:.7rem;font-weight:${esMio?700:500};cursor:${ocupado?'default':'pointer'};opacity:${ocupado?.45:1}"
+          onclick="${ocupado?'':esMio?`cancelarTurno('${s.key}')`:`reservarTurno('${s.key}')`}"
+        >
+          ${s.hora}${esMio?'<br><span style="font-size:.6rem;color:var(--r)">✓ Reservado</span>':''}
+        </button>`;
+      }).join('')}
+    </div>
+  </div>
+
+  ${misReservas.length?`<div class="card" style="padding:.85rem 1rem">
+    <div class="ch" style="margin-bottom:.65rem">Mis turnos</div>
+    ${misReservas.map(t=>`<div class="lr"><div class="lrb"><div class="lrn">${t.fecha.split('-').reverse().join('/')} · ${t.hora}</div><div class="lrs">${gpMed?gpMed.nombre:'Guardia pasiva'} · Videollamada</div></div><button onclick="cancelarTurno('${t.key}')" style="font-size:.7rem;color:var(--r);background:none;border:none;cursor:pointer">Cancelar</button></div>`).join('')}
+  </div>`:''}
+
+  <div class="card" style="background:rgba(220,20,0,.06);border:1px solid rgba(220,20,0,.2);padding:.85rem 1rem">
+    <div style="display:flex;align-items:center;gap:.65rem">
+      <span style="font-size:1.4rem">🚨</span>
+      <div>
+        <div style="font-size:.82rem;font-weight:700;color:var(--r)">¿Urgencia o emergencia?</div>
+        <div style="font-size:.75rem;color:var(--ink3);margin-top:.2rem">No uses el sistema de turnos. Llamá de inmediato.</div>
+      </div>
+    </div>
+    <a href="tel:443044" style="display:block;margin-top:.75rem;background:var(--r);color:#fff;text-align:center;padding:.7rem;border-radius:8px;font-weight:700;font-size:.9rem;text-decoration:none">📞 Llamar 443044</a>
+  </div>`;
+}
+
+function reservarTurno(key){
+  const u=S.user;
+  const [fecha,hora]=key.split(/-(?=\d\d:\d\d)/);
+  const fecha2=key.slice(0,10);
+  const hora2=key.slice(11);
+  if(!S.turnosReservados) S.turnosReservados=[];
+  S.turnosReservados.push({key,fecha:fecha2,hora:hora2,afiliadoId:u.id,afiliadoNombre:u.nombre});
+  render();
+}
+
+function cancelarTurno(key){
+  if(!confirm('¿Cancelar este turno?'))return;
+  S.turnosReservados=S.turnosReservados.filter(t=>t.key!==key);
+  render();
+}
+
+/* ── GUARDIAS (admin) ── */
+function adGuardias(){
+  const slots=[
+    {id:'activa1',lbl:'Guardia Activa 1',sub:'Unidad 05',color:'var(--r)',icon:'🚑'},
+    {id:'activa2',lbl:'Guardia Activa 2',sub:'Unidad 07',color:'var(--r)',icon:'🚑'},
+    {id:'activa3',lbl:'Guardia Activa 3',sub:'Unidad 03',color:'var(--o)',icon:'🚑'},
+    {id:'pasiva', lbl:'Guardia Pasiva',  sub:'Videollamada · 09:00–21:00',color:'#1D9E75',icon:'💻'},
+  ];
+
+  function medSelect(slotId,curr){
+    return`<select onchange="S.guardias['${slotId}'].medico=this.value||null;render()" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.45rem .65rem;font-size:.8rem;color:var(--ink)">
+      <option value="">— Sin asignar —</option>
+      ${MEDICOS_STAFF.map(m=>`<option value="${m.id}" ${curr===m.id?'selected':''}>${m.nombre}</option>`).join('')}
+    </select>`;
+  }
+
+  const turnosHoy=S.turnosReservados.filter(t=>t.fecha===new Date().toISOString().split('T')[0]);
+
+  return`
+  <div style="font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin-bottom:.65rem">Turno actual</div>
+  ${slots.map(sl=>{
+    const g=S.guardias[sl.id];
+    const med=g.medico?MEDICOS_STAFF.find(m=>m.id===g.medico):null;
+    return`<div class="card" style="padding:.9rem 1rem;margin-bottom:.65rem">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:.75rem">
+        <div>
+          <div style="display:flex;align-items:center;gap:.5rem">
+            <span>${sl.icon}</span>
+            <span style="font-weight:700;font-size:.9rem">${sl.lbl}</span>
+            <span class="badge ${g.medico?'bg':'br'}" style="font-size:.62rem">${g.medico?'Cubierta':'Sin cubrir'}</span>
+          </div>
+          <div style="font-size:.72rem;color:var(--ink3);margin-top:.2rem">${sl.sub}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:.65rem">
+        ${medSelect(sl.id,g.medico)}
+      </div>
+      ${med?`<div style="margin-top:.65rem;display:flex;align-items:center;gap:.5rem;padding:.5rem .65rem;background:var(--bg);border-radius:8px">
+        <div style="width:28px;height:28px;border-radius:50%;background:${sl.color};display:flex;align-items:center;justify-content:center;color:#fff;font-size:.7rem;font-weight:700">${med.nombre.split(' ').map(w=>w[0]).slice(0,2).join('')}</div>
+        <div><div style="font-size:.8rem;font-weight:600">${med.nombre}</div><div style="font-size:.68rem;color:var(--ink3)">${med.matricula} · ${med.esp}</div></div>
+      </div>`:''}
+    </div>`;
+  }).join('')}
+
+  <div class="card" style="padding:.9rem 1rem">
+    <div class="ch" style="margin-bottom:.65rem">Turnos programados hoy (guardia pasiva)</div>
+    ${turnosHoy.length===0
+      ?`<div style="font-size:.8rem;color:var(--ink3);text-align:center;padding:.75rem">Sin turnos reservados para hoy</div>`
+      :turnosHoy.map(t=>`<div class="lr"><div class="lrb"><div class="lrn">${t.hora} · ${t.afiliadoNombre}</div></div><span class="badge bg" style="font-size:.62rem">Confirmado</span></div>`).join('')
+    }
+  </div>
+
+  <div class="card" style="padding:.9rem 1rem">
+    <div class="ch" style="margin-bottom:.65rem">Médicos disponibles</div>
+    ${MEDICOS_STAFF.map(m=>{
+      const asignado=Object.entries(S.guardias).find(([k,v])=>v.medico===m.id);
+      return`<div class="lr"><div class="lrb"><div class="lrn">${m.nombre}</div><div class="lrs">${m.matricula} · ${m.esp}</div></div><span class="badge ${asignado?'br':'bg'}" style="font-size:.62rem">${asignado?['activa1','activa2','activa3','pasiva'].includes(asignado[0])?{activa1:'Activa 1',activa2:'Activa 2',activa3:'Activa 3',pasiva:'Pasiva'}[asignado[0]]:'En guardia':'Disponible'}</span></div>`;
+    }).join('')}
+  </div>`;
+}
+
 function adHome(){
   return`
   <div class="srow"><div class="stat red"><div class="sn">5</div><div class="sl">Atenciones hoy</div></div><div class="stat"><div class="sn">4</div><div class="sl">Unidades activas</div></div></div>
