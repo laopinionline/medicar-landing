@@ -155,6 +155,10 @@ const IC={"home":String.raw`<svg viewBox="0 0 24 24" fill="none" stroke="current
 
 const USERS=[
   {id:1,email:'afiliado@demo.com',pw:'1234',rol:'afiliado',nombre:'Carlos Rodríguez',dni:'28.445.123',plan:'Familiar',tel:'2477-123456',dir:'Av. San Martín 1240, Pergamino'},
+  {id:4,email:'joven@demo.com',pw:'1234',rol:'afiliado',nombre:'Sofía Martínez',dni:'42.100.200',plan:'Joven',tel:'2477-654321',dir:'Belgrano 540, Pergamino'},
+  {id:5,email:'senior@demo.com',pw:'1234',rol:'afiliado',nombre:'Roberto Giménez',dni:'18.220.110',plan:'Senior',tel:'2477-111222',dir:'San Lorenzo 890, Pergamino'},
+  {id:6,email:'area@demo.com',pw:'1234',rol:'afiliado',nombre:'Tienda El Sol',dni:'30.445.667',plan:'Area Protegida',tel:'2477-333444',dir:'Av. Alsina 120, Pergamino'},
+  {id:7,email:'corp@demo.com',pw:'1234',rol:'afiliado',nombre:'Agronasaja SA',dni:'33.100.200',plan:'Corporativo',tel:'2477-100200',dir:'Ruta 8 Km 265, Pergamino'},
   {id:2,email:'medico@demo.com',pw:'1234',rol:'medico',nombre:'Dra. Laura Gómez',matricula:'MP 18.432',esp:'Médica de guardia',unidad:'Unidad 05'},
   {id:3,email:'admin@demo.com',pw:'1234',rol:'admin',nombre:'Victoriano Marino',cargo:'Administrador general'},
 ];
@@ -209,8 +213,12 @@ function login(){
     <button class="btn-r" onclick="doLogin()">Ingresar</button>
     <div class="demo">
       <div class="demo-lbl">Acceso rápido demo</div>
-      <div class="demo-pills">
-        <div class="pill" onclick="quick('afiliado@demo.com')">Afiliado</div>
+      <div class="demo-pills" style="flex-wrap:wrap;gap:.4rem">
+        <div class="pill" onclick="quick('afiliado@demo.com')">Familiar</div>
+        <div class="pill" onclick="quick('joven@demo.com')">Joven</div>
+        <div class="pill" onclick="quick('senior@demo.com')">Senior</div>
+        <div class="pill" onclick="quick('area@demo.com')">Área Prot.</div>
+        <div class="pill" onclick="quick('corp@demo.com')">Corporativo</div>
         <div class="pill" onclick="quick('medico@demo.com')">Médico</div>
         <div class="pill" onclick="quick('admin@demo.com')">Admin</div>
       </div>
@@ -224,7 +232,7 @@ function doLogin(){
   const e=document.getElementById('em').value.trim();
   const p=document.getElementById('pw').value;
   const u=USERS.find(x=>x.email===e&&x.pw===p);
-  if(u){set({user:u,tab:'home',step:0})}
+  if(u){S.planExtras={integrantes:0,domicilioLocal:'',responsable:''};S.fotoPerfilUrl=null;set({user:u,tab:'home',step:0})}
   else{const el=document.getElementById('err');el.textContent='Email o contraseña incorrectos';el.style.display='block'}
 }
 
@@ -292,17 +300,77 @@ function hist(){
   ${HISTORIA.map(h=>`<div class="hcc"><div class="hcm"><span class="hcd">${h.fecha}</span><span class="badge ${h.tipo==='Emergencia'?'br':'ba'}">${h.tipo}</span></div><div class="hct">${h.motivo}</div><div class="hcdr">${h.medico} · Alta: ${h.alta}</div><div class="hcev">${h.evolucion}</div></div>`).join('')}`;
 }
 
+/* ── PLANES CONFIG ── */
+const PLANES_CONFIG={
+  'Joven':    {base:20000,extra:0,   desc:'Individual hasta 40 años',color:'#1D9E75'},
+  'Familiar': {base:40000,extra:10000,desc:'Siempre 2 personas base',color:'var(--r)'},
+  'Senior':   {base:60000,extra:0,   desc:'Individual adulto mayor',color:'#7B5EA7'},
+  'Area Protegida':{base:70000,extra:0,desc:'Por domicilio comercial + responsable',color:'#D97706'},
+  'Corporativo':{base:null,extra:0,  desc:'Precio definido por administración',color:'#374151'},
+};
+
+/* ── ESTADO EXTENDIDO ── */
+if(!S.planExtras) S.planExtras={integrantes:0,domicilioLocal:'',responsable:''};
+
+function planCosto(){
+  const u=S.user;
+  const cfg=PLANES_CONFIG[u.plan];
+  if(!cfg||cfg.base===null) return null;
+  if(u.plan==='Familiar') return cfg.base + S.planExtras.integrantes * cfg.extra;
+  return cfg.base;
+}
+
 function plan(){
   const u=S.user;
+  const cfg=PLANES_CONFIG[u.plan]||{base:null,extra:0,desc:'Plan especial',color:'#374151'};
+  const costo=planCosto();
+  const costoStr=costo!==null?`$${costo.toLocaleString('es-AR')}`:'A definir por admin';
+
+  let extras='';
+  if(u.plan==='Familiar'){
+    extras=`
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <div style="font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin-bottom:.75rem">Integrantes adicionales</div>
+      <div style="display:flex;align-items:center;gap:1rem;justify-content:center">
+        <button onclick="if(S.planExtras.integrantes>0){S.planExtras.integrantes--;render()}" style="width:36px;height:36px;border-radius:50%;border:1.5px solid var(--border);background:none;font-size:1.2rem;color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
+        <div style="text-align:center">
+          <div style="font-size:1.6rem;font-weight:700;color:var(--ink)">${S.planExtras.integrantes}</div>
+          <div style="font-size:.68rem;color:var(--ink3)">adicionales</div>
+        </div>
+        <button onclick="S.planExtras.integrantes++;render()" style="width:36px;height:36px;border-radius:50%;background:var(--r);border:none;font-size:1.2rem;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+      </div>
+      <div style="text-align:center;margin-top:.65rem;font-size:.75rem;color:var(--ink3)">${2+S.planExtras.integrantes} personas cubiertas · $10.000 c/u adicional</div>
+    </div>`;
+  }
+
+  if(u.plan==='Area Protegida'){
+    extras=`
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
+      <div class="field" style="margin-bottom:.65rem">
+        <label>Domicilio del local</label>
+        <input type="text" id="inp-dom" value="${S.planExtras.domicilioLocal}" placeholder="Calle, número, localidad" oninput="S.planExtras.domicilioLocal=this.value">
+      </div>
+      <div class="field">
+        <label>Responsable</label>
+        <input type="text" id="inp-resp" value="${S.planExtras.responsable}" placeholder="Nombre del responsable cubierto" oninput="S.planExtras.responsable=this.value">
+      </div>
+    </div>`;
+  }
+
   return`
   <div class="card">
     <div class="ch">Cobertura activa</div>
-    <div style="text-align:center;padding:1rem 0 1.25rem">
-      <div style="font-family:'Bebas Neue',sans-serif;font-size:2.8rem;color:var(--r);letter-spacing:.04em;line-height:1">${u.plan}</div>
-      <div style="margin-top:.5rem"><span class="badge bg">Activo · Al día</span></div>
+    <div style="text-align:center;padding:1rem 0 .5rem">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:2.6rem;color:${cfg.color};letter-spacing:.04em;line-height:1">Plan ${u.plan}</div>
+      <div style="font-size:.8rem;color:var(--ink3);margin-top:.3rem">${cfg.desc}</div>
+      <div style="margin-top:.75rem"><span class="badge bg">Activo · Al día</span></div>
     </div>
-    <div class="ir"><span class="il">Vencimiento cuota</span><span class="iv">31/03/2026</span></div>
-    <div class="ir"><span class="il">Próximo débito</span><span class="iv">01/04/2026</span></div>
+    ${extras}
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:.8rem;color:var(--ink3)">Cuota mensual</span>
+      <span style="font-size:1.4rem;font-weight:700;color:${cfg.color}">${costoStr}</span>
+    </div>
+    <div class="ir" style="margin-top:.5rem"><span class="il">Próximo débito</span><span class="iv">01/04/2026</span></div>
   </div>
   <div class="card">
     <div class="ch">Coberturas incluidas</div>
@@ -313,14 +381,40 @@ function plan(){
 function perfilA(){
   const u=S.user;
   const ini=u.nombre.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-  return`<div class="ptop"><div class="av">${ini}</div><div class="pname">${u.nombre}</div><div class="psub">Afiliado · Plan ${u.plan}</div></div>
-  <div class="card"><div class="ch">Datos personales</div>
-    <div class="ir"><span class="il">DNI</span><span class="iv">${u.dni}</span></div>
-    <div class="ir"><span class="il">Email</span><span class="iv">${u.email}</span></div>
-    <div class="ir"><span class="il">Teléfono</span><span class="iv">${u.tel}</span></div>
-    <div class="ir"><span class="il">Dirección</span><span class="iv">${u.dir}</span></div>
+  const foto=S.fotoPerfilUrl||null;
+  return`
+  <div class="ptop">
+    <div style="position:relative;display:inline-block;margin-bottom:.5rem">
+      ${foto
+        ?`<img src="${foto}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:2.5px solid var(--r)">`
+        :`<div class="av">${ini}</div>`}
+      <label for="inp-foto" style="position:absolute;bottom:0;right:0;width:22px;height:22px;border-radius:50%;background:var(--r);display:flex;align-items:center;justify-content:center;cursor:pointer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+      </label>
+      <input id="inp-foto" type="file" accept="image/*" style="display:none" onchange="
+        const f=this.files[0];if(!f)return;
+        const r=new FileReader();
+        r.onload=e=>{S.fotoPerfilUrl=e.target.result;render();};
+        r.readAsDataURL(f);">
+    </div>
+    <div class="pname">${u.nombre}</div>
+    <div class="psub">Afiliado · Plan ${u.plan}</div>
   </div>
-  <button class="btn-o" onclick="set({user:null})">Cerrar sesión</button>`;
+  <div class="card"><div class="ch">Datos personales</div>
+    <div class="field"><label>Nombre completo</label><input type="text" value="${u.nombre}" oninput="S.user.nombre=this.value"></div>
+    <div class="field"><label>DNI</label><input type="text" value="${u.dni}" oninput="S.user.dni=this.value"></div>
+    <div class="field"><label>Email</label><input type="email" value="${u.email}" oninput="S.user.email=this.value"></div>
+    <div class="field"><label>WhatsApp / Teléfono</label><input type="tel" value="${u.tel}" oninput="S.user.tel=this.value"></div>
+    <div class="field"><label>Domicilio</label><input type="text" value="${u.dir}" oninput="S.user.dir=this.value"></div>
+  </div>
+  <div class="card"><div class="ch">Datos de facturación</div>
+    <div class="field"><label>Razón social / Nombre</label><input type="text" placeholder="Como aparece en la factura" value="${u.razonSocial||u.nombre}" oninput="S.user.razonSocial=this.value"></div>
+    <div class="field"><label>CUIT / CUIL</label><input type="text" placeholder="XX-XXXXXXXX-X" value="${u.cuit||''}" oninput="S.user.cuit=this.value"></div>
+    <div class="field"><label>Domicilio fiscal</label><input type="text" placeholder="Domicilio de facturación" value="${u.domFiscal||u.dir}" oninput="S.user.domFiscal=this.value"></div>
+  </div>
+  <button class="btn-r" onclick="alert('Cambios guardados (con Firebase se sincronizará automáticamente)')">Guardar cambios</button>
+  <button class="btn-o" onclick="set({user:null})" style="margin-top:.5rem">Cerrar sesión</button>`
+;
 }
 
 /* MÉDICO */
