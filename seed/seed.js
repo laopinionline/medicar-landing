@@ -1,0 +1,87 @@
+'use strict';
+/*
+ * Medicar — Etapa 1 (estructura medica)
+ * Seed IDEMPOTENTE de los 3 usuarios demo: crea/asegura las cuentas Auth reales
+ * Y sus docs en usuarios/{uid} en una sola pasada, consistentes.
+ *
+ * Requiere una service account key del proyecto medicar-sistema.
+ * NUNCA se commitea (esta en .gitignore). Ver README.md para generarla.
+ */
+const fs = require('fs');
+const path = require('path');
+const admin = require('firebase-admin');
+
+const KEY_PATH = process.env.GOOGLE_APPLICATION_CREDENTIALS
+  || path.join(__dirname, 'serviceAccountKey.json');
+
+if (!fs.existsSync(KEY_PATH)) {
+  console.error('\n[seed] No encuentro la service account key en:\n       ' + KEY_PATH);
+  console.error('       Generala en la consola de Firebase y colocala ahi (ver README.md).');
+  console.error('       O exporta GOOGLE_APPLICATION_CREDENTIALS apuntando al JSON.\n');
+  process.exit(1);
+}
+
+admin.initializeApp({ credential: admin.credential.cert(require(KEY_PATH)) });
+const auth = admin.auth();
+const db = admin.firestore();
+
+const PASSWORD = '123456'; // Firebase Auth exige >= 6 caracteres
+const USERS = [
+  { email: 'afiliado@demo.com', rol: 'afiliado', nombre: 'Carlos Rodríguez' },
+  { email: 'medico@demo.com',   rol: 'medico',   nombre: 'Dra. Laura Gómez' },
+  { email: 'admin@demo.com',    rol: 'admin',    nombre: 'Victoriano Marino' },
+];
+
+async function ensureAuthUser(u) {
+  try {
+    const existing = await auth.getUserByEmail(u.email);
+    console.log(`[auth] ya existe: ${u.email} -> ${existing.uid}`);
+    return existing.uid;
+  } catch (e) {
+    if (e.code !== 'auth/user-not-found') throw e;
+    const created = await auth.createUser({
+      email: u.email,
+      password: PASSWORD,
+      displayName: u.nombre,
+      emailVerified: true,
+    });
+    console.log(`[auth] creado:   ${u.email} -> ${created.uid}`);
+    return created.uid;
+  }
+}
+
+async function ensureUserDoc(uid, u) {
+  const ref = db.collection('usuarios').doc(uid);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    await ref.set({
+      rol: u.rol,
+      email: u.email,
+      nombre: u.nombre,
+      afiliadoId: null, // gancho a la estructura de Administracion (vacio por ahora)
+      medicoId: null,   // gancho a la estructura Medica (vacio por ahora)
+      creadoEn: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`[doc]  creado:   usuarios/${uid}`);
+  } else {
+    // Idempotente: refresca campos base sin pisar creadoEn ni vinculos ya seteados.
+    const cur = snap.data() || {};
+    const upd = { rol: u.rol, email: u.email, nombre: u.nombre };
+    if (cur.afiliadoId === undefined) upd.afiliadoId = null;
+    if (cur.medicoId === undefined) upd.medicoId = null;
+    await ref.set(upd, { merge: true });
+    console.log(`[doc]  ok:       usuarios/${uid} (merge)`);
+  }
+}
+
+(async () => {
+  for (const u of USERS) {
+    const uid = await ensureAuthUser(u);
+    await ensureUserDoc(uid, u);
+  }
+  console.log(`\n[seed] Listo. 3 usuarios demo asegurados. Password: ${PASSWORD}\n`);
+  process.exit(0);
+})().catch((err) => {
+  console.error('[seed] ERROR:', err);
+  process.exit(1);
+});

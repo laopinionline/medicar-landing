@@ -1,0 +1,12 @@
+{
+  "name": "medicar-seed",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Seed idempotente de usuarios demo (Auth + Firestore) — Medicar Etapa 1",
+  "scripts": {
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}

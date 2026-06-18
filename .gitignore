@@ -1,0 +1,11 @@
+# Secretos — NUNCA al repo
+seed/serviceAccountKey.json
+**/serviceAccountKey.json
+*serviceAccount*.json
+*.serviceaccount.json
+
+# Node
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-error.log*
