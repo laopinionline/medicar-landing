@@ -22,7 +22,7 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Resto del datastore: cerrado hasta las estructuras siguientes.
+    // Resto del datastore: cerrado, se abre en estructuras siguientes.
     match /{document=**} {
       allow read, write: if false;
     }
