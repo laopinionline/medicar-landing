@@ -1,0 +1,30 @@
+rules_version = '2';
+
+// Medicar — Etapa 1 (estructura medica): reglas base por rol.
+// Conservadoras: solo lo necesario para Auth + usuarios/{uid}. Todo lo demas, cerrado.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'admin';
+    }
+
+    // usuarios/{uid}: cada usuario lee su propio doc; admin lee toda la coleccion.
+    // Escritura: bloqueada desde el cliente (altas/cambios via seed / Admin SDK por ahora).
+    match /usuarios/{uid} {
+      allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
+    }
+
+    // Resto del datastore: cerrado, se abre en estructuras siguientes.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
