@@ -1,7 +1,9 @@
 rules_version = '2';
 
-// Medicar — Etapa 1 (estructura medica): reglas base por rol.
-// Conservadoras: solo lo necesario para Auth + usuarios/{uid}. Todo lo demas, cerrado.
+// Medicar — Estructura medica.
+//   Etapa 1: Auth + roles + usuarios/{uid}.
+//   Etapa 2 (despacho): pacientes, episodios y contador atomico de incidentes.
+// Conservadoras: solo lo necesario por rol; todo lo demas, cerrado.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -9,17 +11,55 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAdmin() {
+    // Rol del usuario actual leido de usuarios/{uid} (su doc lo crea el seed / Admin SDK).
+    function rolActual() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol;
+    }
+
+    function tieneRol(roles) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
-        && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol == 'admin';
+        && (rolActual() in roles);
+    }
+
+    function isAdmin() {
+      return tieneRol(['admin']);
+    }
+
+    // Roles operativos de la estructura medica (despacho + atencion).
+    function esOperativo() {
+      return tieneRol(['despachante', 'medico', 'admin']);
     }
 
     // usuarios/{uid}: cada usuario lee su propio doc; admin lee toda la coleccion.
-    // Escritura: bloqueada desde el cliente (altas/cambios via seed / Admin SDK por ahora).
+    // Escritura: bloqueada desde el cliente (altas/cambios via seed / Admin SDK).
     match /usuarios/{uid} {
       allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
       allow write: if false;
+    }
+
+    // pacientes/{id}: padron clinico (entidad central de la historia).
+    // Lo operan despachante, medico y admin: lectura + alta/edicion.
+    // Sin borrado desde el cliente (la HC no se borra).
+    match /pacientes/{id} {
+      allow read:           if esOperativo();
+      allow create, update: if esOperativo();
+      allow delete:         if false;
+    }
+
+    // episodios/{id}: la atencion, cuelga del paciente.
+    // Lectura para los 3 roles operativos. Alta en fase despacho y edicion
+    // (fases siguientes) idem. Sin borrado desde el cliente.
+    match /episodios/{id} {
+      allow read:           if esOperativo();
+      allow create, update: if esOperativo();
+      allow delete:         if false;
+    }
+
+    // contadores/{id}: correlativos atomicos (ej. nroIncidente). Se leen y
+    // escriben dentro de una transaccion por los roles operativos. Sin borrado.
+    match /contadores/{id} {
+      allow read, write: if esOperativo();
     }
 
     // Resto del datastore: cerrado, se abre en estructuras siguientes.

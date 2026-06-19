@@ -27,9 +27,10 @@ const db = admin.firestore();
 
 const PASSWORD = '123456'; // Firebase Auth exige >= 6 caracteres
 const USERS = [
-  { email: 'afiliado@demo.com', rol: 'afiliado', nombre: 'Carlos Rodríguez' },
-  { email: 'medico@demo.com',   rol: 'medico',   nombre: 'Dra. Laura Gómez' },
-  { email: 'admin@demo.com',    rol: 'admin',    nombre: 'Victoriano Marino' },
+  { email: 'afiliado@demo.com',    rol: 'afiliado',    nombre: 'Carlos Rodríguez' },
+  { email: 'medico@demo.com',      rol: 'medico',      nombre: 'Dra. Laura Gómez' },
+  { email: 'admin@demo.com',       rol: 'admin',       nombre: 'Victoriano Marino' },
+  { email: 'despachante@demo.com', rol: 'despachante', nombre: 'Despacho Central' }, // Etapa 2: rol de despacho
 ];
 
 async function ensureAuthUser(u) {
