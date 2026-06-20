@@ -283,7 +283,7 @@ async function enterWithFbUser(fbUser){
   S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
   S.fotoPerfilUrl=null;
   S.dsp=null;
-  set({user:u,tab:(u.rol==='despachante'?'despacho':'home'),step:0});
+  set({user:u,tab:(u.rol==='despachante'?'bandeja':'home'),step:0});
 }
 
 function doLogout(){ auth.signOut(); }
@@ -310,16 +310,17 @@ function shell(){
 
 function getTabs(rol){
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  if(rol==='despachante')return[{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},{id:'perfil',icon:'settings',lbl:'Config'}];
 }
 
 function pg(){
   const r=S.user.rol,t=S.tab;
+  if(t!=='bandeja'&&t!=='episodios') S.epView=null; // salir de la bandeja cierra el detalle abierto
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return perfilA();}
-  if(r==='medico'){if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='perfil')return perfilM();}
-  if(r==='despachante'){if(t==='perfil')return perfilD();return dDesp();}
+  if(r==='medico'){if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return perfilM();}
+  if(r==='despachante'){if(t==='perfil')return perfilD();if(t==='despacho')return dDesp();return bandeja();}
   if(r==='admin'){if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return adConf();}
   return '';
 }
@@ -1195,7 +1196,8 @@ function dDespCreado(d){
     <div style="color:#fff;opacity:.92;font-size:1.35rem;font-weight:800;letter-spacing:.04em;margin-top:.55rem">${d.creado.fmt}</div>
     <div style="color:rgba(255,255,255,.55);font-size:.72rem;margin-top:.35rem">Incidente N° ${d.creado.nro} · estado: despacho</div>
   </div>
-  <button class="btn-r" onclick="dspReset()">+ Nuevo despacho</button>`;
+  <button class="btn-r" onclick="dspReset()">+ Nuevo despacho</button>
+  <button class="btn-o" onclick="verBandeja()" style="margin-top:.5rem">Ver en bandeja</button>`;
 }
 
 function perfilD(){
@@ -1206,6 +1208,245 @@ function perfilD(){
     <div class="ir"><span class="il">Email</span><span class="iv">${u.email}</span></div>
   </div>
   <button class="btn-o" onclick="doLogout()" style="margin-top:.8rem">Cerrar sesión</button>`;
+}
+
+/* ===================== BANDEJA DE EPISODIOS + DETALLE — Etapa 2 =====================
+   Bandeja: despachante ve todos; medico ve solo los suyos (medicoId == su uid).
+   Activos arriba (orden por urgencia de codigo y luego hora de espera), inactivos
+   abajo en dos secciones distintas: Cerrados y Cancelados.
+   Detalle: cápsula del paciente + datos de despacho + asignar recursos + mover estado.
+   NO incluye carga clínica del médico (examen/desenlace) — entregable siguiente. */
+
+const FLUJO=['despacho','en_camino','arribo','atencion']; // estados ACTIVOS, en orden de avance
+const ESTADO_LBL={despacho:'Despacho',en_camino:'En camino',arribo:'Arribo',atencion:'Atención',cerrado:'Cerrado',cancelado:'Cancelado'};
+const RESOL_LBL={resuelto_domicilio:'Resuelto en domicilio',traslado:'Traslado',derivacion:'Derivación'};
+const RESOLUCIONES=Object.keys(RESOL_LBL).map(k=>[k,RESOL_LBL[k]]);
+const TIPO_LUGAR={domiciliaria:'Domiciliaria',via_publica:'Vía pública',comercio:'Comercio',fabrica:'Fábrica',instituto_educativo:'Instituto educativo',base:'Base'};
+// TEMPORAL: lista mínima de médicos hardcodeada hasta que exista el módulo de staff
+// (colección staff_medico propia). El selector real saldrá de ahí. No abrir usuarios
+// a los operativos por privacidad del padrón de afiliados.
+const MEDICOS=[{uid:'xBij3SzgZuVWog3aZltXE6i2noF3',nombre:'Dra. Laura Gómez'}];
+
+const tsSec=t=>(t&&t.seconds)||0;
+function codColor(c){ const f=CODIGOS.find(x=>x[0]===c); return f?f[3]:'#888'; }
+function codOrden(e){ const o={rojo:0,amarillo:1,verde:2,traslado:3}; return o[e.codigoPresuntivo]!=null?o[e.codigoPresuntivo]:9; }
+function horaDe(e){ const t=e&&e.creadoEn; if(t&&t.toDate){ const x=t.toDate(); return `${String(x.getHours()).padStart(2,'0')}:${String(x.getMinutes()).padStart(2,'0')}`; } return '—'; }
+function tipoLugarLbl(t){ return TIPO_LUGAR[t]||t||''; }
+function añoDe(t){ return (t&&t.toDate)?t.toDate().getFullYear():new Date().getFullYear(); }
+
+/* ---- BANDEJA ---- */
+function bandeja(){
+  if(S.epView) return dEpDetalle();
+  const b=S.bandeja;
+  if(!b){ banLoad(); return banSkeleton(); }
+  if(b.loading) return banSkeleton();
+  if(b.err) return `<div class="card">No se pudo cargar la bandeja: ${esc(b.err)}<br><button class="btn-o" onclick="banReload()" style="margin-top:.6rem">Reintentar</button></div>`;
+  return banView(b.items);
+}
+function banSkeleton(){ return `<div class="card">Cargando episodios…</div>`; }
+function banReload(){ S.bandeja=null; render(); }
+
+async function banLoad(){
+  S.bandeja={loading:true};
+  try{
+    let snap;
+    if(S.user.rol==='medico') snap=await db.collection('episodios').where('medicoId','==',S.user.uid).get();
+    else snap=await db.collection('episodios').get();
+    S.bandeja={loading:false,items:snap.docs.map(d=>({id:d.id,...d.data()}))};
+  }catch(e){ S.bandeja={loading:false,err:(e.message||String(e))}; }
+  render();
+}
+
+function banView(items){
+  const esMedico=S.user.rol==='medico';
+  const activos=items.filter(e=>FLUJO.includes(e.estado))
+    .sort((a,b)=>(codOrden(a)-codOrden(b))||(tsSec(a.creadoEn)-tsSec(b.creadoEn)));
+  const termTs=e=>tsSec((e.transiciones&&e.transiciones[e.estado])||e.creadoEn);
+  const cerrados=items.filter(e=>e.estado==='cerrado').sort((a,b)=>termTs(b)-termTs(a));
+  const cancelados=items.filter(e=>e.estado==='cancelado').sort((a,b)=>termTs(b)-termTs(a));
+  const sec=(t,arr,empty)=>`<div class="ch" style="margin:.2rem 0 .4rem">${t} (${arr.length})</div>`+
+    (arr.length?arr.map(banRow).join(''):`<div style="font-size:.78rem;color:var(--ink3);margin-bottom:.5rem">${empty}</div>`);
+  const top=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+    <div style="font-weight:700">${esMedico?'Mis episodios':'Bandeja de episodios'}</div>
+    <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="banReload()">↻ Actualizar</button>
+  </div>`;
+  const nuevo=esMedico?'':`<button class="btn-r" onclick="verBandejaNuevo()" style="margin-bottom:.8rem">+ Nuevo despacho</button>`;
+  return `${top}${nuevo}
+  <div class="card">${sec('🟢 Activos',activos,'Sin episodios activos')}</div>
+  <div class="card">
+    <div class="st">Inactivos</div>
+    ${sec('Cerrados',cerrados,'Sin cerrados')}
+    <div style="height:.5rem"></div>
+    ${sec('Cancelados',cancelados,'Sin cancelados')}
+  </div>`;
+}
+
+function banRow(e){
+  const col=codColor(e.codigoPresuntivo);
+  const movil=e.movilNombre||(e.movilId?('Móvil '+e.movilId):'sin asignar');
+  const medico=e.medicoNombre||(e.medicoId?'asignado':'sin asignar');
+  return `<div class="lr" onclick="openEp('${e.id}')" style="cursor:pointer;border-left:4px solid ${col};padding-left:.6rem">
+    <div class="lrb">
+      <div class="lrn">${codEmoji(e.codigoPresuntivo)} ${(e.pac&&e.pac.nombre)||'—'}</div>
+      <div class="lrs">${esc(e.motivoLlamado)||'—'} · ${horaDe(e)}</div>
+      <div class="lrs" style="margin-top:.15rem">🚑 ${esc(movil)} · 🩺 ${esc(medico)}</div>
+    </div>
+    <span class="badge">${ESTADO_LBL[e.estado]||e.estado}</span>
+  </div>`;
+}
+
+function verBandeja(){ S.dsp=null; S.bandeja=null; set({tab:'bandeja'}); }
+function verBandejaNuevo(){ S.dsp=null; set({tab:'despacho'}); }
+
+/* ---- DETALLE ---- */
+function openEp(id){ S.epView=id; S.ep={loading:true}; render(); epLoad(id); }
+function closeEp(){ S.epView=null; S.ep=null; S.bandeja=null; render(); } // invalida la bandeja para reflejar cambios
+
+async function epLoad(id){
+  try{
+    const d=await db.collection('episodios').doc(id).get();
+    if(!d.exists){ S.ep={err:'Episodio no encontrado'}; render(); return; }
+    const data={id:d.id,...d.data()};
+    let paciente=null;
+    if(data.pacienteId){ try{ const p=await db.collection('pacientes').doc(data.pacienteId).get(); if(p.exists) paciente={id:p.id,...p.data()}; }catch(_){} }
+    const stage=(S.ep&&S.ep.stage)||''; // preserva sub-paso (cerrar/cancelar) tras recargar
+    S.ep={data,paciente,stage};
+    render();
+  }catch(e){ S.ep={err:(e.message||String(e))}; render(); }
+}
+
+function epMsg(t){ const e=document.getElementById('ep-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function epStage(s){ if(S.ep) S.ep.stage=s||''; render(); }
+
+async function epUpdate(upd){
+  try{
+    await db.collection('episodios').doc(S.ep.data.id).update(upd);
+    S.bandeja=null;                 // la lista quedó desactualizada
+    if(S.ep) S.ep.stage='';
+    await epLoad(S.ep.data.id);     // recarga el detalle (re-render adentro)
+  }catch(e){ epMsg('No se pudo guardar: '+(e.message||e)); }
+}
+
+function nextEstado(cur){ const i=FLUJO.indexOf(cur); if(i<0) return null; return i<FLUJO.length-1?FLUJO[i+1]:'cerrado'; }
+
+async function epAsignar(){
+  const movilId=(document.getElementById('ep-movil')?.value||'').trim();
+  const medicoUid=document.getElementById('ep-medico')?.value||'';
+  const med=MEDICOS.find(m=>m.uid===medicoUid);
+  await epUpdate({
+    movilId:movilId||null, movilNombre:movilId?('Móvil '+movilId):null,
+    medicoId:medicoUid||null, medicoNombre:med?med.nombre:null
+  });
+}
+
+async function epAvanzar(){
+  const cur=S.ep.data.estado, nx=nextEstado(cur);
+  if(!nx) return;
+  if(nx==='cerrado'){ epStage('cerrar'); return; }   // el cierre pide resolución
+  await epUpdate({ estado:nx, ['transiciones.'+nx]:FV() });
+}
+async function epCerrar(res){ await epUpdate({ estado:'cerrado', resolucion:res, ['transiciones.cerrado']:FV() }); }
+async function epCancelarOk(){
+  const motivo=(document.getElementById('ep-cancel-motivo')?.value||'').trim();
+  if(!motivo){ epMsg('Cargá un motivo de cancelación'); return; }
+  await epUpdate({ estado:'cancelado', motivoCancelacion:motivo, ['transiciones.cancelado']:FV() });
+}
+
+function dEpDetalle(){
+  const ep=S.ep;
+  if(!ep||ep.loading) return `<div class="card">Cargando episodio…</div>`;
+  if(ep.err) return `<div class="card">Error: ${esc(ep.err)}<br><button class="btn-o" onclick="closeEp()" style="margin-top:.6rem">Volver</button></div>`;
+  const d=ep.data;
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+    <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="closeEp()">← Volver</button>
+    <span class="badge">${ESTADO_LBL[d.estado]||d.estado}</span>
+  </div>
+  <div style="font-size:.8rem;color:var(--ink3);font-weight:700;letter-spacing:.03em;margin-bottom:.5rem">${fmtIncidente(d.nroIncidente,añoDe(d.creadoEn))}</div>
+  ${epCapsula(ep)}
+  ${epDespachoCard(ep)}
+  ${epRecursosCard(ep)}
+  ${epEstadoCard(ep)}`;
+}
+
+function epCapsula(ep){
+  const p=ep.paciente, snap=ep.data.pac||{};
+  const nombre=p?`${p.apellido||''} ${p.nombre||''}`.trim():(snap.nombre||'—');
+  const edad=p?calcEdad(p.fechaNacimiento):(snap.edad!=null?snap.edad:'—');
+  const cron=p?(p.antecedentesCronicos||[]):[];
+  const otros=p?(p.antecedentesOtros||''):'';
+  const alerta=cron.length
+    ? `<div style="background:var(--r);color:#fff;border-radius:10px;padding:.55rem .7rem;font-weight:700;font-size:.82rem;margin-top:.55rem">⚠️ ALERTA: ${cron.join(', ')}${otros?(' · '+esc(otros)):''}</div>`
+    : `<div style="font-size:.75rem;color:rgba(255,255,255,.5);margin-top:.45rem">Sin antecedentes crónicos</div>`;
+  return `<div class="card card-dk">
+    <div class="ch">Paciente</div>
+    <div style="font-size:1.15rem;font-weight:700;color:#fff">${esc(nombre)}</div>
+    <div style="font-size:.95rem;color:#fff;opacity:.85;margin-top:.15rem"><strong style="font-size:1.05rem">${edad} años</strong>${p&&p.dni?(' · DNI '+esc(p.dni)):''}</div>
+    ${alerta}
+    ${p?'':'<div style="font-size:.62rem;color:rgba(255,255,255,.4);margin-top:.4rem">Datos del snapshot (paciente no disponible)</div>'}
+  </div>`;
+}
+
+function epDespachoCard(ep){
+  const d=ep.data;
+  const ant=(d.antecedentes||[]).filter(a=>a!=='ninguna');
+  const antStr=ant.length?ant.join(', '):'ninguna';
+  const otros=d.antecedentesOtros?(' · otros: '+esc(d.antecedentesOtros)):'';
+  return `<div class="card">
+    <div class="ch">Despacho</div>
+    <div class="ir"><span class="il">Código</span><span class="iv" style="color:${codColor(d.codigoPresuntivo)};font-weight:700">${codEmoji(d.codigoPresuntivo)} ${d.codigoPresuntivo||'—'}</span></div>
+    <div class="ir"><span class="il">Motivo</span><span class="iv">${esc(d.motivoLlamado)||'—'}</span></div>
+    <div class="ir"><span class="il">Antecedentes</span><span class="iv">${esc(antStr)}${otros}</span></div>
+    <div class="ir"><span class="il">Ubicación</span><span class="iv">${esc(d.domicilio)||'—'}${d.tipoLugar?(' · '+esc(tipoLugarLbl(d.tipoLugar))):''}</span></div>
+    <div class="ir"><span class="il">Creado</span><span class="iv">${fechaDe(d)} ${horaDe(d)}</span></div>
+  </div>`;
+}
+
+function epRecursosCard(ep){
+  const d=ep.data, term=(d.estado==='cerrado'||d.estado==='cancelado');
+  if(term){
+    return `<div class="card"><div class="ch">Recursos</div>
+      <div class="ir"><span class="il">Móvil</span><span class="iv">${esc(d.movilNombre||d.movilId||'sin asignar')}</span></div>
+      <div class="ir"><span class="il">Médico</span><span class="iv">${esc(d.medicoNombre||(d.medicoId?'asignado':'sin asignar'))}</span></div>
+    </div>`;
+  }
+  const medOpts=['<option value="">Sin asignar</option>'].concat(
+    MEDICOS.map(m=>`<option value="${m.uid}" ${d.medicoId===m.uid?'selected':''}>${esc(m.nombre)}</option>`)
+  ).join('');
+  return `<div class="card"><div class="ch">Recursos</div>
+    <div class="field"><label>Móvil (N°)</label><input id="ep-movil" type="text" inputmode="numeric" value="${esc(d.movilId||'')}" placeholder="Ej. 05" autocomplete="off"></div>
+    <div class="field"><label>Médico</label><select id="ep-medico">${medOpts}</select></div>
+    <button class="btn-o" onclick="epAsignar()">Guardar recursos</button>
+  </div>`;
+}
+
+function epEstadoCard(ep){
+  const d=ep.data, st=ep.stage, estado=d.estado;
+  if(estado==='cerrado') return `<div class="card"><div class="ch">Estado</div>
+    <div class="ir"><span class="il">Estado</span><span class="iv">Cerrado</span></div>
+    <div class="ir"><span class="il">Resolución</span><span class="iv">${RESOL_LBL[d.resolucion]||d.resolucion||'—'}</span></div></div>`;
+  if(estado==='cancelado') return `<div class="card"><div class="ch">Estado</div>
+    <div class="ir"><span class="il">Estado</span><span class="iv">Cancelado</span></div>
+    <div class="ir"><span class="il">Motivo</span><span class="iv">${esc(d.motivoCancelacion)||'—'}</span></div></div>`;
+  const nx=nextEstado(estado);
+  let body;
+  if(st==='cerrar'){
+    body=`<div style="font-size:.78rem;color:var(--ink3);margin-bottom:.4rem">Resolución del cierre:</div>`+
+      RESOLUCIONES.map(r=>`<button class="btn-o" style="margin-bottom:.4rem" onclick="epCerrar('${r[0]}')">${r[1]}</button>`).join('')+
+      `<button class="btn-o" onclick="epStage('')">Volver</button>`;
+  }else if(st==='cancelar'){
+    body=`<div class="field"><label>Motivo de cancelación</label><input id="ep-cancel-motivo" type="text" placeholder="Ej. falsa alarma / paciente se fue" autocomplete="off"></div>
+      <button class="btn-r" onclick="epCancelarOk()">Confirmar cancelación</button>
+      <button class="btn-o" onclick="epStage('')" style="margin-top:.5rem">Volver</button>`;
+  }else{
+    const nxLbl=nx==='cerrado'?'Cerrar episodio':('Avanzar a '+ESTADO_LBL[nx]);
+    body=`<button class="btn-r" onclick="epAvanzar()">${nxLbl}</button>
+      <button class="btn-o" onclick="epStage('cancelar')" style="margin-top:.5rem">Cancelar / anular</button>`;
+  }
+  return `<div class="card"><div class="ch">Estado actual: ${ESTADO_LBL[estado]||estado}</div>
+    <div id="ep-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    ${body}
+  </div>`;
 }
 
 function bind(){
