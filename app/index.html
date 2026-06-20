@@ -199,6 +199,17 @@ const ATENC=[
 let S={user:null,tab:'home',sub:'directos',step:0};
 const set=p=>{Object.assign(S,p);render()};
 
+/* Estado de sesion limpio definido en UN solo lugar. resetSession() REASIGNA S a un
+   baseline fresco: descarta TODO lo derivado del usuario (bandeja, ep, epView, dsp,
+   planExtras, fotoPerfilUrl, guardias, turno*, etc.) sin enumerarlo campo por campo.
+   Asi ningun dato de un usuario sobrevive al siguiente (higiene de sesion). */
+function cleanSession(){ return {user:null,tab:'home',sub:'directos',step:0}; }
+function resetSession(keepErr){
+  const err=keepErr?S.loginErr:'';
+  S=cleanSession();
+  if(err) S.loginErr=err; // preserva el mensaje de login (ej. "cuenta sin rol")
+}
+
 const render=()=>{
   document.getElementById('app').innerHTML=S.user?shell():login();
   bind();
@@ -280,9 +291,9 @@ async function enterWithFbUser(fbUser){
     afiliadoId:(data.afiliadoId!==undefined?data.afiliadoId:null),
     medicoId:(data.medicoId!==undefined?data.medicoId:null)
   };
+  resetSession(false); // cinturón y tiradores: arranque de sesión limpio aunque no se haya pasado por logout
   S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
   S.fotoPerfilUrl=null;
-  S.dsp=null;
   set({user:u,tab:(u.rol==='despachante'?'bandeja':'home'),step:0});
 }
 
@@ -1259,6 +1270,9 @@ async function banLoad(){
 
 function banView(items){
   const esMedico=S.user.rol==='medico';
+  // Doble red (defensa en profundidad): el médico solo ve episodios asignados a él,
+  // en TODAS las secciones, aunque 'items' llegara contaminado por alguna fuga futura.
+  if(esMedico) items=items.filter(e=>e.medicoId===S.user.uid);
   const activos=items.filter(e=>FLUJO.includes(e.estado))
     .sort((a,b)=>(codOrden(a)-codOrden(b))||(tsSec(a.creadoEn)-tsSec(b.creadoEn)));
   const termTs=e=>tsSec((e.transiciones&&e.transiciones[e.estado])||e.creadoEn);
@@ -1460,7 +1474,7 @@ function bind(){
 render();
 auth.onAuthStateChanged(fbUser=>{
   if(fbUser){ enterWithFbUser(fbUser); }
-  else{ S.user=null; render(); }
+  else{ resetSession(true); render(); } // limpia TODA la sesión; keepErr preserva el mensaje "sin rol"
 });
 </script>
 </body>
