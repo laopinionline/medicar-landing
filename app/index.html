@@ -243,7 +243,12 @@ function login(){
 </div>`;
 }
 
-function quick(e){document.getElementById('em').value=e;document.getElementById('pw').value='123456';doLogin();}
+async function quick(e){
+  try{ if(firebase.auth().currentUser){ await firebase.auth().signOut(); } }catch(_){}
+  document.getElementById('em').value=e;
+  document.getElementById('pw').value='123456';
+  doLogin();
+}
 async function doLogin(){
   const e=document.getElementById('em').value.trim();
   const p=document.getElementById('pw').value;
@@ -289,7 +294,9 @@ async function enterWithFbUser(fbUser){
     rol:data.rol,
     nombre:data.nombre||fbUser.email||'',
     afiliadoId:(data.afiliadoId!==undefined?data.afiliadoId:null),
-    medicoId:(data.medicoId!==undefined?data.medicoId:null)
+    medicoId:(data.medicoId!==undefined?data.medicoId:null),
+    unidad:(data.unidad!==undefined?data.unidad:null),
+    esp:(data.esp!==undefined?data.esp:null)
   };
   resetSession(false); // cinturón y tiradores: arranque de sesión limpio aunque no se haya pasado por logout
   S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
@@ -529,10 +536,11 @@ function perfilA(){
 /* MÉDICO */
 function mHome(){
   const u=S.user;
+  const sub=[u.unidad,u.esp].filter(Boolean).join(' · ');
   return`
   <div class="card card-dk">
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
-      <div><div class="ch">Guardia activa</div><div style="font-size:1rem;font-weight:600;color:#fff;margin-bottom:.18rem">${u.nombre}</div><div style="font-size:.8rem;color:rgba(255,255,255,.38)">${u.unidad} · ${u.esp}</div></div>
+      <div><div class="ch">Guardia activa</div><div style="font-size:1rem;font-weight:600;color:#fff;margin-bottom:.18rem">${u.nombre}</div><div style="font-size:.8rem;color:rgba(255,255,255,.38)">${sub}</div></div>
       <span class="badge bg bp" style="background:rgba(29,158,117,.18);color:#5DCAA5">● En línea</span>
     </div>
   </div>
