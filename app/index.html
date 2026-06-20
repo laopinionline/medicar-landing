@@ -294,7 +294,9 @@ async function enterWithFbUser(fbUser){
     rol:data.rol,
     nombre:data.nombre||fbUser.email||'',
     afiliadoId:(data.afiliadoId!==undefined?data.afiliadoId:null),
-    medicoId:(data.medicoId!==undefined?data.medicoId:null)
+    medicoId:(data.medicoId!==undefined?data.medicoId:null),
+    unidad:(data.unidad!==undefined?data.unidad:null),
+    esp:(data.esp!==undefined?data.esp:null)
   };
   resetSession(false); // cinturón y tiradores: arranque de sesión limpio aunque no se haya pasado por logout
   S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
