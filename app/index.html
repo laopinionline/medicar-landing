@@ -1364,7 +1364,7 @@ async function epAsignar(){
 async function epAvanzar(){
   const cur=S.ep.data.estado, nx=nextEstado(cur);
   if(!nx) return;
-  if(nx==='cerrado'){ epStage('cerrar'); return; }   // el cierre pide resolución
+  if(nx==='cerrado'){ S.ep.clin=freshClin(); epStage('cerrar'); return; }   // el cierre abre la carga clínica
   await epUpdate({ estado:nx, ['transiciones.'+nx]:FV() });
 }
 async function epCerrar(res){ await epUpdate({ estado:'cerrado', resolucion:res, ['transiciones.cerrado']:FV() }); }
@@ -1388,7 +1388,8 @@ function dEpDetalle(){
   ${epCapsula(ep)}
   ${epDespachoCard(ep)}
   ${epRecursosCard(ep)}
-  ${epEstadoCard(ep)}`;
+  ${epEstadoCard(ep)}
+  ${(d.examen||d.desenlace)&&ep.stage!=='cerrar'?epClinicaCard(ep):''}`;
 }
 
 function epCapsula(ep){
@@ -1446,17 +1447,15 @@ function epEstadoCard(ep){
   const d=ep.data, st=ep.stage, estado=d.estado;
   if(estado==='cerrado') return `<div class="card"><div class="ch">Estado</div>
     <div class="ir"><span class="il">Estado</span><span class="iv">Cerrado</span></div>
-    <div class="ir"><span class="il">Resolución</span><span class="iv">${RESOL_LBL[d.resolucion]||d.resolucion||'—'}</span></div></div>`;
+    ${d.desenlace&&d.desenlace.codigoReal?`<div class="ir"><span class="il">Código real</span><span class="iv" style="color:${codColor(d.desenlace.codigoReal)};font-weight:700">${codEmoji(d.desenlace.codigoReal)} ${d.desenlace.codigoReal}</span></div>`:''}
+    ${d.resolucion?`<div class="ir"><span class="il">Resolución</span><span class="iv">${RESOL_LBL[d.resolucion]||d.resolucion}</span></div>`:''}</div>`;
   if(estado==='cancelado') return `<div class="card"><div class="ch">Estado</div>
     <div class="ir"><span class="il">Estado</span><span class="iv">Cancelado</span></div>
     <div class="ir"><span class="il">Motivo</span><span class="iv">${esc(d.motivoCancelacion)||'—'}</span></div></div>`;
+  if(st==='cerrar') return clinForm(ep); // el cierre del médico = carga clínica (examen + desenlace)
   const nx=nextEstado(estado);
   let body;
-  if(st==='cerrar'){
-    body=`<div style="font-size:.78rem;color:var(--ink3);margin-bottom:.4rem">Resolución del cierre:</div>`+
-      RESOLUCIONES.map(r=>`<button class="btn-o" style="margin-bottom:.4rem" onclick="epCerrar('${r[0]}')">${r[1]}</button>`).join('')+
-      `<button class="btn-o" onclick="epStage('')">Volver</button>`;
-  }else if(st==='cancelar'){
+  if(st==='cancelar'){
     body=`<div class="field"><label>Motivo de cancelación</label><input id="ep-cancel-motivo" type="text" placeholder="Ej. falsa alarma / paciente se fue" autocomplete="off"></div>
       <button class="btn-r" onclick="epCancelarOk()">Confirmar cancelación</button>
       <button class="btn-o" onclick="epStage('')" style="margin-top:.5rem">Volver</button>`;
@@ -1468,6 +1467,164 @@ function epEstadoCard(ep){
   return `<div class="card"><div class="ch">Estado actual: ${ESTADO_LBL[estado]||estado}</div>
     <div id="ep-err" class="err" style="display:none;margin-bottom:.5rem"></div>
     ${body}
+  </div>`;
+}
+
+/* ===================== CARGA CLÍNICA DEL MÉDICO — Etapa 2 =====================
+   Fase atención + desenlace: al "Cerrar episodio" desde estado 'atencion', el médico
+   completa examen por aparatos + desenlace en UN formulario y cierra con UNA escritura
+   (epUpdate). Crónico nuevo marcado acá sube al paciente (arrayUnion, escritura aparte).
+   Estado del form en memoria (S.ep.clin); inputs de texto se leen del DOM al cerrar
+   (sin re-render mientras se tipea); los botones togglean clases sin render. */
+
+const APAR_RESP=[['normal','Normal'],['irregular','Irregular'],['apnea','Apnea'],['asistida','Asistida'],['no_corresponde','No corresponde']];
+const APAR_CV=[['normal','Normal'],['soplos','Soplos'],['sistolico','Sistólico'],['diastolico','Diastólico'],['pulso','Pulso'],['no_corresponde','No corresponde']];
+const APAR_ABD=[['normal','Normal'],['hernias','Hernias'],['evisceraciones','Evisceraciones'],['enterorragia','Enterorragia'],['dolor','Dolor'],['otros','Otros']];
+const COD_REAL=[['rojo','🔴 Rojo','#E5484D'],['amarillo','🟡 Amarillo','#E0A23B'],['verde','🟢 Verde','#1D9E75']];
+const APAR_LBL={}; [...APAR_RESP,...APAR_CV,...APAR_ABD].forEach(o=>{APAR_LBL[o[0]]=o[1];});
+const LBL_ST='display:block;font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);font-weight:600;margin:.6rem 0 .3rem';
+const CHIP_ST='display:inline-flex;align-items:center;gap:.35rem;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:.35rem .6rem;font-size:.8rem;cursor:pointer';
+
+function freshClin(){ return {respiratorio:null,cardiovascular:null,abdomen:[],codigoReal:null,internacion:null,rechaza:null}; }
+function pillStyle(on,color){
+  const bd=color||'var(--border2)', bg=color?color+'1a':'var(--bg)', fg=color||'var(--ink)';
+  return `border:2px solid ${bd};background:${bg};color:${fg};border-radius:10px;padding:.5rem .65rem;font-size:.8rem;cursor:pointer;font-weight:${on?'700':'500'};opacity:${on?'1':'.55'};box-shadow:${on?'0 0 0 2px rgba(0,0,0,.18) inset':'none'}`;
+}
+function applySel(btn,on){ btn.style.fontWeight=on?'700':'500'; btn.style.opacity=on?'1':'.55'; btn.style.boxShadow=on?'0 0 0 2px rgba(0,0,0,.18) inset':'none'; }
+function clinWrap(inner){ return `<div style="display:flex;flex-wrap:wrap;gap:.4rem">${inner}</div>`; }
+function clinGrp(grp,opts,sel,multi,colors){
+  return opts.map(o=>{
+    const v=o[0],lbl=o[1],color=colors?o[2]:null;
+    const on=multi?sel.includes(v):sel===v;
+    const handler=multi?`clinToggleAbd('${v}',this)`:`clinPick('${grp}','${v}')`;
+    return `<button type="button" data-cgrp="${grp}" data-cval="${v}" onclick="${handler}" style="${pillStyle(on,color)}">${lbl}</button>`;
+  }).join('');
+}
+
+/* Handlers de los botones del form (mutan S.ep.clin + togglean clases, SIN render) */
+function clinPick(grp,val){
+  S.ep.clin[grp]=val;
+  document.querySelectorAll(`[data-cgrp="${grp}"]`).forEach(b=>applySel(b,b.dataset.cval===val));
+}
+function clinToggleAbd(val,btn){
+  const a=S.ep.clin.abdomen, i=a.indexOf(val);
+  if(i>=0) a.splice(i,1); else a.push(val);
+  applySel(btn,a.includes(val));
+  if(val==='otros'){ const w=document.getElementById('clin-abd-otros'); if(w) w.style.display=a.includes('otros')?'block':'none'; }
+}
+function clinBool(grp,val){
+  S.ep.clin[grp]=val; // 'si' | 'no'
+  document.querySelectorAll(`[data-cgrp="${grp}"]`).forEach(b=>applySel(b,b.dataset.cval===val));
+  const w=document.getElementById('clin-'+grp+'-extra'); if(w) w.style.display=(val==='si')?'block':'none';
+}
+function clinCronOtros(cb){ const w=document.getElementById('clin-cron-otros'); if(w) w.style.display=cb.checked?'block':'none'; }
+
+function clinForm(ep){
+  if(!S.ep.clin) S.ep.clin=freshClin(); // defensa: nunca rendir el form sin estado
+  const c=S.ep.clin;
+  return `
+  <div class="card"><div class="ch">Examen por aparatos</div>
+    <span style="${LBL_ST}">Respiratorio</span>${clinWrap(clinGrp('respiratorio',APAR_RESP,c.respiratorio,false))}
+    <span style="${LBL_ST}">Cardiovascular</span>${clinWrap(clinGrp('cardiovascular',APAR_CV,c.cardiovascular,false))}
+    <span style="${LBL_ST}">Abdomen</span>${clinWrap(clinGrp('abdomen',APAR_ABD,c.abdomen,true))}
+    <div class="field" id="clin-abd-otros" style="display:${c.abdomen.includes('otros')?'block':'none'};margin:.4rem 0 0"><input id="clin-abd-otros-txt" type="text" placeholder="Abdomen — otros (detalle)" autocomplete="off"></div>
+    <div class="field" style="margin-top:.6rem"><label>ECG</label><textarea id="clin-ecg" placeholder="Hallazgos del ECG…"></textarea></div>
+    <div class="field"><label>Psiquiátrico</label><textarea id="clin-psiq" placeholder="…"></textarea></div>
+  </div>
+  <div class="card"><div class="ch">Desenlace</div>
+    <div class="field"><label>Procedimiento efectuado</label><input id="clin-proc" type="text" autocomplete="off"></div>
+    <div class="field"><label>Medicamento (in situ)</label><input id="clin-med" type="text" autocomplete="off"></div>
+    <div class="field"><label>Diagnóstico presuntivo</label><input id="clin-dx" type="text" autocomplete="off"></div>
+    <div class="field"><label>Epicrisis</label><textarea id="clin-epi" placeholder="Resumen clínico del episodio…"></textarea></div>
+    <span style="${LBL_ST}">Internación</span>${clinWrap(
+      `<button type="button" data-cgrp="internacion" data-cval="si" onclick="clinBool('internacion','si')" style="${pillStyle(c.internacion==='si')}">Sí</button>`+
+      `<button type="button" data-cgrp="internacion" data-cval="no" onclick="clinBool('internacion','no')" style="${pillStyle(c.internacion==='no')}">No</button>`)}
+    <div class="field" id="clin-internacion-extra" style="display:${c.internacion==='si'?'block':'none'};margin:.4rem 0 0"><input id="clin-donde" type="text" placeholder="¿Dónde?" autocomplete="off"></div>
+    <span style="${LBL_ST}">Rechaza tratamiento</span>${clinWrap(
+      `<button type="button" data-cgrp="rechaza" data-cval="si" onclick="clinBool('rechaza','si')" style="${pillStyle(c.rechaza==='si')}">Sí</button>`+
+      `<button type="button" data-cgrp="rechaza" data-cval="no" onclick="clinBool('rechaza','no')" style="${pillStyle(c.rechaza==='no')}">No</button>`)}
+    <div class="field" id="clin-rechaza-extra" style="display:${c.rechaza==='si'?'block':'none'};margin:.4rem 0 0"><input id="clin-motivo" type="text" placeholder="Motivo" autocomplete="off"></div>
+    <span style="${LBL_ST}">Código real <span style="text-transform:none;letter-spacing:0;font-weight:500">(presunto: ${codEmoji(ep.data.codigoPresuntivo)} ${ep.data.codigoPresuntivo||'—'})</span></span>${clinWrap(clinGrp('codigoReal',COD_REAL,c.codigoReal,false,true))}
+  </div>
+  <div class="card"><div class="ch">Antecedente crónico nuevo</div>
+    <div style="font-size:.7rem;color:var(--ink3);margin-bottom:.45rem">Lo que marques se suma a los crónicos del paciente al cerrar (no se re-pregunta a futuro).</div>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+      ${ANTECEDENTES.map(a=>`<label style="${CHIP_ST}"><input type="checkbox" class="clin-cron" value="${a}"> ${a}</label>`).join('')}
+      <label style="${CHIP_ST}"><input type="checkbox" class="clin-cron" value="otros" onclick="clinCronOtros(this)"> otros</label>
+    </div>
+    <div class="field" id="clin-cron-otros" style="display:none;margin-top:.4rem"><input id="clin-cron-otros-txt" type="text" placeholder="Otro antecedente crónico" autocomplete="off"></div>
+  </div>
+  <div id="ep-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+  <button class="btn-r" onclick="clinCerrar()">Cerrar episodio</button>
+  <button class="btn-o" onclick="epStage('')" style="margin-top:.5rem">Volver (sin guardar)</button>`;
+}
+
+async function clinCerrar(){
+  const ep=S.ep, c=ep.clin;
+  epMsg('');
+  const g=id=>(document.getElementById(id)?.value||'').trim();
+  const dx=g('clin-dx');
+  // VALIDACIÓN MÍNIMA: código real + diagnóstico. El resto opcional.
+  if(!c.codigoReal){ epMsg('Seleccioná el código real antes de cerrar'); return; }
+  if(!dx){ epMsg('Cargá el diagnóstico presuntivo antes de cerrar'); return; }
+
+  const ecg=g('clin-ecg'), psiq=g('clin-psiq'), abdOtros=g('clin-abd-otros-txt');
+  const examen={
+    respiratorio:   c.respiratorio   ? {examinado:true,estado:c.respiratorio}   : {examinado:false,estado:null},
+    cardiovascular: c.cardiovascular ? {examinado:true,estado:c.cardiovascular} : {examinado:false,estado:null},
+    abdomen:        c.abdomen.length ? {examinado:true,hallazgos:c.abdomen.slice(),otros:(c.abdomen.includes('otros')?abdOtros:'')} : {examinado:false,hallazgos:[],otros:''},
+    ecg:            {examinado:!!ecg,texto:ecg},
+    psiquiatrico:   {examinado:!!psiq,texto:psiq}
+  };
+  const interna=(c.internacion==='si'), rechaza=(c.rechaza==='si');
+  const desenlace={
+    procedimiento:g('clin-proc'), medicamento:g('clin-med'), diagnostico:dx, epicrisis:g('clin-epi'),
+    internacion:{interna, donde:interna?g('clin-donde'):''},
+    rechazaTratamiento:{rechaza, motivo:rechaza?g('clin-motivo'):''},
+    codigoReal:c.codigoReal
+  };
+
+  // CRÓNICO NUEVO → PACIENTE (escritura separada, antes del cierre del episodio)
+  const cron=[...document.querySelectorAll('.clin-cron:checked')].map(x=>x.value);
+  const cronOtrosTxt = cron.includes('otros') ? g('clin-cron-otros-txt') : '';
+  if(cron.length && ep.data.pacienteId){
+    const updP={ antecedentesCronicos: firebase.firestore.FieldValue.arrayUnion(...cron) };
+    if(cronOtrosTxt){
+      const prev=(ep.paciente&&ep.paciente.antecedentesOtros)||'';
+      updP.antecedentesOtros=[prev,cronOtrosTxt].filter(Boolean).join('; '); // append, no pisa lo previo
+    }
+    try{ await db.collection('pacientes').doc(ep.data.pacienteId).set(updP,{merge:true}); }
+    catch(e){ epMsg('No se pudo actualizar antecedentes del paciente: '+(e.message||e)); return; }
+  }
+
+  // CIERRE del episodio — escritor único. codigoPresuntivo queda intacto.
+  await epUpdate({ estado:'cerrado', examen, desenlace, ['transiciones.cerrado']:FV() });
+}
+
+/* Display read-only de la clínica una vez cerrado el episodio */
+function epClinicaCard(ep){
+  const d=ep.data, ex=d.examen||{}, de=d.desenlace||{};
+  const apar=(lbl,o,fmt)=>{ if(!o) return ''; const v=o.examinado?fmt(o):'<span style="color:var(--ink3)">no examinado</span>'; return `<div class="ir"><span class="il">${lbl}</span><span class="iv">${v}</span></div>`; };
+  const aparLbl=k=>esc(APAR_LBL[k]||k||'—');
+  const examenHtml=
+    apar('Respiratorio',ex.respiratorio,o=>aparLbl(o.estado))+
+    apar('Cardiovascular',ex.cardiovascular,o=>aparLbl(o.estado))+
+    apar('Abdomen',ex.abdomen,o=>esc((o.hallazgos||[]).map(h=>APAR_LBL[h]||h).join(', ')+(o.otros?(' · '+o.otros):'')))+
+    apar('ECG',ex.ecg,o=>esc(o.texto||'—'))+
+    apar('Psiquiátrico',ex.psiquiatrico,o=>esc(o.texto||'—'));
+  const fila=(l,v)=> v?`<div class="ir"><span class="il">${l}</span><span class="iv">${esc(v)}</span></div>`:'';
+  const intern = de.internacion ? (de.internacion.interna?('Sí'+(de.internacion.donde?(' · '+de.internacion.donde):'')):'No') : '';
+  const rech = de.rechazaTratamiento ? (de.rechazaTratamiento.rechaza?('Sí'+(de.rechazaTratamiento.motivo?(' · '+de.rechazaTratamiento.motivo):'')):'No') : '';
+  return `<div class="card"><div class="ch">Atención (clínica)</div>
+    ${examenHtml||'<div style="font-size:.78rem;color:var(--ink3)">Sin examen cargado</div>'}
+    <div style="height:.5rem"></div>
+    ${fila('Procedimiento',de.procedimiento)}
+    ${fila('Medicamento',de.medicamento)}
+    ${fila('Diagnóstico',de.diagnostico)}
+    ${fila('Epicrisis',de.epicrisis)}
+    ${fila('Internación',intern)}
+    ${fila('Rechaza tratamiento',rech)}
+    ${de.codigoReal?`<div class="ir"><span class="il">Código real</span><span class="iv" style="color:${codColor(de.codigoReal)};font-weight:700">${codEmoji(de.codigoReal)} ${de.codigoReal}</span></div>`:''}
   </div>`;
 }
 
