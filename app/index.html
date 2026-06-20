@@ -895,6 +895,7 @@ const CODIGOS=[
   ['traslado','🔵 Traslado','Programado','#3B82F6']
 ];
 const FV=()=>firebase.firestore.FieldValue.serverTimestamp();
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 function dspState(){ if(!S.dsp) S.dsp={stage:'buscar'}; return S.dsp; }
 function calcEdad(f){
@@ -934,7 +935,7 @@ function dDespBuscar(){
     <p style="font-size:.8rem;color:var(--ink3);margin:.2rem 0 .8rem">Identificá al paciente por DNI o N° de afiliado. Si no está, lo das de alta en el momento.</p>
     <div class="field"><label>DNI o N° de afiliado</label><input id="dspq" type="text" inputmode="numeric" placeholder="Ej. 30123456" autocomplete="off"></div>
     <button class="btn-r" id="btnBuscar" onclick="dspBuscar()">Buscar paciente</button>
-    <button class="btn-o" onclick="dspAltaDirecta()" style="margin-top:.5rem">Cargar sin documento (vía pública)</button>
+    <button class="btn-o" onclick="dspAltaDirecta()" style="margin-top:.5rem">Cargar sin DNI</button>
   </div>`;
 }
 
@@ -1057,6 +1058,8 @@ function dspTipoAfil(v){
 
 function dAntecedentes(d){
   const cron = d.paciente ? (d.paciente.antecedentesCronicos||[]) : [];
+  const otrosOn = cron.includes('otros');
+  const otrosTxt = d.paciente ? (d.paciente.antecedentesOtros||'') : '';
   const chip = (val,on)=>`<label style="display:inline-flex;align-items:center;gap:.35rem;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:.35rem .6rem;font-size:.8rem;cursor:pointer"><input type="checkbox" class="dsp-ant" value="${val}" ${on?'checked':''} onclick="dspAntClick(this)"> ${val}</label>`;
   const nota = d.paciente && cron.length
     ? 'Crónicos del paciente (ya marcados). Tocá para sumar/quitar de este episodio.'
@@ -1067,7 +1070,11 @@ function dAntecedentes(d){
     <div style="font-size:.7rem;color:var(--ink3);margin-bottom:.45rem">${nota}</div>
     <div style="display:flex;flex-wrap:wrap;gap:.4rem">
       ${ANTECEDENTES.map(a=>chip(a,cron.includes(a))).join('')}
+      ${chip('otros',otrosOn)}
       ${chip('ninguna',false)}
+    </div>
+    <div class="field" id="ant-otros-wrap" style="display:${otrosOn?'block':'none'};margin-top:.6rem;margin-bottom:0">
+      <input id="ant-otros-txt" type="text" placeholder="Detallar otros antecedentes" value="${esc(otrosTxt)}" autocomplete="off">
     </div>
   </div>`;
 }
@@ -1076,6 +1083,13 @@ function dspAntClick(cb){
   const all=[...document.querySelectorAll('.dsp-ant')];
   if(cb.value==='ninguna' && cb.checked){ all.forEach(c=>{ if(c!==cb) c.checked=false; }); }
   else if(cb.value!=='ninguna' && cb.checked){ const n=all.find(c=>c.value==='ninguna'); if(n) n.checked=false; }
+  dspOtrosVis();
+}
+
+function dspOtrosVis(){
+  const o=[...document.querySelectorAll('.dsp-ant')].find(c=>c.value==='otros');
+  const w=document.getElementById('ant-otros-wrap');
+  if(w) w.style.display=(o&&o.checked)?'block':'none';
 }
 
 function dspPickCodigo(btn,code){
@@ -1105,6 +1119,7 @@ async function dspCrear(){
   const domicilio=(document.getElementById('dom')?.value||'').trim();
   const tipoLugar=document.getElementById('tlugar')?.value||'';
   const antec=[...document.querySelectorAll('.dsp-ant:checked')].map(c=>c.value);
+  const antecedentesOtros = antec.includes('otros') ? (document.getElementById('ant-otros-txt')?.value||'').trim() : '';
 
   const errs=[];
   if(!codigo) errs.push('elegí un código');
@@ -1130,6 +1145,7 @@ async function dspCrear(){
       snapAfil=afilOf(p);
     }else{
       nuevo.antecedentesCronicos=antec.filter(a=>a!=='ninguna'); // alta: los marcados quedan como crónicos
+      nuevo.antecedentesOtros=antecedentesOtros;                 // texto libre del "otros" (campo aparte)
       nuevo.creadoEn=FV();
       const ref=await db.collection('pacientes').add(nuevo);
       pid=ref.id;
@@ -1156,6 +1172,7 @@ async function dspCrear(){
         domicilio:domicilio, tipoLugar:tipoLugar,
         motivoLlamado:motivo, codigoPresuntivo:codigo,
         antecedentes:antec,
+        antecedentesOtros:antecedentesOtros, // texto libre del "otros" (campo aparte, lista queda limpia)
         creadoEn:FV(),
         transiciones:{ despacho:FV() }     // timestamp de SERVIDOR de la transición
       });
