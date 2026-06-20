@@ -1,9 +1,10 @@
 rules_version = '2';
 
 // Medicar — Estructura medica.
-//   Etapa 1: Auth + roles + usuarios/{uid}.
-//   Etapa 2 (despacho): pacientes, episodios y contador atomico de incidentes.
-// Conservadoras: solo lo necesario por rol; todo lo demas, cerrado.
+//   Etapa 1: Auth + rol.
+//   Etapa 2 (despacho + atencion): contador atomico, episodio clinico.
+//   Permisos por rol (estricto + actor): cada accion atada a su rol;
+//   la clinica/cierre solo la hace el medico ASIGNADO al episodio.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -11,7 +12,7 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Rol del usuario actual leido de usuarios/{uid} (su doc lo crea el seed / Admin SDK).
+    // Rol del usuario actual, leido de usuarios/{uid} (su doc lo crea el seed / Admin SDK).
     function rolActual() {
       return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol;
     }
@@ -26,21 +27,33 @@ service cloud.firestore {
       return tieneRol(['admin']);
     }
 
-    // Roles operativos de la estructura medica (despacho + atencion).
+    function esDespachante() {
+      return tieneRol(['despachante']);
+    }
+
+    function esMedico() {
+      return tieneRol(['medico']);
+    }
+
+    // Los tres roles operativos (lectura compartida del tablero).
     function esOperativo() {
       return tieneRol(['despachante', 'medico', 'admin']);
     }
 
-    // usuarios/{uid}: cada usuario lee su propio doc; admin lee toda la coleccion.
-    // Escritura: bloqueada desde el cliente (altas/cambios via seed / Admin SDK).
+    // Claves que cambia este write (set de campos tocados).
+    function tocadas() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // usuarios/{uid}: cada quien lee su doc; admin lee toda la coleccion.
+    // Escritura bloqueada desde el cliente (altas/cambios via seed / Admin SDK).
     match /usuarios/{uid} {
       allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
       allow write: if false;
     }
 
-    // pacientes/{id}: padron clinico (entidad central de la historia).
-    // Lo operan despachante, medico y admin: lectura + alta/edicion.
-    // Sin borrado desde el cliente (la HC no se borra).
+    // pacientes/{id}: identidad + antecedentes (nucleo de la historia).
+    // Alta y edicion: despachante o medico (ambos), o admin. Sin borrado desde cliente.
     match /pacientes/{id} {
       allow read:           if esOperativo();
       allow create, update: if esOperativo();
@@ -48,18 +61,69 @@ service cloud.firestore {
     }
 
     // episodios/{id}: la atencion, cuelga del paciente.
-    // Lectura para los 3 roles operativos. Alta en fase despacho y edicion
-    // (fases siguientes) idem. Sin borrado desde el cliente.
+    // Lectura: los 3 roles operativos.
+    // Escritura: diferenciada por rol y por los campos que toca cada accion.
     match /episodios/{id} {
-      allow read:           if esOperativo();
-      allow create, update: if esOperativo();
-      allow delete:         if false;
+      allow read:   if esOperativo();
+
+      // Alta (fase despacho): solo despachante. Admin tambien.
+      allow create: if (esDespachante() || isAdmin())
+                       && request.resource.data.estado == 'despacho';
+
+      allow delete: if false;
+
+      // Update: admin sin restriccion; el resto, segun la accion.
+      allow update: if isAdmin() || (
+        isSignedIn() && (
+          // Asignar / reasignar recursos: solo despachante. Toca movil/medico/chofer.
+          // Permitido en cualquier estado activo (incluye derivacion entre moviles
+          // durante la atencion, p.ej. internacion). El nuevo medico pasa a ser el
+          // asignado y es quien puede cerrar.
+          (
+            esDespachante()
+            && tocadas().hasOnly(['movilId','movilNombre','medicoId','medicoNombre','choferId','choferNombre'])
+            && resource.data.estado in ['despacho','en_camino','arribo','atencion']
+          )
+          // Avanzar estado: despachante o medico. Toca estado + el timestamp de esa transicion.
+          // El salto despacho -> en_camino exige movil + medico ya asignados.
+          || (
+            (esDespachante() || esMedico())
+            && tocadas().hasOnly(['estado','transiciones'])
+            && request.resource.data.estado in ['en_camino','arribo','atencion']
+            && (
+              request.resource.data.estado != 'en_camino'
+              || (resource.data.movilId != null && resource.data.medicoId != null)
+            )
+          )
+          // Clinica + cierre: solo el medico ASIGNADO a este episodio.
+          || (
+            esMedico()
+            && request.auth.uid == resource.data.medicoId
+            && tocadas().hasOnly(['estado','examen','desenlace','transiciones'])
+            && request.resource.data.estado == 'cerrado'
+          )
+          // Cierre viejo por resolucion (compat): medico asignado.
+          || (
+            esMedico()
+            && request.auth.uid == resource.data.medicoId
+            && tocadas().hasOnly(['estado','resolucion','transiciones'])
+            && request.resource.data.estado == 'cerrado'
+          )
+          // Cancelar / anular: despachante o medico (p.ej. falsa alarma).
+          || (
+            (esDespachante() || esMedico())
+            && tocadas().hasOnly(['estado','motivoCancelacion','transiciones'])
+            && request.resource.data.estado == 'cancelado'
+          )
+        )
+      );
     }
 
-    // contadores/{id}: correlativos atomicos (ej. nroIncidente). Se leen y
-    // escriben dentro de una transaccion por los roles operativos. Sin borrado.
+    // contadores/{id}: correlativo atomico (nroIncidente).
+    // Lectura/escritura dentro de la transaccion de alta (operativos). Sin borrado.
     match /contadores/{id} {
       allow read, write: if esOperativo();
+      allow delete:      if false;
     }
 
     // Resto del datastore: cerrado, se abre en estructuras siguientes.
