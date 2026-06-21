@@ -35,9 +35,14 @@ service cloud.firestore {
       return tieneRol(['medico']);
     }
 
-    // Los tres roles operativos (lectura compartida del tablero).
+    // Superadmin / director medico: rol maximo, poder total sin restriccion.
+    function esSuperadmin() {
+      return tieneRol(['superadmin']);
+    }
+
+    // Roles operativos (lectura compartida del tablero). Incluye superadmin.
     function esOperativo() {
-      return tieneRol(['despachante', 'medico', 'admin']);
+      return tieneRol(['despachante', 'medico', 'admin', 'superadmin']);
     }
 
     // Claves que cambia este write (set de campos tocados).
@@ -46,18 +51,20 @@ service cloud.firestore {
     }
 
     // usuarios/{uid}: cada quien lee su doc; admin lee toda la coleccion.
-    // Escritura bloqueada desde el cliente (altas/cambios via seed / Admin SDK).
+    // Escritura bloqueada desde el cliente (altas/cambios via seed / Admin SDK),
+    // SALVO superadmin: gestiona usuarios y roles desde la app sin restriccion.
     match /usuarios/{uid} {
-      allow read:  if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      allow write: if false;
+      allow read:  if esSuperadmin() || (isSignedIn() && (request.auth.uid == uid || isAdmin()));
+      allow write: if esSuperadmin();
     }
 
     // pacientes/{id}: identidad + antecedentes (nucleo de la historia).
-    // Alta y edicion: despachante o medico (ambos), o admin. Sin borrado desde cliente.
+    // Alta y edicion: despachante o medico (ambos), o admin. Sin borrado desde cliente,
+    // SALVO superadmin: lee, edita y borra sin restriccion.
     match /pacientes/{id} {
       allow read:           if esOperativo();
       allow create, update: if esOperativo();
-      allow delete:         if false;
+      allow delete:         if esSuperadmin();
     }
 
     // episodios/{id}: la atencion, cuelga del paciente.
@@ -66,14 +73,16 @@ service cloud.firestore {
     match /episodios/{id} {
       allow read:   if esOperativo();
 
-      // Alta (fase despacho): solo despachante. Admin tambien.
-      allow create: if (esDespachante() || isAdmin())
-                       && request.resource.data.estado == 'despacho';
+      // Alta (fase despacho): solo despachante. Admin tambien. Superadmin sin restriccion.
+      allow create: if esSuperadmin()
+                       || ((esDespachante() || isAdmin())
+                           && request.resource.data.estado == 'despacho');
 
-      allow delete: if false;
+      // Borrado: solo superadmin (el resto, nunca desde el cliente).
+      allow delete: if esSuperadmin();
 
-      // Update: admin sin restriccion; el resto, segun la accion.
-      allow update: if isAdmin() || (
+      // Update: superadmin y admin sin restriccion; el resto, segun la accion.
+      allow update: if esSuperadmin() || isAdmin() || (
         isSignedIn() && (
           // Asignar / reasignar recursos: solo despachante. Toca movil/medico/chofer.
           // Permitido en cualquier estado activo (incluye derivacion entre moviles
@@ -136,15 +145,15 @@ service cloud.firestore {
     }
 
     // contadores/{id}: correlativo atomico (nroIncidente).
-    // Lectura/escritura dentro de la transaccion de alta (operativos). Sin borrado.
+    // Lectura/escritura dentro de la transaccion de alta (operativos). Borrado solo superadmin.
     match /contadores/{id} {
       allow read, write: if esOperativo();
-      allow delete:      if false;
+      allow delete:      if esSuperadmin();
     }
 
-    // Resto del datastore: cerrado, se abre en estructuras siguientes.
+    // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if esSuperadmin();
     }
   }
 }
