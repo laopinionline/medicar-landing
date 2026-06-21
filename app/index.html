@@ -1292,7 +1292,7 @@ function banView(items){
     <div style="font-weight:700">${esMedico?'Mis episodios':'Bandeja de episodios'}</div>
     <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="banReload()">↻ Actualizar</button>
   </div>`;
-  const nuevo=esMedico?'':`<button class="btn-r" onclick="verBandejaNuevo()" style="margin-bottom:.8rem">+ Nuevo despacho</button>`;
+  const nuevo=(S.user.rol==='despachante')?`<button class="btn-r" onclick="verBandejaNuevo()" style="margin-bottom:.8rem">+ Nuevo despacho</button>`:''; // crear: solo despachante
   return `${top}${nuevo}
   <div class="card">${sec('🟢 Activos',activos,'Sin episodios activos')}</div>
   <div class="card">
@@ -1427,7 +1427,9 @@ function epDespachoCard(ep){
 
 function epRecursosCard(ep){
   const d=ep.data, term=(d.estado==='cerrado'||d.estado==='cancelado');
-  if(term){
+  const esDespachante=S.user.rol==='despachante';
+  // Solo el despachante asigna recursos (regla). Terminal o cualquier otro rol: lectura.
+  if(term || !esDespachante){
     return `<div class="card"><div class="ch">Recursos</div>
       <div class="ir"><span class="il">Móvil</span><span class="iv">${esc(d.movilNombre||d.movilId||'sin asignar')}</span></div>
       <div class="ir"><span class="il">Médico</span><span class="iv">${esc(d.medicoNombre||(d.medicoId?'asignado':'sin asignar'))}</span></div>
@@ -1454,15 +1456,36 @@ function epEstadoCard(ep){
     <div class="ir"><span class="il">Motivo</span><span class="iv">${esc(d.motivoCancelacion)||'—'}</span></div></div>`;
   if(st==='cerrar') return clinForm(ep); // el cierre del médico = carga clínica (examen + desenlace)
   const nx=nextEstado(estado);
+  // Gating por rol (espejo de las firestore.rules):
+  const asignado = S.user.rol==='medico' && S.user.uid===d.medicoId; // médico ASIGNADO
+  const esDespachante = S.user.rol==='despachante';
   let body;
   if(st==='cancelar'){
     body=`<div class="field"><label>Motivo de cancelación</label><input id="ep-cancel-motivo" type="text" placeholder="Ej. falsa alarma / paciente se fue" autocomplete="off"></div>
       <button class="btn-r" onclick="epCancelarOk()">Confirmar cancelación</button>
       <button class="btn-o" onclick="epStage('')" style="margin-top:.5rem">Volver</button>`;
   }else{
-    const nxLbl=nx==='cerrado'?'Cerrar episodio':('Avanzar a '+ESTADO_LBL[nx]);
-    body=`<button class="btn-r" onclick="epAvanzar()">${nxLbl}</button>
-      <button class="btn-o" onclick="epStage('cancelar')" style="margin-top:.5rem">Cancelar / anular</button>`;
+    const parts=[];
+    if(nx==='cerrado'){
+      // Cerrar episodio (carga clínica) — SOLO médico asignado.
+      if(asignado) parts.push(`<button class="btn-r" onclick="epAvanzar()">Cerrar episodio</button>`);
+    }else{
+      // Avanzar de estado — despachante o médico asignado.
+      if(esDespachante || asignado){
+        const faltanRecursos = (estado==='despacho' && nx==='en_camino') && (d.movilId==null || d.medicoId==null);
+        if(faltanRecursos){
+          parts.push(`<button class="btn-r" disabled style="opacity:.5;cursor:not-allowed">Avanzar a ${ESTADO_LBL[nx]}</button>`);
+          parts.push(`<div style="font-size:.72rem;color:var(--ink3);margin-top:.35rem">Asigná móvil y médico antes de avanzar</div>`);
+        }else{
+          parts.push(`<button class="btn-r" onclick="epAvanzar()">Avanzar a ${ESTADO_LBL[nx]}</button>`);
+        }
+      }
+    }
+    // Cancelar / anular — despachante o médico asignado.
+    if(esDespachante || asignado){
+      parts.push(`<button class="btn-o" onclick="epStage('cancelar')" style="margin-top:.5rem">Cancelar / anular</button>`);
+    }
+    body = parts.join('') || `<div style="font-size:.78rem;color:var(--ink3)">Sin acciones disponibles para tu rol en este episodio.</div>`;
   }
   return `<div class="card"><div class="ch">Estado actual: ${ESTADO_LBL[estado]||estado}</div>
     <div id="ep-err" class="err" style="display:none;margin-bottom:.5rem"></div>
