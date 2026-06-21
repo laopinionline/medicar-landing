@@ -33,6 +33,21 @@ const USERS = [
   { email: 'despachante@demo.com', rol: 'despachante', nombre: 'Despacho Central' }, // Etapa 2: rol de despacho
 ];
 
+// Etapa 2: colección staff_medico (selector de médicos para asignar en episodios).
+// doc id = uid de Auth del médico (mismo que usuarios/{uid}) -> las reglas de episodios
+// (medicoId == request.auth.uid) no cambian. set merge = idempotente.
+const STAFF_MEDICO = [
+  { uid: 'xBij3SzgZuVWog3aZltXE6i2noF3', nombre: 'Dra. Laura Gómez', activo: true },
+];
+
+async function ensureStaffMedico(s) {
+  await db.collection('staff_medico').doc(s.uid).set(
+    { nombre: s.nombre, activo: s.activo },
+    { merge: true }
+  );
+  console.log(`[staff] ok:      staff_medico/${s.uid} (${s.nombre}, activo=${s.activo})`);
+}
+
 async function ensureAuthUser(u) {
   try {
     const existing = await auth.getUserByEmail(u.email);
@@ -80,7 +95,10 @@ async function ensureUserDoc(uid, u) {
     const uid = await ensureAuthUser(u);
     await ensureUserDoc(uid, u);
   }
-  console.log(`\n[seed] Listo. 3 usuarios demo asegurados. Password: ${PASSWORD}\n`);
+  for (const s of STAFF_MEDICO) {
+    await ensureStaffMedico(s);
+  }
+  console.log(`\n[seed] Listo. ${USERS.length} usuarios + ${STAFF_MEDICO.length} staff_medico asegurados. Password: ${PASSWORD}\n`);
   process.exit(0);
 })().catch((err) => {
   console.error('[seed] ERROR:', err);
