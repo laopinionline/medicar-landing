@@ -1389,7 +1389,16 @@ function dEpDetalle(){
   ${epDespachoCard(ep)}
   ${epRecursosCard(ep)}
   ${epEstadoCard(ep)}
+  ${d.reabierto ? epReaperturaCard(ep) : ''}
   ${(d.examen||d.desenlace)&&ep.stage!=='cerrar'?epClinicaCard(ep):''}`;
+}
+
+function epReaperturaCard(ep){
+  const r=ep.data.reabierto||{};
+  return `<div class="card"><div class="ch">Reapertura</div>
+    <div class="ir"><span class="il">Reabierto por</span><span class="iv">${esc(r.rol||'—')}</span></div>
+    <div class="ir"><span class="il">Veces</span><span class="iv">${r.veces||1}</span></div>
+  </div>`;
 }
 
 function epCapsula(ep){
@@ -1447,10 +1456,14 @@ function epRecursosCard(ep){
 
 function epEstadoCard(ep){
   const d=ep.data, st=ep.stage, estado=d.estado;
-  if(estado==='cerrado') return `<div class="card"><div class="ch">Estado</div>
+  if(estado==='cerrado'){
+    const puedeReabrir=(S.user.rol==='medico' && S.user.uid===d.medicoId) || S.user.rol==='admin';
+    return `<div class="card"><div class="ch">Estado</div>
     <div class="ir"><span class="il">Estado</span><span class="iv">Cerrado</span></div>
     ${d.desenlace&&d.desenlace.codigoReal?`<div class="ir"><span class="il">Código real</span><span class="iv" style="color:${codColor(d.desenlace.codigoReal)};font-weight:700">${codEmoji(d.desenlace.codigoReal)} ${d.desenlace.codigoReal}</span></div>`:''}
-    ${d.resolucion?`<div class="ir"><span class="il">Resolución</span><span class="iv">${RESOL_LBL[d.resolucion]||d.resolucion}</span></div>`:''}</div>`;
+    ${d.resolucion?`<div class="ir"><span class="il">Resolución</span><span class="iv">${RESOL_LBL[d.resolucion]||d.resolucion}</span></div>`:''}
+    ${puedeReabrir?`<button class="btn-o" onclick="epReabrir()" style="margin-top:.6rem">Reabrir episodio</button>`:''}</div>`;
+  }
   if(estado==='cancelado') return `<div class="card"><div class="ch">Estado</div>
     <div class="ir"><span class="il">Estado</span><span class="iv">Cancelado</span></div>
     <div class="ir"><span class="il">Motivo</span><span class="iv">${esc(d.motivoCancelacion)||'—'}</span></div></div>`;
@@ -1621,7 +1634,35 @@ async function clinCerrar(){
   }
 
   // CIERRE del episodio — escritor único. codigoPresuntivo queda intacto.
-  await epUpdate({ estado:'cerrado', examen, desenlace, ['transiciones.cerrado']:FV() });
+  // cierres[] versiona cada cierre (1ra vez y recierres tras reapertura).
+  // OJO: dentro de arrayUnion NO va FV()/serverTimestamp -> timestamp de cliente (Date.now()).
+  await epUpdate({
+    estado:'cerrado', examen, desenlace,
+    ['transiciones.cerrado']:FV(),
+    cierres: firebase.firestore.FieldValue.arrayUnion({
+      cerradoEn: Date.now(),
+      examen: examen,
+      desenlace: desenlace,
+      por: S.user.uid
+    })
+  });
+}
+
+// Reapertura: cerrado -> atencion. Solo médico ASIGNADO o admin (la regla es la defensa real).
+// hasOnly ESTRICTO en reglas: toca SOLO estado + reabierto (NO cierres ni transiciones).
+async function epReabrir(){
+  const d=S.ep.data;
+  const puede = (S.user.rol==='medico' && S.user.uid===d.medicoId) || S.user.rol==='admin';
+  if(!puede){ return; }
+  await epUpdate({
+    estado:'atencion',
+    reabierto:{
+      por: S.user.uid,
+      rol: S.user.rol,
+      en: Date.now(),
+      veces: (d.reabierto && d.reabierto.veces ? d.reabierto.veces : 0) + 1
+    }
+  });
 }
 
 /* Display read-only de la clínica una vez cerrado el episodio */
