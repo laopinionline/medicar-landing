@@ -31,6 +31,7 @@ const USERS = [
   { email: 'medico@demo.com',      rol: 'medico',      nombre: 'Dra. Laura Gómez' },
   { email: 'admin@demo.com',       rol: 'admin',       nombre: 'Victoriano Marino' },
   { email: 'despachante@demo.com', rol: 'despachante', nombre: 'Despacho Central' }, // Etapa 2: rol de despacho
+  { email: 'medico2@demo.com',     rol: 'medico',      nombre: 'Dr. Martín Suárez', staffMedico: true }, // 2do médico (handoff); staff_medico con uid dinámico de Auth
 ];
 
 // Etapa 2: colección staff_medico (selector de médicos para asignar en episodios).
@@ -94,6 +95,8 @@ async function ensureUserDoc(uid, u) {
   for (const u of USERS) {
     const uid = await ensureAuthUser(u);
     await ensureUserDoc(uid, u);
+    // Médicos marcados staffMedico -> su doc en staff_medico con el uid de Auth recién resuelto.
+    if (u.staffMedico) await ensureStaffMedico({ uid, nombre: u.nombre, activo: true });
   }
   for (const s of STAFF_MEDICO) {
     await ensureStaffMedico(s);
