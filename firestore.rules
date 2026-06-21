@@ -107,10 +107,12 @@ service cloud.firestore {
             )
           )
           // Clinica + cierre: solo el medico ASIGNADO a este episodio. Origen: atencion.
+          // No se permite si el caso esta ofrecido (el cedente ya no lo trabaja).
           || (
             esMedico()
             && request.auth.uid == resource.data.medicoId
             && resource.data.estado == 'atencion'
+            && resource.data.get('ofrecido', false) != true
             && tocadas().hasOnly(['estado','examen','desenlace','transiciones','cierres'])
             && request.resource.data.estado == 'cerrado'
           )
@@ -119,6 +121,7 @@ service cloud.firestore {
             esMedico()
             && request.auth.uid == resource.data.medicoId
             && resource.data.estado == 'atencion'
+            && resource.data.get('ofrecido', false) != true
             && tocadas().hasOnly(['estado','resolucion','transiciones','cierres'])
             && request.resource.data.estado == 'cerrado'
           )
@@ -139,6 +142,30 @@ service cloud.firestore {
               (esMedico() && request.auth.uid == resource.data.medicoId)
               || isAdmin()
             )
+          )
+          // Handoff - CEDER: el medico ASIGNADO ofrece su caso en atencion.
+          // Marca ofrecido=true (+ registro). Sigue siendo su medicoId, pero ya no
+          // puede cargar clinica/cerrar mientras este ofrecido (la regla de cierre
+          // exige !ofrecido). El caso no cambia de dueno hasta que OTRO lo tome.
+          || (
+            esMedico()
+            && request.auth.uid == resource.data.medicoId
+            && resource.data.estado == 'atencion'
+            && resource.data.get('ofrecido', false) != true
+            && request.resource.data.get('ofrecido', false) == true
+            && tocadas().hasOnly(['ofrecido','handoff'])
+          )
+          // Handoff - TOMAR: OTRO medico (distinto del asignado) toma un caso ofrecido.
+          // Se pone a si mismo como medicoId y baja ofrecido=false (+ registro).
+          // Aca SI cambia de dueno.
+          || (
+            esMedico()
+            && resource.data.get('ofrecido', false) == true
+            && resource.data.estado == 'atencion'
+            && request.auth.uid != resource.data.medicoId
+            && request.resource.data.medicoId == request.auth.uid
+            && request.resource.data.ofrecido == false
+            && tocadas().hasOnly(['medicoId','medicoNombre','ofrecido','handoff'])
           )
         )
       );
