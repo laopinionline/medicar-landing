@@ -86,34 +86,50 @@ service cloud.firestore {
           )
           // Avanzar estado: despachante o medico. Toca estado + el timestamp de esa transicion.
           // El salto despacho -> en_camino exige movil + medico ya asignados.
+          // ORIGEN debe ser activo (no terminal): impide reabrir cerrado/cancelado por esta via.
           || (
             (esDespachante() || esMedico())
             && tocadas().hasOnly(['estado','transiciones'])
+            && resource.data.estado in ['despacho','en_camino','arribo']
             && request.resource.data.estado in ['en_camino','arribo','atencion']
             && (
               request.resource.data.estado != 'en_camino'
               || (resource.data.movilId != null && resource.data.medicoId != null)
             )
           )
-          // Clinica + cierre: solo el medico ASIGNADO a este episodio.
+          // Clinica + cierre: solo el medico ASIGNADO a este episodio. Origen: atencion.
           || (
             esMedico()
             && request.auth.uid == resource.data.medicoId
-            && tocadas().hasOnly(['estado','examen','desenlace','transiciones'])
+            && resource.data.estado == 'atencion'
+            && tocadas().hasOnly(['estado','examen','desenlace','transiciones','cierres'])
             && request.resource.data.estado == 'cerrado'
           )
-          // Cierre viejo por resolucion (compat): medico asignado.
+          // Cierre viejo por resolucion (compat): medico asignado. Origen: atencion.
           || (
             esMedico()
             && request.auth.uid == resource.data.medicoId
-            && tocadas().hasOnly(['estado','resolucion','transiciones'])
+            && resource.data.estado == 'atencion'
+            && tocadas().hasOnly(['estado','resolucion','transiciones','cierres'])
             && request.resource.data.estado == 'cerrado'
           )
-          // Cancelar / anular: despachante o medico (p.ej. falsa alarma).
+          // Cancelar / anular: despachante o medico (p.ej. falsa alarma). Origen activo.
           || (
             (esDespachante() || esMedico())
+            && resource.data.estado in ['despacho','en_camino','arribo','atencion']
             && tocadas().hasOnly(['estado','motivoCancelacion','transiciones'])
             && request.resource.data.estado == 'cancelado'
+          )
+          // Reapertura: de cerrado a atencion. Solo el medico ASIGNADO o admin.
+          // Toca estado + reabierto (auditoria) + cierres (preserva el cierre previo).
+          || (
+            resource.data.estado == 'cerrado'
+            && request.resource.data.estado == 'atencion'
+            && tocadas().hasOnly(['estado','reabierto','cierres'])
+            && (
+              (esMedico() && request.auth.uid == resource.data.medicoId)
+              || isAdmin()
+            )
           )
         )
       );
