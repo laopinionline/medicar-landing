@@ -1278,19 +1278,35 @@ function banReload(){ S.bandeja=null; render(); }
 async function banLoad(){
   S.bandeja={loading:true};
   try{
-    let snap;
-    if(S.user.rol==='medico') snap=await db.collection('episodios').where('medicoId','==',S.user.uid).get();
-    else snap=await db.collection('episodios').get();
-    S.bandeja={loading:false,items:snap.docs.map(d=>({id:d.id,...d.data()}))};
+    let items;
+    if(S.user.rol==='medico'){
+      // Firestore no hace OR -> 2 queries (los suyos + los ofrecidos) y merge dedup por id.
+      const [mine,off]=await Promise.all([
+        db.collection('episodios').where('medicoId','==',S.user.uid).get(),
+        db.collection('episodios').where('ofrecido','==',true).get()
+      ]);
+      const map={};
+      mine.docs.forEach(x=>{ map[x.id]={id:x.id,...x.data()}; });
+      off.docs.forEach(x=>{ map[x.id]={id:x.id,...x.data()}; });
+      items=Object.values(map);
+    }else{
+      const snap=await db.collection('episodios').get();
+      items=snap.docs.map(d=>({id:d.id,...d.data()}));
+    }
+    S.bandeja={loading:false,items};
   }catch(e){ S.bandeja={loading:false,err:(e.message||String(e))}; }
   render();
 }
 
 function banView(items){
   const esMedico=S.user.rol==='medico';
-  // Doble red (defensa en profundidad): el médico solo ve episodios asignados a él,
-  // en TODAS las secciones, aunque 'items' llegara contaminado por alguna fuga futura.
-  if(esMedico) items=items.filter(e=>e.medicoId===S.user.uid);
+  // Handoff: el médico ve los SUYOS + los OFRECIDOS por otros ("Disponibles para tomar").
+  let disponibles=[];
+  if(esMedico){
+    disponibles=items.filter(e=>e.ofrecido===true && e.medicoId!==S.user.uid)
+      .sort((a,b)=>(codOrden(a)-codOrden(b))||(tsSec(a.creadoEn)-tsSec(b.creadoEn)));
+    items=items.filter(e=>e.medicoId===S.user.uid); // sus propios (incluye los que él ofreció: siguen siendo suyos)
+  }
   const activos=items.filter(e=>FLUJO.includes(e.estado))
     .sort((a,b)=>(codOrden(a)-codOrden(b))||(tsSec(a.creadoEn)-tsSec(b.creadoEn)));
   const termTs=e=>tsSec((e.transiciones&&e.transiciones[e.estado])||e.creadoEn);
@@ -1303,8 +1319,10 @@ function banView(items){
     <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="banReload()">↻ Actualizar</button>
   </div>`;
   const nuevo=(S.user.rol==='despachante')?`<button class="btn-r" onclick="verBandejaNuevo()" style="margin-bottom:.8rem">+ Nuevo despacho</button>`:''; // crear: solo despachante
+  const disp=esMedico?`<div class="card">${sec('🤝 Disponibles para tomar',disponibles,'No hay casos ofrecidos')}</div>`:'';
   return `${top}${nuevo}
   <div class="card">${sec('🟢 Activos',activos,'Sin episodios activos')}</div>
+  ${disp}
   <div class="card">
     <div class="st">Inactivos</div>
     ${sec('Cerrados',cerrados,'Sin cerrados')}
@@ -1399,6 +1417,7 @@ function dEpDetalle(){
   ${epDespachoCard(ep)}
   ${epRecursosCard(ep)}
   ${epEstadoCard(ep)}
+  ${(d.handoff && d.handoff.a)?`<div class="card"><div class="ch">Handoff</div><div class="ir"><span class="il">Recibido de</span><span class="iv">${esc(d.handoff.deNombre||'—')}</span></div></div>`:''}
   ${d.reabierto ? epReaperturaCard(ep) : ''}
   ${(d.examen||d.desenlace)&&ep.stage!=='cerrar'?epClinicaCard(ep):''}`;
 }
@@ -1488,10 +1507,23 @@ function epEstadoCard(ep){
       <button class="btn-r" onclick="epCancelarOk()">Confirmar cancelación</button>
       <button class="btn-o" onclick="epStage('')" style="margin-top:.5rem">Volver</button>`;
   }else{
+    const ofrecido = d.ofrecido===true;
+    const esMed = S.user.rol==='medico';
     const parts=[];
     if(nx==='cerrado'){
-      // Cerrar episodio (carga clínica) — SOLO médico asignado.
-      if(asignado) parts.push(`<button class="btn-r" onclick="epAvanzar()">Cerrar episodio</button>`);
+      // Estado atención. Handoff médico→médico + cierre.
+      if(asignado){
+        if(ofrecido){
+          // El cedente quedó congelado: no puede cerrar mientras esté ofrecido (espejo de la regla).
+          parts.push(`<div style="font-size:.82rem;color:var(--o);font-weight:600;margin-bottom:.2rem">🤝 Ofrecido — esperando que otro médico lo tome.</div>`);
+        }else{
+          parts.push(`<button class="btn-r" onclick="epAvanzar()">Cerrar episodio</button>`);
+          parts.push(`<button class="btn-o" onclick="epCeder()" style="margin-top:.5rem">Ceder caso</button>`);
+        }
+      }else if(esMed && ofrecido){
+        // Otro médico puede tomar el caso ofrecido.
+        parts.push(`<button class="btn-r" onclick="epTomar()">Tomar caso</button>`);
+      }
     }else{
       // Avanzar de estado — despachante o médico asignado.
       if(esDespachante || asignado){
@@ -1672,6 +1704,26 @@ async function epReabrir(){
       en: Date.now(),
       veces: (d.reabierto && d.reabierto.veces ? d.reabierto.veces : 0) + 1
     }
+  });
+}
+
+// Handoff CEDER: el médico asignado ofrece su caso (queda congelado para él hasta que otro lo tome).
+// Toca solo ofrecido + handoff (espejo de la regla). serverTimestamp NO va dentro del objeto -> Date.now().
+async function epCeder(){
+  await epUpdate({
+    ofrecido:true,
+    handoff:{ de:S.user.uid, deNombre:S.user.nombre, cedidoEn:Date.now() }
+  });
+}
+
+// Handoff TOMAR: otro médico toma el caso ofrecido -> se pone como medicoId y baja ofrecido.
+async function epTomar(){
+  const h=S.ep.data.handoff||{};
+  await epUpdate({
+    medicoId:S.user.uid,
+    medicoNombre:S.user.nombre,
+    ofrecido:false,
+    handoff:{ ...h, a:S.user.uid, aNombre:S.user.nombre, tomadoEn:Date.now() }
   });
 }
 
