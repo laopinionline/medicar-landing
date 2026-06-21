@@ -302,6 +302,18 @@ async function enterWithFbUser(fbUser){
   S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
   S.fotoPerfilUrl=null;
   set({user:u,tab:(u.rol==='despachante'?'bandeja':'home'),step:0});
+  // Médicos para asignar: solo roles operativos pueden leer staff_medico (regla).
+  if(['despachante','medico','admin','superadmin'].includes(u.rol)) loadStaffMedico();
+}
+
+// Carga staff_medico (where activo==true) una vez por sesión -> S.staffMedico [{uid,nombre}].
+async function loadStaffMedico(){
+  S.staffMedico=[];
+  try{
+    const snap=await db.collection('staff_medico').where('activo','==',true).get();
+    S.staffMedico=snap.docs.map(d=>({uid:d.id,nombre:(d.data().nombre||'')}));
+  }catch(_){ S.staffMedico=[]; }
+  render();
 }
 
 function doLogout(){ auth.signOut(); }
@@ -1241,10 +1253,8 @@ const ESTADO_LBL={despacho:'Despacho',en_camino:'En camino',arribo:'Arribo',aten
 const RESOL_LBL={resuelto_domicilio:'Resuelto en domicilio',traslado:'Traslado',derivacion:'Derivación'};
 const RESOLUCIONES=Object.keys(RESOL_LBL).map(k=>[k,RESOL_LBL[k]]);
 const TIPO_LUGAR={domiciliaria:'Domiciliaria',via_publica:'Vía pública',comercio:'Comercio',fabrica:'Fábrica',instituto_educativo:'Instituto educativo',base:'Base'};
-// TEMPORAL: lista mínima de médicos hardcodeada hasta que exista el módulo de staff
-// (colección staff_medico propia). El selector real saldrá de ahí. No abrir usuarios
-// a los operativos por privacidad del padrón de afiliados.
-const MEDICOS=[{uid:'xBij3SzgZuVWog3aZltXE6i2noF3',nombre:'Dra. Laura Gómez'}];
+// Médicos para asignación: se cargan de la colección staff_medico (where activo==true)
+// tras login y se cachean en S.staffMedico ({uid,nombre}). Ver loadStaffMedico().
 
 const tsSec=t=>(t&&t.seconds)||0;
 function codColor(c){ const f=CODIGOS.find(x=>x[0]===c); return f?f[3]:'#888'; }
@@ -1354,7 +1364,7 @@ function nextEstado(cur){ const i=FLUJO.indexOf(cur); if(i<0) return null; retur
 async function epAsignar(){
   const movilId=(document.getElementById('ep-movil')?.value||'').trim();
   const medicoUid=document.getElementById('ep-medico')?.value||'';
-  const med=MEDICOS.find(m=>m.uid===medicoUid);
+  const med=(S.staffMedico||[]).find(m=>m.uid===medicoUid);
   await epUpdate({
     movilId:movilId||null, movilNombre:movilId?('Móvil '+movilId):null,
     medicoId:medicoUid||null, medicoNombre:med?med.nombre:null
@@ -1445,7 +1455,7 @@ function epRecursosCard(ep){
     </div>`;
   }
   const medOpts=['<option value="">Sin asignar</option>'].concat(
-    MEDICOS.map(m=>`<option value="${m.uid}" ${d.medicoId===m.uid?'selected':''}>${esc(m.nombre)}</option>`)
+    (S.staffMedico||[]).map(m=>`<option value="${m.uid}" ${d.medicoId===m.uid?'selected':''}>${esc(m.nombre)}</option>`)
   ).join('');
   return `<div class="card"><div class="ch">Recursos</div>
     <div class="field"><label>Móvil (N°)</label><input id="ep-movil" type="text" inputmode="numeric" value="${esc(d.movilId||'')}" placeholder="Ej. 05" autocomplete="off"></div>
