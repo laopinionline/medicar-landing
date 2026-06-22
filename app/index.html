@@ -154,6 +154,7 @@ svg{display:block;flex-shrink:0}
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <script>
 /* Firebase init. apiKey/firebaseConfig son publicos por diseno (viven en el frontend, no son secreto). */
 const firebaseConfig = {
@@ -301,7 +302,8 @@ async function enterWithFbUser(fbUser){
     afiliadoId:(data.afiliadoId!==undefined?data.afiliadoId:null),
     medicoId:(data.medicoId!==undefined?data.medicoId:null),
     unidad:(data.unidad!==undefined?data.unidad:null),
-    esp:(data.esp!==undefined?data.esp:null)
+    esp:(data.esp!==undefined?data.esp:null),
+    fotoURL:(data.fotoURL!==undefined?data.fotoURL:null)
   };
   resetSession(false); // cinturón y tiradores: arranque de sesión limpio aunque no se haya pasado por logout
   S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
@@ -348,17 +350,17 @@ function getTabs(rol){
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},{id:'perfil',icon:'settings',lbl:'Config'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
   const r=S.user.rol,t=S.tab;
   if(t!=='bandeja'&&t!=='episodios') S.epView=null; // salir de la bandeja cierra el detalle abierto
-  if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return perfilA();}
-  if(r==='medico'){if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return perfilM();}
-  if(r==='despachante'){if(t==='perfil')return perfilD();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return adConf();}
-  if(r==='superadmin'){if(t==='perfil')return perfilSuper();return superView();}
+  if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
+  if(r==='medico'){if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
+  if(r==='despachante'){if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
+  if(r==='admin'){if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   return '';
 }
 
@@ -2055,6 +2057,108 @@ function dashSuper(){
     <div class="ir"><span class="il">Móviles (disponibles/ocupados)</span><span class="iv" style="color:var(--ink3)">módulo no disponible</span></div>
     <div class="ir"><span class="il">Consumos diarios (farmacia/insumos)</span><span class="iv" style="color:var(--ink3)">no modelado aún</span></div>
   </div>`;
+}
+
+/* ===================== MI PERFIL (editable, todos los roles) =====================
+   Cada usuario edita SOLO lo propio (S.user.uid / auth.currentUser): nombre, foto y su
+   contraseña. email/rol read-only. La contraseña va por SDK cliente (reauth + updatePassword),
+   NO por la Cloud Function setPassword (esa es para que el superadmin resetee a otros). */
+function mpMsg(id,t,ok){ const e=document.getElementById(id); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; e.style.color=(t&&ok)?'var(--g,#1D9E75)':''; } }
+
+function miPerfil(){
+  const u=S.user;
+  const ini=(u.nombre||u.email||'?').trim().split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  const avatar=u.fotoURL
+    ? `<img src="${esc(u.fotoURL)}" style="width:84px;height:84px;border-radius:50%;object-fit:cover;border:2.5px solid var(--r)" onerror="this.style.display='none'">`
+    : `<div class="av">${ini}</div>`;
+  return `
+  <div class="ptop">
+    <div style="margin-bottom:.5rem">${avatar}</div>
+    <div class="pname">${esc(u.nombre||'—')}</div>
+    <div class="psub">${esc(u.rol)} · ${esc(u.email)}</div>
+  </div>
+  <div class="card"><div class="ch">Datos</div>
+    <div class="field"><label>Nombre</label><input id="mp-nombre" type="text" value="${esc(u.nombre||'')}" autocomplete="off"></div>
+    <div class="field"><label>Email</label><input type="email" value="${esc(u.email)}" disabled></div>
+    <div class="field"><label>Rol</label><input type="text" value="${esc(u.rol)}" disabled></div>
+    <div id="mp-err-nombre" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <button class="btn-r" onclick="mpGuardarNombre()">Guardar nombre</button>
+  </div>
+  <div class="card"><div class="ch">Foto de perfil</div>
+    <input id="mp-foto" type="file" accept="image/*" onchange="mpSubirFoto(this)" style="font-size:.8rem">
+    <div style="font-size:.66rem;color:var(--ink3);margin-top:.35rem">Imagen, máx. 3 MB.</div>
+    <div id="mp-err-foto" class="err" style="display:none;margin-top:.5rem"></div>
+  </div>
+  <div class="card"><div class="ch">Cambiar contraseña</div>
+    <div class="field"><label>Contraseña actual</label><input id="mp-pass-act" type="password" autocomplete="off"></div>
+    <div class="field"><label>Nueva contraseña</label><input id="mp-pass-new" type="password" placeholder="mín. 6 caracteres" autocomplete="off"></div>
+    <div class="field"><label>Repetir nueva</label><input id="mp-pass-rep" type="password" autocomplete="off"></div>
+    <div id="mp-err-pass" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <button class="btn-r" onclick="mpCambiarPass()">Cambiar contraseña</button>
+  </div>
+  <button class="btn-o" onclick="doLogout()" style="margin-top:.4rem">Cerrar sesión</button>`;
+}
+
+async function mpGuardarNombre(){
+  mpMsg('mp-err-nombre','');
+  const nombre=(document.getElementById('mp-nombre')?.value||'').trim();
+  if(!nombre){ mpMsg('mp-err-nombre','El nombre no puede estar vacío.'); return; }
+  const uid=S.user.uid;
+  try{
+    await db.collection('usuarios').doc(uid).set({nombre},{merge:true}); // depende de la regla "mi perfil"
+    // sync staff_medico (best-effort): el médico no puede escribirlo por reglas; lo sincroniza un admin.
+    if(S.user.rol==='medico'){ try{ await db.collection('staff_medico').doc(uid).set({nombre},{merge:true}); }catch(_){ } }
+    S.user.nombre=nombre; render();
+    mpMsg('mp-err-nombre','✓ Nombre actualizado.',true);
+  }catch(e){
+    let m=e.message||String(e);
+    if(e.code==='permission-denied') m='Sin permiso para editar el nombre (la regla de "mi perfil" todavía no está aplicada).';
+    mpMsg('mp-err-nombre',m);
+  }
+}
+
+async function mpSubirFoto(input){
+  mpMsg('mp-err-foto','');
+  const f=input.files&&input.files[0]; if(!f) return;
+  if(!/^image\//.test(f.type)){ mpMsg('mp-err-foto','El archivo debe ser una imagen.'); return; }
+  if(f.size>3*1024*1024){ mpMsg('mp-err-foto','La imagen supera 3 MB.'); return; }
+  const uid=S.user.uid;
+  mpMsg('mp-err-foto','Subiendo…',true);
+  try{
+    const ext=((f.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,''))||'jpg';
+    const ref=firebase.storage().ref('perfiles/'+uid+'/avatar.'+ext);
+    const snap=await ref.put(f);
+    const url=await snap.ref.getDownloadURL();
+    await db.collection('usuarios').doc(uid).set({fotoURL:url},{merge:true});
+    S.user.fotoURL=url; render();
+  }catch(e){
+    let m=e.message||String(e);
+    if(e.code==='storage/unauthorized') m='Sin permiso (la regla de Storage todavía no está aplicada).';
+    mpMsg('mp-err-foto',m);
+  }
+}
+
+async function mpCambiarPass(){
+  mpMsg('mp-err-pass','');
+  const act=document.getElementById('mp-pass-act')?.value||'';
+  const nue=document.getElementById('mp-pass-new')?.value||'';
+  const rep=document.getElementById('mp-pass-rep')?.value||'';
+  if(!act){ mpMsg('mp-err-pass','Ingresá tu contraseña actual.'); return; }
+  if(nue.length<6){ mpMsg('mp-err-pass','La nueva debe tener al menos 6 caracteres.'); return; }
+  if(nue!==rep){ mpMsg('mp-err-pass','Las contraseñas nuevas no coinciden.'); return; }
+  const user=auth.currentUser;
+  try{
+    const cred=firebase.auth.EmailAuthProvider.credential(user.email, act);
+    await user.reauthenticateWithCredential(cred); // cubre requires-recent-login
+    await user.updatePassword(nue);
+    ['mp-pass-act','mp-pass-new','mp-pass-rep'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+    mpMsg('mp-err-pass','✓ Contraseña actualizada.',true);
+  }catch(e){
+    let m=e.message||String(e);
+    if(e.code==='auth/wrong-password'||e.code==='auth/invalid-credential') m='La contraseña actual es incorrecta.';
+    else if(e.code==='auth/weak-password') m='La nueva contraseña es muy débil.';
+    mpMsg('mp-err-pass',m);
+  }
 }
 
 function bind(){

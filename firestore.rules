@@ -51,11 +51,15 @@ service cloud.firestore {
     }
 
     // usuarios/{uid}: cada quien lee su doc; admin lee toda la coleccion.
-    // Escritura bloqueada desde el cliente (altas/cambios via seed / Admin SDK),
-    // SALVO superadmin: gestiona usuarios y roles desde la app sin restriccion.
+    // Escritura: alta/baja/cambios de rol -> solo superadmin (via panel / Admin SDK).
+    // Mi perfil: cada usuario puede actualizar SOLO su propio nombre/fotoURL (nada mas).
     match /usuarios/{uid} {
-      allow read:  if esSuperadmin() || (isSignedIn() && (request.auth.uid == uid || isAdmin()));
-      allow write: if esSuperadmin();
+      allow read:           if esSuperadmin() || (isSignedIn() && (request.auth.uid == uid || isAdmin()));
+      allow create, delete: if esSuperadmin();
+      allow update: if esSuperadmin()
+                       || ( isSignedIn()
+                            && request.auth.uid == uid
+                            && tocadas().hasOnly(['nombre','fotoURL']) );
     }
 
     // pacientes/{id}: identidad + antecedentes (nucleo de la historia).
@@ -183,8 +187,13 @@ service cloud.firestore {
     // Alta/baja: admin (director medico) o superadmin. El uid sigue siendo la clave de las
     // reglas de episodios (medicoId == request.auth.uid), que no cambian.
     match /staff_medico/{uid} {
-      allow read:  if esOperativo();
-      allow write: if isAdmin() || esSuperadmin();
+      allow read:           if esOperativo();
+      allow create, delete: if isAdmin() || esSuperadmin();
+      // Mi perfil: el propio médico puede actualizar SOLO su nombre en su ficha; nada mas.
+      allow update: if isAdmin() || esSuperadmin()
+                       || ( esMedico()
+                            && request.auth.uid == uid
+                            && tocadas().hasOnly(['nombre']) );
     }
 
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
