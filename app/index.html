@@ -301,7 +301,7 @@ async function enterWithFbUser(fbUser){
   resetSession(false); // cinturón y tiradores: arranque de sesión limpio aunque no se haya pasado por logout
   S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
   S.fotoPerfilUrl=null;
-  set({user:u,tab:(u.rol==='despachante'?'bandeja':'home'),step:0});
+  set({user:u,tab:(u.rol==='despachante'?'bandeja':(u.rol==='superadmin'?'personal':'home')),step:0});
   // Médicos para asignar: solo roles operativos pueden leer staff_medico (regla).
   if(['despachante','medico','admin','superadmin'].includes(u.rol)) loadStaffMedico();
 }
@@ -342,6 +342,7 @@ function getTabs(rol){
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='superadmin')return[{id:'personal',icon:'users',lbl:'Personal'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},{id:'perfil',icon:'settings',lbl:'Config'}];
 }
 
@@ -352,6 +353,7 @@ function pg(){
   if(r==='medico'){if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return perfilM();}
   if(r==='despachante'){if(t==='perfil')return perfilD();if(t==='despacho')return dDesp();return bandeja();}
   if(r==='admin'){if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return adConf();}
+  if(r==='superadmin'){if(t==='perfil')return perfilSuper();return spPanel();}
   return '';
 }
 
@@ -1752,6 +1754,141 @@ function epClinicaCard(ep){
     ${fila('Rechaza tratamiento',rech)}
     ${de.codigoReal?`<div class="ir"><span class="il">Código real</span><span class="iv" style="color:${codColor(de.codigoReal)};font-weight:700">${codEmoji(de.codigoReal)} ${de.codigoReal}</span></div>`:''}
   </div>`;
+}
+
+/* ===================== SUPERADMIN — Panel de Gestión de Personal/Roles =====================
+   Opción A (solo Firestore): gestiona docs usuarios/{uid} (+ sincroniza staff_medico/{uid}
+   cuando el rol es médico). NO toca Firebase Auth (alta de cuentas = script aparte).
+   Baja = lógica (activo=false), nunca borrado. Guard anti-lockout: el superadmin no puede
+   quitarse el rol ni darse de baja a sí mismo. */
+
+// Roles reales del sistema (no se inventan director_* hasta que tengan reglas/UI propias).
+const ROLES_PERSONAL=['superadmin','admin','despachante','medico','afiliado'];
+
+function spMsg(t){ const e=document.getElementById('sp-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function spReload(){ S.sp=null; render(); }
+function spTab(t){ if(S.sp){ S.sp.tab=t; S.sp.edit=null; } render(); }
+function spOpen(uid){ if(S.sp){ S.sp.edit=uid; } render(); }
+function spCancelEdit(){ if(S.sp){ S.sp.edit=null; } render(); }
+
+async function spLoad(){
+  const tab=(S.sp&&S.sp.tab)||'personal';
+  S.sp={loading:true,tab};
+  try{
+    const [us,sm]=await Promise.all([
+      db.collection('usuarios').get(),
+      db.collection('staff_medico').get()
+    ]);
+    const staff={}; sm.docs.forEach(d=>{ staff[d.id]=d.data(); });
+    const users=us.docs.map(d=>({uid:d.id,...d.data()}));
+    S.sp={loading:false,tab,edit:null,users,staff};
+  }catch(e){ S.sp={loading:false,tab,err:(e.message||String(e))}; }
+  render();
+}
+
+function spPanel(){
+  if(!S.sp){ spLoad(); return `<div class="card">Cargando personal…</div>`; }
+  if(S.sp.loading) return `<div class="card">Cargando personal…</div>`;
+  if(S.sp.err) return `<div class="card">No se pudo cargar: ${esc(S.sp.err)}<br><button class="btn-o" onclick="spReload()" style="margin-top:.6rem">Reintentar</button></div>`;
+  if(S.sp.edit) return spEditView();
+  return spListView();
+}
+
+function spListView(){
+  const tab=S.sp.tab||'personal';
+  const all=S.sp.users;
+  const nPers=all.filter(u=>u.rol!=='afiliado').length;
+  const nAfil=all.filter(u=>u.rol==='afiliado').length;
+  // Criterio: "Personal" = roles operativos/directivos (todo menos afiliado).
+  // Los afiliados (cuentas de paciente) van en su propia solapa, no se mezclan con el staff.
+  const list=(tab==='afiliados'?all.filter(u=>u.rol==='afiliado'):all.filter(u=>u.rol!=='afiliado'))
+    .slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
+  const rows=list.length?list.map(spRow).join(''):`<div style="font-size:.78rem;color:var(--ink3)">Sin registros</div>`;
+  const tabBtn=(id,lbl)=>`<button class="btn-o" style="width:auto;padding:.4rem .8rem;${tab===id?'border-color:var(--r);color:var(--r);font-weight:700':''}" onclick="spTab('${id}')">${lbl}</button>`;
+  return `
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+    <div style="font-weight:700">Gestión de personal</div>
+    <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="spReload()">↻ Actualizar</button>
+  </div>
+  <div style="display:flex;gap:.4rem;margin-bottom:.7rem">
+    ${tabBtn('personal','Personal ('+nPers+')')}
+    ${tabBtn('afiliados','Afiliados ('+nAfil+')')}
+  </div>
+  <div class="card">${rows}</div>`;
+}
+
+function spRow(u){
+  const activo=u.activo!==false; // campo ausente = activo
+  const esMed=u.rol==='medico';
+  const st=S.sp.staff[u.uid];
+  const asignable=esMed && st && st.activo!==false;
+  const medMark=esMed?` · ${asignable?'🩺 asignable':'🩺 no asignable'}`:'';
+  const badge=activo?`<span class="badge bg">activo</span>`:`<span class="badge br">inactivo</span>`;
+  return `<div class="lr" onclick="spOpen('${u.uid}')" style="cursor:pointer">
+    <div class="lrb"><div class="lrn">${esc(u.nombre||'—')}</div>
+      <div class="lrs">${esc(u.email||'')} · ${esc(u.rol||'—')}${medMark}</div></div>
+    ${badge}
+  </div>`;
+}
+
+function spEditView(){
+  const u=S.sp.users.find(x=>x.uid===S.sp.edit);
+  if(!u){ S.sp.edit=null; return spListView(); }
+  const esSelf=u.uid===S.user.uid;
+  const activo=u.activo!==false;
+  const roleOpts=ROLES_PERSONAL.map(r=>`<option value="${r}" ${u.rol===r?'selected':''}>${r}</option>`).join('');
+  return `
+  <div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="spCancelEdit()">← Volver</button></div>
+  <div class="card card-dk"><div class="ch">Editar persona</div>
+    <div style="font-size:1.05rem;font-weight:700;color:#fff">${esc(u.nombre||'—')}</div>
+    <div style="font-size:.85rem;color:#fff;opacity:.8;margin-top:.15rem">${esc(u.email||'')}</div>
+    ${esSelf?`<div style="background:var(--o,#E0A23B);color:#fff;border-radius:8px;padding:.45rem .6rem;font-size:.76rem;font-weight:600;margin-top:.55rem">Es tu propia cuenta: no podés quitarte superadmin ni darte de baja.</div>`:''}
+  </div>
+  <div class="card">
+    <div class="field"><label>Nombre</label><input id="sp-nombre" type="text" value="${esc(u.nombre||'')}" autocomplete="off"></div>
+    <div class="field"><label>Rol</label><select id="sp-rol" ${esSelf?'disabled':''}>${roleOpts}</select></div>
+    <div class="field"><label>Estado</label><select id="sp-activo" ${esSelf?'disabled':''}>
+      <option value="si" ${activo?'selected':''}>Activo</option>
+      <option value="no" ${!activo?'selected':''}>Inactivo (baja lógica)</option>
+    </select></div>
+    <div style="font-size:.68rem;color:var(--ink3);margin:-.3rem 0 .6rem">Si el rol pasa a/deja de ser médico, se sincroniza su ficha en staff_medico. La baja lógica lo saca del selector de despacho.</div>
+    <div id="sp-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <button class="btn-r" onclick="spSave('${u.uid}')">Guardar</button>
+  </div>`;
+}
+
+async function spSave(uid){
+  const u=S.sp.users.find(x=>x.uid===uid); if(!u) return;
+  spMsg('');
+  const esSelf=uid===S.user.uid;
+  const nombre=(document.getElementById('sp-nombre')?.value||'').trim();
+  const rol = esSelf ? u.rol : (document.getElementById('sp-rol')?.value||u.rol);
+  const activo = esSelf ? true : ((document.getElementById('sp-activo')?.value||'si')==='si');
+  // Guard anti-lockout (también en la lógica, no solo en la UI).
+  if(esSelf && (rol!=='superadmin' || activo!==true)){ spMsg('No podés quitarte el rol superadmin ni darte de baja.'); return; }
+  if(!nombre){ spMsg('El nombre no puede estar vacío.'); return; }
+  try{
+    // 1) usuarios/{uid}
+    await db.collection('usuarios').doc(uid).set({ rol, nombre, activo }, { merge:true });
+    // 2) sync staff_medico/{uid} (persona única): médico -> upsert con su activo; ex-médico -> inactivar (no borrar)
+    if(rol==='medico'){
+      await db.collection('staff_medico').doc(uid).set({ nombre, activo }, { merge:true });
+    }else if(S.sp.staff[uid]){
+      await db.collection('staff_medico').doc(uid).set({ activo:false }, { merge:true });
+    }
+    S.sp=null; // recargar lista fresca
+    render();
+  }catch(e){ spMsg('No se pudo guardar: '+(e.message||e)); }
+}
+
+function perfilSuper(){
+  const u=S.user;
+  return `<div class="ptop"><div class="av">SA</div><div class="pname">${esc(u.nombre)}</div><div class="psub">Superadmin · acceso total</div></div>
+  <div class="card"><div class="ch">Cuenta</div>
+    <div class="ir"><span class="il">Rol</span><span class="iv">superadmin</span></div>
+    <div class="ir"><span class="il">Email</span><span class="iv">${esc(u.email)}</span></div>
+  </div>
+  <button class="btn-o" onclick="doLogout()" style="margin-top:.8rem">Cerrar sesión</button>`;
 }
 
 function bind(){
