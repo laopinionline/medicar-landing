@@ -1,0 +1,26 @@
+rules_version = '2';
+
+// Medicar — Storage. Por ahora SOLO fotos de perfil.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Fotos de perfil: perfiles/{uid}/...
+    // Escritura: SOLO el dueño (su propio uid), imagen, <3 MB.
+    // Lectura: cualquier usuario autenticado -> los avatares se muestran en toda la app
+    //          (ej. el médico asignado a un episodio, el personal en el panel). No son
+    //          datos sensibles; el padrón clínico vive en Firestore con sus propias reglas.
+    match /perfiles/{uid}/{archivo=**} {
+      allow read:   if request.auth != null;
+      allow write:  if request.auth != null
+                       && request.auth.uid == uid
+                       && request.resource.size < 3 * 1024 * 1024
+                       && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Todo lo demas: cerrado.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

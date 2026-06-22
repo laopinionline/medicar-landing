@@ -51,11 +51,15 @@ service cloud.firestore {
     }
 
     // usuarios/{uid}: cada quien lee su doc; admin lee toda la coleccion.
-    // Escritura bloqueada desde el cliente (altas/cambios via seed / Admin SDK),
-    // SALVO superadmin: gestiona usuarios y roles desde la app sin restriccion.
+    // Escritura: alta/baja/cambios de rol -> solo superadmin (via panel / Admin SDK).
+    // Mi perfil: cada usuario puede actualizar SOLO su propio nombre/fotoURL (nada mas).
     match /usuarios/{uid} {
-      allow read:  if esSuperadmin() || (isSignedIn() && (request.auth.uid == uid || isAdmin()));
-      allow write: if esSuperadmin();
+      allow read:           if esSuperadmin() || (isSignedIn() && (request.auth.uid == uid || isAdmin()));
+      allow create, delete: if esSuperadmin();
+      allow update: if esSuperadmin()
+                       || ( isSignedIn()
+                            && request.auth.uid == uid
+                            && tocadas().hasOnly(['nombre','fotoURL']) );
     }
 
     // pacientes/{id}: identidad + antecedentes (nucleo de la historia).
