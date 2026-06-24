@@ -15,7 +15,9 @@ admin.initializeApp();
 const db = admin.firestore();
 
 const REGION = 'southamerica-east1';
-const ROLES = ['superadmin', 'admin', 'despachante', 'medico', 'afiliado'];
+// 'chofer': rol NO-operativo (sin acceso a clínica). Se versiona aquí para habilitar el alta;
+// el DEPLOY de esta Function lo hace Lucas aparte (este commit no la deploya).
+const ROLES = ['superadmin', 'admin', 'despachante', 'medico', 'chofer', 'afiliado'];
 const fn = functions.region(REGION).https;
 
 // Exige llamante autenticado y con rol superadmin. Devuelve su uid.
