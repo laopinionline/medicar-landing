@@ -212,6 +212,7 @@ function resetSession(keepErr){
   const err=keepErr?S.loginErr:'';
   if(typeof spDetach==='function') spDetach(); // corta listeners onSnapshot del panel antes de limpiar
   if(typeof dashDetach==='function') dashDetach(); // ídem dashboard del superadmin
+  if(typeof movDetach==='function') movDetach(); // ídem sección móviles
   S=cleanSession();
   if(err) S.loginErr=err; // preserva el mensaje de login (ej. "cuenta sin rol")
 }
@@ -303,7 +304,8 @@ async function enterWithFbUser(fbUser){
     medicoId:(data.medicoId!==undefined?data.medicoId:null),
     unidad:(data.unidad!==undefined?data.unidad:null),
     esp:(data.esp!==undefined?data.esp:null),
-    fotoURL:(data.fotoURL!==undefined?data.fotoURL:null)
+    fotoURL:(data.fotoURL!==undefined?data.fotoURL:null),
+    permisos:(data.permisos&&typeof data.permisos==='object'?data.permisos:{}) // capa de permisos del centro de mando (fail-closed: ausente = sin permiso)
   };
   resetSession(false); // cinturón y tiradores: arranque de sesión limpio aunque no se haya pasado por logout
   S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
@@ -345,21 +347,35 @@ function shell(){
 </div>`;
 }
 
+// Capa de permisos del centro de mando (7 capacidades). Superadmin = todo, sin depender del campo.
+const CAPS=[
+  ['gestionar_moviles','Gestionar móviles'],
+  ['gestionar_personal','Gestionar personal'],
+  ['despachar_episodios','Despachar episodios'],
+  ['ver_dashboard','Ver dashboard'],
+  ['ver_auditoria','Ver auditoría'],
+  ['gestionar_afiliados','Gestionar afiliados'],
+  ['configurar_sistema','Configurar sistema']
+];
+function puede(cap){ return !!(S.user && (S.user.rol==='superadmin' || (S.user.permisos && S.user.permisos[cap]===true))); }
+
 function getTabs(rol){
+  // Tab Móviles para operativos NO-superadmin que tengan el permiso (consumo de la capa de permisos).
+  const movTab = puede('gestionar_moviles') ? [{id:'moviles',icon:'dispatch',lbl:'Móviles'}] : [];
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},...movTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
   const r=S.user.rol,t=S.tab;
   if(t!=='bandeja'&&t!=='episodios') S.epView=null; // salir de la bandeja cierra el detalle abierto
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
-  if(r==='medico'){if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
-  if(r==='despachante'){if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='medico'){if(t==='moviles')return movPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
+  if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   return '';
 }
@@ -1897,6 +1913,7 @@ function spEditView(){
     <div class="field"><label>Nueva contraseña</label><input id="sp-rp" type="text" placeholder="mín. 6 caracteres" autocomplete="off"></div>
     <button class="btn-o" onclick="spResetPass('${u.uid}')">Resetear contraseña</button>
   </div>
+  ${spCardPermisos(u)}
   <div class="card"><div class="ch">Zona peligrosa</div>
     ${esSelf
       ? `<div style="font-size:.78rem;color:var(--ink3)">No podés borrar tu propia cuenta.</div>`
@@ -1967,7 +1984,7 @@ function perfilSuper(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',false],['auditoria','Auditoría',false],['config','Configuración',false]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['auditoria','Auditoría',false],['config','Configuración',false]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -1986,6 +2003,7 @@ function superView(){
   let body;
   if(sec==='personal') body=spPanel();
   else if(sec==='dashboard') body=dashSuper();
+  else if(sec==='moviles') body=movPanel();
   else body=`<div class="card"><div class="ch">${(SUPER_SECS.find(s=>s[0]===sec)||[,sec])[1]}</div><div style="font-size:.8rem;color:var(--ink3)">Próximamente. Módulo no disponible todavía.</div></div>`;
   return superMenu(sec)+body;
 }
@@ -1994,6 +2012,7 @@ function superView(){
 function superNav(sec){
   if(S.superSec==='personal'){ spDetach(); S.sp=null; }
   if(S.superSec==='dashboard'){ dashDetach(); S.dash=null; }
+  if(S.superSec==='moviles'){ movDetach(); S.mov=null; }
   S.superSec=sec;
   render();
 }
@@ -2159,6 +2178,77 @@ async function mpCambiarPass(){
     else if(e.code==='auth/weak-password') m='La nueva contraseña es muy débil.';
     mpMsg('mp-err-pass',m);
   }
+}
+
+/* ===================== MÓVILES (mínimo) — caso de prueba de la capa de permisos =====================
+   Gobernado por el permiso 'gestionar_moviles' (UI + reglas). read: operativos; write: con permiso.
+   Es la pieza para validar el sistema de permisos; el módulo Móviles completo es un bloque aparte. */
+function movAttach(){
+  if(S.movUnsub) return;
+  S.movUnsub=[ db.collection('moviles').onSnapshot(s=>{ if(!S.mov) return; S.mov.items=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, e=>{ if(S.mov){ S.mov.err=(e.message||String(e)); render(); } }) ];
+}
+function movDetach(){ if(S.movUnsub){ S.movUnsub.forEach(u=>{ try{u();}catch(_){} }); S.movUnsub=null; } }
+function movErr(t){ const e=document.getElementById('mov-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+
+function movPanel(){
+  if(!S.mov){ S.mov={items:null}; movAttach(); }
+  if(S.mov.err) return `<div class="card">No se pudo cargar móviles: ${esc(S.mov.err)}</div>`;
+  if(S.mov.items===null) return `<div class="card">Cargando móviles…</div>`;
+  const gest=puede('gestionar_moviles');
+  const rows=S.mov.items.length
+    ? S.mov.items.map(m=>`<div class="lr"><div class="lrb"><div class="lrn">${esc(m.nombre||'—')}</div><div class="lrs">${esc(m.estado||'—')}${m.activo===false?' · inactivo':''}</div></div>${gest?`<button class="btn-o" style="width:auto;padding:.3rem .6rem" onclick="movBorrar('${m.id}')">Borrar</button>`:''}</div>`).join('')
+    : `<div style="font-size:.78rem;color:var(--ink3)">Sin móviles cargados</div>`;
+  return `
+  <div style="font-weight:700;margin:.1rem 0 .6rem">Móviles <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
+  ${gest
+    ? `<button class="btn-r" onclick="movCrear()" style="margin-bottom:.7rem">+ Crear móvil (prueba)</button>`
+    : `<div style="font-size:.78rem;color:var(--ink3);margin-bottom:.7rem">Solo lectura — no tenés permiso para gestionar móviles.</div>`}
+  <div id="mov-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+  <div class="card">${rows}</div>`;
+}
+async function movCrear(){
+  if(!puede('gestionar_moviles')) return; // la regla es la defensa real; esto es UI
+  movErr('');
+  const n=(S.mov&&S.mov.items?S.mov.items.length:0)+1;
+  try{ await db.collection('moviles').add({ nombre:'Móvil '+n, estado:'disponible', activo:true, creadoEn:FV() }); }
+  catch(e){ movErr('No se pudo crear: '+(e.message||e)); }
+}
+async function movBorrar(id){
+  if(!puede('gestionar_moviles')) return;
+  movErr('');
+  try{ await db.collection('moviles').doc(id).delete(); }
+  catch(e){ movErr('No se pudo borrar: '+(e.message||e)); }
+}
+
+/* ===================== PERMISOS por persona (lo configura el superadmin en la ficha) ===================== */
+function spCardPermisos(u){
+  const esSelf=u.uid===S.user.uid;
+  if(esSelf){
+    return `<div class="card"><div class="ch">Permisos</div>
+      <div style="font-size:.78rem;color:var(--ink3)">Tu cuenta (superadmin) siempre tiene todos los permisos; no se configuran.</div></div>`;
+  }
+  const items=CAPS.map(([k,lbl])=>{
+    const on=!!(u.permisos && u.permisos[k]===true);
+    return `<label style="display:flex;align-items:center;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span style="font-size:.85rem">${lbl}</span><input type="checkbox" class="sp-cap" data-cap="${k}" ${on?'checked':''}></label>`;
+  }).join('');
+  return `<div class="card"><div class="ch">Permisos</div>
+    <div style="font-size:.68rem;color:var(--ink3);margin-bottom:.4rem">Capacidades de esta persona (capa del centro de mando; no afecta el control por rol del despacho/clínica).</div>
+    ${items}
+    <div id="sp-err-perm" class="err" style="display:none;margin:.5rem 0"></div>
+    <button class="btn-r" style="margin-top:.6rem" onclick="spGuardarPermisos('${u.uid}')">Guardar permisos</button>
+  </div>`;
+}
+async function spGuardarPermisos(uid){
+  const e=document.getElementById('sp-err-perm');
+  const msg=(t,ok)=>{ if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; e.style.color=ok?'var(--g,#1D9E75)':''; } };
+  msg('');
+  if(uid===S.user.uid){ msg('No podés configurar tus propios permisos.'); return; } // anti-lockout (UI; reglas también)
+  const permisos={};
+  document.querySelectorAll('.sp-cap').forEach(c=>{ permisos[c.dataset.cap]=c.checked; });
+  try{
+    await db.collection('usuarios').doc(uid).set({ permisos }, { merge:true });
+    msg('✓ Permisos guardados.', true);
+  }catch(err){ msg('No se pudo guardar: '+spErr(err)); }
 }
 
 function bind(){
