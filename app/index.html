@@ -49,6 +49,13 @@ svg{display:block;flex-shrink:0}
 .btn-r:active{opacity:.88;transform:scale(.99)}
 .btn-o{width:100%;background:transparent;color:var(--ink2);padding:.85rem;font-size:.82rem;font-weight:500;letter-spacing:.06em;text-transform:uppercase;border-radius:10px;border:1.5px solid var(--border2);margin-top:.5rem;transition:background .18s}
 .btn-o:active{background:var(--bg2)}
+/* Toggle de permisos (ficha de personal). El reset global -webkit-appearance:none deja el
+   checkbox invisible; lo re-estilizamos como switch (track gris->rojo, perilla blanca). */
+input.sp-cap{-webkit-appearance:none;appearance:none;position:relative;flex:none;width:42px;height:24px;border-radius:999px;background:var(--bg3);border:1px solid var(--border2);cursor:pointer;transition:background .18s,border-color .18s;margin:0}
+input.sp-cap::before{content:"";position:absolute;top:50%;left:3px;transform:translateY(-50%);width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .18s}
+input.sp-cap:checked{background:var(--r);border-color:var(--r)}
+input.sp-cap:checked::before{left:21px}
+input.sp-cap:focus-visible{outline:2px solid var(--r);outline-offset:2px}
 .demo{margin-top:1.5rem;background:var(--bg2);border-radius:12px;padding:1rem}
 .demo-lbl{font-size:.63rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);font-weight:600;margin-bottom:.65rem}
 .demo-pills{display:flex;gap:.5rem}
