@@ -50,6 +50,18 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys();
     }
 
+    // Permisos granulares por persona (capa del centro de mando, ademas del rol).
+    // Se guardan en usuarios/{uid}.permisos = { gestionar_moviles:bool, ... }.
+    //  - superadmin: SIEMPRE true (cortocircuito; nunca depende del mapa).
+    //  - resto: true SOLO si el doc existe y permisos[cap] == true.
+    // FAIL-CLOSED: campo permisos ausente, cap ausente, o no-true => false.
+    function tienePermiso(cap) {
+      return esSuperadmin()
+        || ( isSignedIn()
+             && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+             && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.get('permisos', {}).get(cap, false) == true );
+    }
+
     // usuarios/{uid}: cada quien lee su doc; admin lee toda la coleccion.
     // Escritura: alta/baja/cambios de rol -> solo superadmin (via panel / Admin SDK).
     // Mi perfil: cada usuario puede actualizar SOLO su propio nombre/fotoURL (nada mas).
@@ -194,6 +206,15 @@ service cloud.firestore {
                        || ( esMedico()
                             && request.auth.uid == uid
                             && tocadas().hasOnly(['nombre']) );
+    }
+
+    // moviles/{id}: flota. CASO DE PRUEBA de la capa de permisos granulares.
+    //  - Lectura: roles operativos (todos ven la flota en el tablero).
+    //  - Escritura (alta/edicion/baja): SOLO quien tenga gestionar_moviles
+    //    (o superadmin, por cortocircuito en tienePermiso). Fail-closed.
+    match /moviles/{id} {
+      allow read:                  if esOperativo();
+      allow create, update, delete: if tienePermiso('gestionar_moviles');
     }
 
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
