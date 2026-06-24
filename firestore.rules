@@ -214,7 +214,7 @@ service cloud.firestore {
     //    (o superadmin, por cortocircuito en tienePermiso). Fail-closed.
     match /moviles/{id} {
       allow read:                  if esOperativo();
-      allow create, update, delete: if tienePermiso('gestionar_moviles');
+      allow create, update, delete: if esOperativo() && tienePermiso('gestionar_moviles');
     }
 
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
