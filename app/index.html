@@ -366,6 +366,8 @@ function getTabs(rol){
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},...movTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
+  // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
+  if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
@@ -377,7 +379,18 @@ function pg(){
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
   if(r==='admin'){if(t==='moviles')return movPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
+  if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
+}
+
+// Placeholder para el chofer logueado: su vista operativa (asignación, episodios de su móvil)
+// es un bloque de diseño posterior. Por ahora solo confirma su acceso y ofrece su perfil.
+function choferHome(){
+  return `<div class="card" style="text-align:center;padding:2rem 1.2rem">
+    <div style="font-weight:700;margin-bottom:.5rem">Hola, ${esc(S.user.nombre||'chofer')}</div>
+    <div style="font-size:.85rem;color:var(--ink2);line-height:1.6">Tu cuenta de <b>chofer</b> está activa. La vista operativa de choferes (móvil asignado, despachos) estará disponible próximamente.</div>
+    <div style="font-size:.78rem;color:var(--ink3);margin-top:.8rem">Mientras tanto podés editar tu perfil desde la pestaña <b>Perfil</b>.</div>
+  </div>`;
 }
 
 /* AFILIADO */
@@ -1786,7 +1799,7 @@ function epClinicaCard(ep){
    quitarse el rol ni darse de baja a sí mismo. */
 
 // Roles reales del sistema (no se inventan director_* hasta que tengan reglas/UI propias).
-const ROLES_PERSONAL=['superadmin','admin','despachante','medico','afiliado'];
+const ROLES_PERSONAL=['superadmin','admin','despachante','medico','chofer','afiliado'];
 
 function spMsg(t,ok){ const e=document.getElementById('sp-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; e.style.color = (t&&ok)?'var(--g,#1D9E75)':''; } }
 const spVal=id=>(document.getElementById(id)?.value||'').trim();
@@ -2028,13 +2041,14 @@ function dashAttach(){
   S.dashUnsub=[
     db.collection('episodios').onSnapshot(s=>{ if(!S.dash) return; S.dash.eps=s.docs.map(d=>d.data()); if(dashIdle()) render(); }, e=>{ if(S.dash){ S.dash.err=(e.message||String(e)); if(dashIdle()) render(); } }),
     db.collection('staff_medico').where('activo','==',true).onSnapshot(s=>{ if(!S.dash) return; S.dash.staffN=s.size; if(dashIdle()) render(); }, ()=>{}),
-    db.collection('usuarios').where('rol','==','afiliado').onSnapshot(s=>{ if(!S.dash) return; S.dash.afilN=s.size; if(dashIdle()) render(); }, ()=>{})
+    db.collection('usuarios').where('rol','==','afiliado').onSnapshot(s=>{ if(!S.dash) return; S.dash.afilN=s.size; if(dashIdle()) render(); }, ()=>{}),
+    db.collection('moviles').where('activo','==',true).onSnapshot(s=>{ if(!S.dash) return; S.dash.flota=s.docs.map(d=>d.data()); if(dashIdle()) render(); }, ()=>{ if(S.dash){ S.dash.flota=[]; if(dashIdle()) render(); } })
   ];
 }
 function dashDetach(){ if(S.dashUnsub){ S.dashUnsub.forEach(u=>{ try{u();}catch(_){} }); S.dashUnsub=null; } }
 
 function dashSuper(){
-  if(!S.dash){ S.dash={eps:null,staffN:null,afilN:null}; dashAttach(); }
+  if(!S.dash){ S.dash={eps:null,staffN:null,afilN:null,flota:null}; dashAttach(); }
   const d=S.dash;
   const card=(n,l)=>`<div class="stat"><div class="sn">${n}</div><div class="sl">${l}</div></div>`;
   let hoy='…', activos='…', cDesp=0,cEnC=0,cArr=0,cAt=0, tResp='…', tAt='…';
@@ -2058,6 +2072,13 @@ function dashSuper(){
   }
   const medN=(d.staffN==null)?'…':d.staffN;
   const afN=(d.afilN==null)?'…':d.afilN;
+  // Flota (móviles activos) por estado — en vivo.
+  const fl=d.flota;
+  const fLoad=(fl==null);
+  const fDisp=fLoad?'…':fl.filter(m=>m.estado==='disponible').length;
+  const fOcup=fLoad?'…':fl.filter(m=>m.estado==='ocupado').length;
+  const fFds =fLoad?'…':fl.filter(m=>m.estado==='fuera_de_servicio').length;
+  const fTot =fLoad?'…':fl.length;
   return `
   <div style="font-weight:700;margin:.1rem 0 .6rem">Dashboard <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
   <div class="srow">${card(hoy,'Atenciones del día')}${card(activos,'Episodios activos')}</div>
@@ -2072,8 +2093,13 @@ function dashSuper(){
     <div class="ir"><span class="il">Respuesta (despacho→arribo)</span><span class="iv">${tResp}</span></div>
     <div class="ir"><span class="il">Atención (atención→cierre)</span><span class="iv">${tAt}</span></div>
   </div>
+  <div class="card"><div class="ch">Flota (móviles activos)</div>
+    <div class="ir"><span class="il">Disponibles</span><span class="iv">${fDisp}</span></div>
+    <div class="ir"><span class="il">Ocupados</span><span class="iv">${fOcup}</span></div>
+    <div class="ir"><span class="il">Fuera de servicio</span><span class="iv">${fFds}</span></div>
+    <div class="ir"><span class="il">Total flota activa</span><span class="iv">${fTot}</span></div>
+  </div>
   <div class="card"><div class="ch">Próximamente</div>
-    <div class="ir"><span class="il">Móviles (disponibles/ocupados)</span><span class="iv" style="color:var(--ink3)">módulo no disponible</span></div>
     <div class="ir"><span class="il">Consumos diarios (farmacia/insumos)</span><span class="iv" style="color:var(--ink3)">no modelado aún</span></div>
   </div>`;
 }
@@ -2180,44 +2206,175 @@ async function mpCambiarPass(){
   }
 }
 
-/* ===================== MÓVILES (mínimo) — caso de prueba de la capa de permisos =====================
-   Gobernado por el permiso 'gestionar_moviles' (UI + reglas). read: operativos; write: con permiso.
-   Es la pieza para validar el sistema de permisos; el módulo Móviles completo es un bloque aparte. */
+/* ===================== MÓVILES — módulo completo (flota + catálogo de tipos) =====================
+   Gobernado por 'gestionar_moviles' (UI + reglas). read: operativos; write: con permiso.
+   Subsecciones: Flota (moviles) y Tipos (tipos_movil). choferId es una referencia OPCIONAL a
+   personal con rol 'chofer' (string ref; el chofer NO es operativo). Baja lógica (activo) en ambas. */
+const MOV_ESTADOS=[['disponible','Disponible'],['ocupado','Ocupado'],['fuera_de_servicio','Fuera de servicio']];
+function movEstLbl(e){ const f=MOV_ESTADOS.find(x=>x[0]===e); return f?f[1]:(e||'—'); }
+function movFormOpen(){ return !!(S.mov && (S.mov.edit!=null || S.mov.tedit!=null)); }
+
 function movAttach(){
   if(S.movUnsub) return;
-  S.movUnsub=[ db.collection('moviles').onSnapshot(s=>{ if(!S.mov) return; S.mov.items=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, e=>{ if(S.mov){ S.mov.err=(e.message||String(e)); render(); } }) ];
+  const upd=()=>{ if(!movFormOpen()) render(); }; // no re-renderiza con un form abierto (perdería lo tipeado)
+  S.movUnsub=[
+    db.collection('moviles').onSnapshot(s=>{ if(!S.mov) return; S.mov.items=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.mov){ S.mov.err=(e.message||String(e)); render(); } }),
+    db.collection('tipos_movil').onSnapshot(s=>{ if(!S.mov) return; S.mov.tipos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.mov) S.mov.tipos=[]; })
+  ];
+  movLoadChoferes();
 }
 function movDetach(){ if(S.movUnsub){ S.movUnsub.forEach(u=>{ try{u();}catch(_){} }); S.movUnsub=null; } }
 function movErr(t){ const e=document.getElementById('mov-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
 
+// Choferes para el selector: personal con rol 'chofer'. La regla usuarios solo deja LISTAR la
+// colección a superadmin/admin; para el resto el listado no está disponible (choferes='denied').
+function movLoadChoferes(){
+  db.collection('usuarios').where('rol','==','chofer').get()
+    .then(s=>{ if(!S.mov) return; S.mov.choferes=s.docs.map(d=>({uid:d.id,...d.data()})).filter(c=>c.activo!==false); if(!movFormOpen()) render(); })
+    .catch(()=>{ if(S.mov) S.mov.choferes='denied'; });
+}
+
 function movPanel(){
-  if(!S.mov){ S.mov={items:null}; movAttach(); }
+  if(!S.mov){ S.mov={sub:'flota',items:null,tipos:null,choferes:null,edit:null,tedit:null,err:''}; movAttach(); }
   if(S.mov.err) return `<div class="card">No se pudo cargar móviles: ${esc(S.mov.err)}</div>`;
-  if(S.mov.items===null) return `<div class="card">Cargando móviles…</div>`;
   const gest=puede('gestionar_moviles');
-  const rows=S.mov.items.length
-    ? S.mov.items.map(m=>`<div class="lr"><div class="lrb"><div class="lrn">${esc(m.nombre||'—')}</div><div class="lrs">${esc(m.estado||'—')}${m.activo===false?' · inactivo':''}</div></div>${gest?`<button class="btn-o" style="width:auto;padding:.3rem .6rem" onclick="movBorrar('${m.id}')">Borrar</button>`:''}</div>`).join('')
-    : `<div style="font-size:.78rem;color:var(--ink3)">Sin móviles cargados</div>`;
-  return `
+  const sub=S.mov.sub||'flota';
+  const tab=(id,lbl)=>`<button onclick="movSub('${id}')" style="flex:1;padding:.5rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.78rem;font-weight:600;letter-spacing:.04em;cursor:pointer">${lbl}</button>`;
+  const head=`
   <div style="font-weight:700;margin:.1rem 0 .6rem">Móviles <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
-  ${gest
-    ? `<button class="btn-r" onclick="movCrear()" style="margin-bottom:.7rem">+ Crear móvil (prueba)</button>`
-    : `<div style="font-size:.78rem;color:var(--ink3);margin-bottom:.7rem">Solo lectura — no tenés permiso para gestionar móviles.</div>`}
-  <div id="mov-err" class="err" style="display:none;margin-bottom:.5rem"></div>
-  <div class="card">${rows}</div>`;
+  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('flota','Flota')}${tab('tipos','Tipos')}</div>
+  <div id="mov-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
+  return head + (sub==='tipos' ? movTiposView(gest) : movFlotaView(gest));
 }
-async function movCrear(){
-  if(!puede('gestionar_moviles')) return; // la regla es la defensa real; esto es UI
+function movSub(id){ if(!S.mov) return; S.mov.sub=id; S.mov.edit=null; S.mov.tedit=null; render(); }
+
+/* ---- Flota ---- */
+function movFlotaView(gest){
+  if(S.mov.items===null) return `<div class="card">Cargando flota…</div>`;
+  if(S.mov.edit!=null) return movForm(gest);
+  const tipoNom=id=>{ if(!id) return ''; const t=(S.mov.tipos||[]).find(x=>x.id===id); return t?(t.nombre||''):''; };
+  const rows = S.mov.items.length ? S.mov.items.map(m=>{
+    const tn=tipoNom(m.tipoId);
+    const meta=[movEstLbl(m.estado), tn?('· '+esc(tn)):'', m.patente?('· '+esc(m.patente)):'', m.choferNombre?('· '+esc(m.choferNombre)):'', m.activo===false?'· inactivo':''].filter(Boolean).join(' ');
+    const selStyle="background:var(--bg);border:1px solid var(--border2);border-radius:8px;padding:.35rem .55rem;font-size:.78rem;color:var(--ink)";
+    const estSel = (gest && m.activo!==false) ? `<select onchange="movEstado('${m.id}',this.value)" style="${selStyle}">${MOV_ESTADOS.map(([v,l])=>`<option value="${v}" ${m.estado===v?'selected':''}>${l}</option>`).join('')}</select>` : '';
+    const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+    const acts = gest ? `<div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">${estSel}<button class="${btn}" onclick="movEditar('${m.id}')">Editar</button><button class="${btn}" onclick="movBaja('${m.id}',${m.activo===false})">${m.activo===false?'Reactivar':'Baja'}</button></div>` : '';
+    return `<div class="lr" style="flex-wrap:wrap"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(m.nombre||'—')}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin móviles cargados</div>`;
+  return `${gest?`<button class="btn-r" onclick="movNuevo()" style="margin-bottom:.7rem">+ Nuevo móvil</button>`:`<div style="font-size:.78rem;color:var(--ink3);margin-bottom:.7rem">Solo lectura — no tenés permiso para gestionar móviles.</div>`}<div class="card">${rows}</div>`;
+}
+function movForm(gest){
+  if(!gest){ S.mov.edit=null; return ''; }
+  const isNew=S.mov.edit==='new';
+  const m=isNew?{estado:'disponible'}:((S.mov.items||[]).find(x=>x.id===S.mov.edit)||{estado:'disponible'});
+  const tiposAct=(S.mov.tipos||[]).filter(t=>t.activo!==false);
+  const tipoOpts=['<option value="">— Sin tipo —</option>'].concat(tiposAct.map(t=>`<option value="${t.id}" ${m.tipoId===t.id?'selected':''}>${esc(t.nombre||'')}</option>`)).join('');
+  const ch=S.mov.choferes;
+  let choferField;
+  if(Array.isArray(ch)){
+    choferField = ch.length
+      ? `<div class="field"><label>Chofer (opcional)</label><select id="mov-f-chofer"><option value="">— Sin chofer —</option>${ch.map(c=>`<option value="${c.uid}" ${m.choferId===c.uid?'selected':''}>${esc(c.nombre||c.uid)}</option>`).join('')}</select></div>`
+      : `<div class="field"><label>Chofer (opcional)</label><select id="mov-f-chofer" disabled><option>No hay choferes cargados</option></select><div style="font-size:.7rem;color:var(--ink3);margin-top:.3rem">Creá personal con rol "chofer" para poder asignarlo.</div></div>`;
+  } else if(ch==='denied'){
+    choferField = `<div class="field"><label>Chofer (opcional)</label><div style="font-size:.78rem;color:var(--ink3)">Tu rol no puede listar choferes. ${m.choferNombre?('Actual: '+esc(m.choferNombre)+'. '):'Sin chofer asignado. '}Se conserva sin cambios.</div></div>`;
+  } else {
+    choferField = `<div class="field"><label>Chofer (opcional)</label><div style="font-size:.78rem;color:var(--ink3)">Cargando choferes…</div></div>`;
+  }
+  return `<div class="card"><div class="ch">${isNew?'Nuevo móvil':'Editar móvil'}</div>
+    <div class="field"><label>Nombre / Número</label><input id="mov-f-nombre" value="${esc(m.nombre||'')}" placeholder="Ej. Móvil 1"></div>
+    <div class="field"><label>Patente</label><input id="mov-f-patente" value="${esc(m.patente||'')}" placeholder="opcional"></div>
+    <div class="field"><label>Tipo</label><select id="mov-f-tipo">${tipoOpts}</select></div>
+    <div class="field"><label>Estado</label><select id="mov-f-estado">${MOV_ESTADOS.map(([v,l])=>`<option value="${v}" ${(m.estado||'disponible')===v?'selected':''}>${l}</option>`).join('')}</select></div>
+    ${choferField}
+    <div class="field"><label>Notas</label><textarea id="mov-f-notas" rows="2" placeholder="opcional">${esc(m.notas||'')}</textarea></div>
+    ${isNew?'':`<div class="field"><label>Estado de alta</label><select id="mov-f-activo"><option value="si" ${m.activo!==false?'selected':''}>Activo</option><option value="no" ${m.activo===false?'selected':''}>Baja lógica</option></select></div>`}
+    <button class="btn-r" onclick="movGuardar()">Guardar</button>
+    <button class="btn-o" onclick="movCancelar()">Cancelar</button>
+  </div>`;
+}
+function movNuevo(){ if(!puede('gestionar_moviles'))return; S.mov.edit='new'; render(); }
+function movEditar(id){ if(!puede('gestionar_moviles'))return; S.mov.edit=id; render(); }
+function movCancelar(){ if(S.mov) S.mov.edit=null; render(); }
+async function movGuardar(){
+  if(!puede('gestionar_moviles')) return; // la regla es la defensa real
   movErr('');
-  const n=(S.mov&&S.mov.items?S.mov.items.length:0)+1;
-  try{ await db.collection('moviles').add({ nombre:'Móvil '+n, estado:'disponible', activo:true, creadoEn:FV() }); }
-  catch(e){ movErr('No se pudo crear: '+(e.message||e)); }
+  const id=S.mov.edit;
+  const nombre=(document.getElementById('mov-f-nombre')?.value||'').trim();
+  if(!nombre){ movErr('El nombre/número es requerido.'); return; }
+  const data={
+    nombre,
+    patente:(document.getElementById('mov-f-patente')?.value||'').trim(),
+    tipoId:document.getElementById('mov-f-tipo')?.value||'',
+    estado:document.getElementById('mov-f-estado')?.value||'disponible',
+    notas:(document.getElementById('mov-f-notas')?.value||'').trim()
+  };
+  // Chofer: solo si el selector estaba disponible (lista cargada). Si no, se preserva (merge).
+  if(Array.isArray(S.mov.choferes)){
+    const chId=document.getElementById('mov-f-chofer')?.value||'';
+    const c=S.mov.choferes.find(x=>x.uid===chId);
+    data.choferId=chId; data.choferNombre=c?(c.nombre||''):'';
+  }
+  try{
+    if(id==='new'){ data.activo=true; data.creadoEn=FV(); await db.collection('moviles').add(data); }
+    else{ data.activo=(document.getElementById('mov-f-activo')?.value||'si')==='si'; data.actualizadoEn=FV(); await db.collection('moviles').doc(id).set(data,{merge:true}); }
+    S.mov.edit=null; render();
+  }catch(e){ movErr('No se pudo guardar: '+(e.message||e)); }
 }
-async function movBorrar(id){
+async function movEstado(id,estado){
   if(!puede('gestionar_moviles')) return;
   movErr('');
-  try{ await db.collection('moviles').doc(id).delete(); }
-  catch(e){ movErr('No se pudo borrar: '+(e.message||e)); }
+  try{ await db.collection('moviles').doc(id).set({estado,actualizadoEn:FV()},{merge:true}); }
+  catch(e){ movErr('No se pudo cambiar el estado: '+(e.message||e)); }
+}
+async function movBaja(id,reactivar){
+  if(!puede('gestionar_moviles')) return;
+  movErr('');
+  try{ await db.collection('moviles').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
+  catch(e){ movErr('No se pudo actualizar: '+(e.message||e)); }
+}
+
+/* ---- Catálogo de tipos ---- */
+function movTiposView(gest){
+  if(S.mov.tipos===null) return `<div class="card">Cargando tipos…</div>`;
+  if(S.mov.tedit!=null) return movTipoForm(gest);
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+  const rows = S.mov.tipos.length ? S.mov.tipos.map(t=>{
+    const acts = gest?`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="tipoEditar('${t.id}')">Editar</button><button class="${btn}" onclick="tipoBaja('${t.id}',${t.activo===false})">${t.activo===false?'Reactivar':'Baja'}</button></div>`:'';
+    return `<div class="lr"><div class="lrb"><div class="lrn">${esc(t.nombre||'—')}</div><div class="lrs">${t.activo===false?'inactivo':'activo'}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin tipos cargados</div>`;
+  return `${gest?`<button class="btn-r" onclick="tipoNuevo()" style="margin-bottom:.7rem">+ Nuevo tipo</button>`:`<div style="font-size:.78rem;color:var(--ink3);margin-bottom:.7rem">Solo lectura.</div>`}<div class="card">${rows}</div>`;
+}
+function movTipoForm(gest){
+  if(!gest){ S.mov.tedit=null; return ''; }
+  const isNew=S.mov.tedit==='new';
+  const t=isNew?{}:((S.mov.tipos||[]).find(x=>x.id===S.mov.tedit)||{});
+  return `<div class="card"><div class="ch">${isNew?'Nuevo tipo':'Editar tipo'}</div>
+    <div class="field"><label>Nombre</label><input id="mov-t-nombre" value="${esc(t.nombre||'')}" placeholder="Ej. UTI, Traslado, Auto médico"></div>
+    <button class="btn-r" onclick="tipoGuardar()">Guardar</button>
+    <button class="btn-o" onclick="tipoCancelar()">Cancelar</button>
+  </div>`;
+}
+function tipoNuevo(){ if(!puede('gestionar_moviles'))return; S.mov.tedit='new'; render(); }
+function tipoEditar(id){ if(!puede('gestionar_moviles'))return; S.mov.tedit=id; render(); }
+function tipoCancelar(){ if(S.mov) S.mov.tedit=null; render(); }
+async function tipoGuardar(){
+  if(!puede('gestionar_moviles')) return;
+  movErr('');
+  const id=S.mov.tedit;
+  const nombre=(document.getElementById('mov-t-nombre')?.value||'').trim();
+  if(!nombre){ movErr('El nombre del tipo es requerido.'); return; }
+  try{
+    if(id==='new'){ await db.collection('tipos_movil').add({nombre,activo:true,creadoEn:FV()}); }
+    else{ await db.collection('tipos_movil').doc(id).set({nombre,actualizadoEn:FV()},{merge:true}); }
+    S.mov.tedit=null; render();
+  }catch(e){ movErr('No se pudo guardar: '+(e.message||e)); }
+}
+async function tipoBaja(id,reactivar){
+  if(!puede('gestionar_moviles')) return;
+  movErr('');
+  try{ await db.collection('tipos_movil').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
+  catch(e){ movErr('No se pudo actualizar: '+(e.message||e)); }
 }
 
 /* ===================== PERMISOS por persona (lo configura el superadmin en la ficha) ===================== */
