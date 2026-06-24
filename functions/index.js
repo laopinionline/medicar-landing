@@ -116,3 +116,36 @@ exports.deleteUser = fn.onCall(async (data, context) => {
   if (st.exists) await db.collection('staff_medico').doc(uid).delete();
   return { deleted: true };
 });
+
+// liberarMovilAlCerrar: trigger onUpdate de episodios. Cuando un episodio pasa A 'cerrado' o
+// 'cancelado' (y antes NO era terminal) y tiene un movilId que apunta a un móvil real, libera ese
+// móvil (estado:'disponible', episodioActivoId:null). Idempotente: si el móvil ya no está ligado a
+// ESTE episodio (libre o reasignado a otro) o no existe -> no-op. NO toca el episodio. Corre con
+// privilegios de admin (no depende de las reglas de cliente).
+exports.liberarMovilAlCerrar = functions
+  .region(REGION)
+  .firestore.document('episodios/{id}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    const TERMINALES = ['cerrado', 'cancelado'];
+    const pasoATerminal = !TERMINALES.includes(before.estado) && TERMINALES.includes(after.estado);
+    if (!pasoATerminal) return null;
+
+    const movilId = after.movilId;
+    if (!movilId) return null; // sin móvil (o legacy null)
+
+    const ref = db.collection('moviles').doc(movilId);
+    const snap = await ref.get();
+    if (!snap.exists) return null; // móvil legacy/inexistente -> no-op
+
+    // Solo libero si el móvil SIGUE ligado a este episodio. Si ya está libre o lo tomó otro, no-op.
+    if (snap.data().episodioActivoId !== context.params.id) return null;
+
+    await ref.set({
+      estado: 'disponible',
+      episodioActivoId: null,
+      actualizadoEn: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return null;
+  });

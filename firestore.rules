@@ -213,8 +213,22 @@ service cloud.firestore {
     //  - Escritura (alta/edicion/baja): SOLO quien tenga gestionar_moviles
     //    (o superadmin, por cortocircuito en tienePermiso). Fail-closed.
     match /moviles/{id} {
-      allow read:                  if esOperativo();
-      allow create, update, delete: if esOperativo() && tienePermiso('gestionar_moviles');
+      allow read:           if esOperativo();
+      // Alta/baja y CRUD general de la flota: gestionar_moviles.
+      allow create, delete: if esOperativo() && tienePermiso('gestionar_moviles');
+      allow update: if esOperativo() && (
+        // (a) CRUD general (editar campos del móvil): gestionar_moviles.
+        tienePermiso('gestionar_moviles')
+        // (b) DESPACHO: ocupar/liberar el móvil al asignar/reasignar desde el episodio.
+        //     SOLO toca estado + episodioActivoId + actualizadoEn, y SOLO la transición
+        //     disponible<->ocupado. Requiere despachar_episodios. Fail-closed.
+        || (
+          tienePermiso('despachar_episodios')
+          && tocadas().hasOnly(['estado','episodioActivoId','actualizadoEn'])
+          && resource.data.estado in ['disponible','ocupado']
+          && request.resource.data.estado in ['disponible','ocupado']
+        )
+      );
     }
 
     // tipos_movil/{id}: catálogo de tipos de móvil (UTI, Traslado, ...). Mismo criterio que moviles:

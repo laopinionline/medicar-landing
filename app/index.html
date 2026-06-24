@@ -1397,6 +1397,13 @@ async function epLoad(id){
     const data={id:d.id,...d.data()};
     let paciente=null;
     if(data.pacienteId){ try{ const p=await db.collection('pacientes').doc(data.pacienteId).get(); if(p.exists) paciente={id:p.id,...p.data()}; }catch(_){} }
+    // Flota para el selector de recursos (solo el despachante asigna). Se trae acá, en el mismo
+    // ciclo, para que el <select> ya tenga la lista al primer render (sin re-render a mitad de edición).
+    if(S.user.rol==='despachante'){
+      try{ const ms=await db.collection('moviles').where('activo','==',true).get();
+        S.movilesDisponibles=ms.docs.map(m=>({id:m.id,nombre:(m.data().nombre||''),patente:(m.data().patente||''),estado:(m.data().estado||'')}));
+      }catch(_){ S.movilesDisponibles=[]; }
+    }
     const stage=(S.ep&&S.ep.stage)||''; // preserva sub-paso (cerrar/cancelar) tras recargar
     S.ep={data,paciente,stage};
     render();
@@ -1417,15 +1424,65 @@ async function epUpdate(upd){
 
 function nextEstado(cur){ const i=FLUJO.indexOf(cur); if(i<0) return null; return i<FLUJO.length-1?FLUJO[i+1]:'cerrado'; }
 
+function epRecErr(t){ const e=document.getElementById('ep-rec-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+
+// Asignación de recursos TRANSACCIONAL: sincroniza el estado del móvil real con el episodio.
+//  - Ocupa el móvil nuevo (estado:'ocupado', episodioActivoId) si está disponible.
+//  - Libera el anterior (si era un móvil real distinto) en la misma transacción.
+//  - Aborta sin escribir si el móvil elegido ya no está disponible (lo tomó otro).
+// El doc episodio solo toca los 6 campos de la whitelist (movil*/medico*); el estado del
+// móvil y episodioActivoId viven SOLO en el doc moviles. Requiere despachar_episodios (regla Fase 3).
 async function epAsignar(){
-  const movilId=(document.getElementById('ep-movil')?.value||'').trim();
+  epRecErr('');
+  const epId=S.ep.data.id;
+  const prevMovilId=S.ep.data.movilId||null;
+  const nuevoMovilId=(document.getElementById('ep-movil')?.value||'').trim();
   const medicoUid=document.getElementById('ep-medico')?.value||'';
   const med=(S.staffMedico||[]).find(m=>m.uid===medicoUid);
-  await epUpdate({
-    movilId:movilId||null, movilNombre:movilId?('Móvil '+movilId):null,
-    medicoId:medicoUid||null, medicoNombre:med?med.nombre:null
-  });
+  const flota=S.movilesDisponibles||[];
+  const nuevoEsReal=!!flota.find(m=>m.id===nuevoMovilId);
+  const prevEsReal=!!flota.find(m=>m.id===prevMovilId); // 'real' = matchea un móvil de la flota cargada
+  const cambioMovil=nuevoMovilId!==prevMovilId;
+  try{
+    await db.runTransaction(async tx=>{
+      // --- LECTURAS primero (requisito de runTransaction) ---
+      let nuevoRef=null, nuevoNombre=null;
+      if(nuevoMovilId && nuevoEsReal && cambioMovil){
+        nuevoRef=db.collection('moviles').doc(nuevoMovilId);
+        const ns=await tx.get(nuevoRef);
+        if(!ns.exists) throw new Error('El móvil seleccionado ya no existe.');
+        const md=ns.data();
+        if(md.activo===false || md.estado!=='disponible'){
+          throw new Error('El móvil "'+(md.nombre||nuevoMovilId)+'" ya no está disponible (lo tomó otro).');
+        }
+        nuevoNombre=md.nombre||'';
+      }
+      let prevRef=null, liberarPrev=false;
+      if(prevMovilId && prevEsReal && cambioMovil){
+        prevRef=db.collection('moviles').doc(prevMovilId);
+        const ps=await tx.get(prevRef);
+        // Solo lo libero si sigue apuntando a ESTE episodio (no piso una reasignación ajena).
+        liberarPrev = ps.exists && ps.data().episodioActivoId===epId;
+      }
+      // --- ESCRITURAS ---
+      // Episodio: SOLO campos de la whitelist de reglas (movil*/medico*).
+      const movilNombreFinal = !nuevoMovilId ? null
+        : (nuevoEsReal && cambioMovil) ? nuevoNombre                                  // móvil real nuevo: nombre leído en la tx
+        : (S.ep.data.movilNombre || asignadoNombre(nuevoMovilId) || nuevoMovilId);    // mismo móvil / legacy: conservar
+      tx.update(db.collection('episodios').doc(epId), {
+        movilId: nuevoMovilId||null,
+        movilNombre: movilNombreFinal,
+        medicoId: medicoUid||null,
+        medicoNombre: med?med.nombre:null
+      });
+      if(liberarPrev) tx.update(prevRef,{estado:'disponible',episodioActivoId:null,actualizadoEn:FV()});
+      if(nuevoRef)    tx.update(nuevoRef,{estado:'ocupado',episodioActivoId:epId,actualizadoEn:FV()});
+    });
+    await epLoad(epId); // recarga episodio + flota
+  }catch(e){ epRecErr(e.message||String(e)); }
 }
+// Nombre de un móvil real desde la flota cargada (para el caso "no cambió de móvil").
+function asignadoNombre(id){ const m=(S.movilesDisponibles||[]).find(x=>x.id===id); return m?m.nombre:''; }
 
 async function epAvanzar(){
   const cur=S.ep.data.estado, nx=nextEstado(cur);
@@ -1514,9 +1571,21 @@ function epRecursosCard(ep){
   const medOpts=['<option value="">Sin asignar</option>'].concat(
     (S.staffMedico||[]).map(m=>`<option value="${m.uid}" ${d.medicoId===m.uid?'selected':''}>${esc(m.nombre)}</option>`)
   ).join('');
+  // Selector de móvil: disponibles (activos) + SIEMPRE el actualmente asignado (aunque esté 'ocupado').
+  const flota=S.movilesDisponibles||[];
+  const asignadoReal=flota.find(m=>m.id===d.movilId);
+  const movOpts=flota
+    .filter(m=>m.estado==='disponible' || m.id===d.movilId)
+    .map(m=>`<option value="${m.id}" ${d.movilId===m.id?'selected':''}>${esc(m.nombre)}${m.patente?(' · '+esc(m.patente)):''}</option>`)
+    .join('');
+  // Legacy: movilId guardado que NO matchea un móvil real (texto libre histórico tipo "05").
+  // Se muestra como opción seleccionada y deshabilitada, para no perder el dato ni romper. NO se migra.
+  const esLegacy = !!d.movilId && !asignadoReal;
+  const legacyOpt = esLegacy ? `<option value="${esc(d.movilId)}" selected disabled>${esc(d.movilNombre||d.movilId)} (histórico)</option>` : '';
   return `<div class="card"><div class="ch">Recursos</div>
-    <div class="field"><label>Móvil (N°)</label><input id="ep-movil" type="text" inputmode="numeric" value="${esc(d.movilId||'')}" placeholder="Ej. 05" autocomplete="off"></div>
+    <div class="field"><label>Móvil</label><select id="ep-movil"><option value="">Sin asignar</option>${legacyOpt}${movOpts}</select></div>
     <div class="field"><label>Médico</label><select id="ep-medico">${medOpts}</select></div>
+    <div id="ep-rec-err" class="err" style="display:none;margin-bottom:.5rem"></div>
     <button class="btn-o" onclick="epAsignar()">Guardar recursos</button>
   </div>`;
 }
@@ -2316,7 +2385,7 @@ async function movGuardar(){
     data.choferId=chId; data.choferNombre=c?(c.nombre||''):'';
   }
   try{
-    if(id==='new'){ data.activo=true; data.creadoEn=FV(); await db.collection('moviles').add(data); }
+    if(id==='new'){ data.activo=true; data.episodioActivoId=null; data.creadoEn=FV(); await db.collection('moviles').add(data); }
     else{ data.activo=(document.getElementById('mov-f-activo')?.value||'si')==='si'; data.actualizadoEn=FV(); await db.collection('moviles').doc(id).set(data,{merge:true}); }
     S.mov.edit=null; render();
   }catch(e){ movErr('No se pudo guardar: '+(e.message||e)); }
