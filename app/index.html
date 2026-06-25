@@ -220,6 +220,7 @@ function resetSession(keepErr){
   if(typeof spDetach==='function') spDetach(); // corta listeners onSnapshot del panel antes de limpiar
   if(typeof dashDetach==='function') dashDetach(); // ídem dashboard del superadmin
   if(typeof movDetach==='function') movDetach(); // ídem sección móviles
+  if(typeof cronoDetach==='function') cronoDetach(); // ídem cronograma de guardias
   S=cleanSession();
   if(err) S.loginErr=err; // preserva el mensaje de login (ej. "cuenta sin rol")
 }
@@ -368,24 +369,25 @@ const CAPS=[
 function puede(cap){ return !!(S.user && (S.user.rol==='superadmin' || (S.user.permisos && S.user.permisos[cap]===true))); }
 
 function getTabs(rol){
-  // Tab Móviles para operativos NO-superadmin que tengan el permiso (consumo de la capa de permisos).
+  // Tabs para operativos NO-superadmin que tengan el permiso (consumo de la capa de permisos).
   const movTab = puede('gestionar_moviles') ? [{id:'moviles',icon:'dispatch',lbl:'Móviles'}] : [];
+  const cronoTab = puede('gestionar_guardias') ? [{id:'cronograma',icon:'history',lbl:'Cronograma'}] : [];
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},...movTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
-  if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
   const r=S.user.rol,t=S.tab;
   if(t!=='bandeja'&&t!=='episodios') S.epView=null; // salir de la bandeja cierra el detalle abierto
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
-  if(r==='medico'){if(t==='moviles')return movPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
-  if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
+  if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
@@ -2093,7 +2095,7 @@ function perfilSuper(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['auditoria','Auditoría',false],['config','Configuración',false]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['auditoria','Auditoría',false],['config','Configuración',false]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -2113,6 +2115,7 @@ function superView(){
   if(sec==='personal') body=spPanel();
   else if(sec==='dashboard') body=dashSuper();
   else if(sec==='moviles') body=movPanel();
+  else if(sec==='cronograma') body=cronoPanel();
   else body=`<div class="card"><div class="ch">${(SUPER_SECS.find(s=>s[0]===sec)||[,sec])[1]}</div><div style="font-size:.8rem;color:var(--ink3)">Próximamente. Módulo no disponible todavía.</div></div>`;
   return superMenu(sec)+body;
 }
@@ -2122,6 +2125,7 @@ function superNav(sec){
   if(S.superSec==='personal'){ spDetach(); S.sp=null; }
   if(S.superSec==='dashboard'){ dashDetach(); S.dash=null; }
   if(S.superSec==='moviles'){ movDetach(); S.mov=null; }
+  if(S.superSec==='cronograma'){ cronoDetach(); S.crono=null; }
   S.superSec=sec;
   render();
 }
@@ -2586,6 +2590,203 @@ async function gCrear(datos, force){
     const ref=await db.collection('guardias').add({...g, creadoEn:FV(), creadoPor:S.user.uid});
     return {ok:true, id:ref.id, alertas:v.alertas};
   }catch(e){ return {ok:false,error:(e.message||String(e))}; }
+}
+
+/* ===================== CRONOGRAMA — UI del calendario de guardias (2º prompt del Bloque 1) =====================
+   Vista semanal (7 días × horas), color por móvil, filtros superponibles, alta/edición/baja.
+   Reusa gMs/gSolapan/gValidar/gCrear (base). Estado propio S.crono (NO S.guardias = mock admin). */
+const CRONO_WD=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+const CRONO_COLORS=['#DC1400','#1D9E75','#2D6CDF','#E08600','#7A3FB8','#0F8A8A','#C2185B','#4A7A1A'];
+const CRONO_HH=34; // alto de hora en px
+
+function cronoMondayMs(ms){ const d=new Date(ms); const dow=(d.getDay()+6)%7; d.setHours(0,0,0,0); d.setDate(d.getDate()-dow); return d.getTime(); }
+function cronoDTLocal(ms){ if(ms==null) return ''; const d=new Date(ms); const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }
+function cronoColorMovil(id){ const arr=S.crono&&S.crono.moviles||[]; const i=arr.findIndex(m=>m.id===id); return CRONO_COLORS[(i<0?0:i)%CRONO_COLORS.length]; }
+function cronoFormOpen(){ return !!(S.crono && S.crono.edit!=null); }
+function cronoVisible(g){
+  if(!S.crono) return true;
+  const mk=g.movilId||'__pasiva__';
+  return (S.crono.filtMov[mk]!==false) && (S.crono.filtPers[g.personaId]!==false);
+}
+
+function cronoAttach(){
+  if(S.cronoUnsub) return;
+  const upd=()=>{ if(!cronoFormOpen()) render(); }; // no re-render con el form abierto (perdería lo tipeado)
+  S.cronoUnsub=[
+    db.collection('guardias').onSnapshot(s=>{ if(!S.crono) return; S.crono.guardias=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.crono){ S.crono.err=(e.message||String(e)); render(); } })
+  ];
+  db.collection('moviles').where('activo','==',true).get()
+    .then(s=>{ if(!S.crono) return; S.crono.moviles=s.docs.map(d=>({id:d.id,...d.data()})); if(!cronoFormOpen()) render(); })
+    .catch(()=>{ if(S.crono) S.crono.moviles=[]; });
+  // personas para selector/filtros: solo choferes y médicos. La regla usuarios solo deja listar a superadmin/admin.
+  db.collection('usuarios').where('rol','in',['chofer','medico']).get()
+    .then(s=>{ if(!S.crono) return; S.crono.personas=s.docs.map(d=>({uid:d.id,...d.data()})).filter(p=>p.activo!==false); if(!cronoFormOpen()) render(); })
+    .catch(()=>{ if(S.crono) S.crono.personas='denied'; });
+}
+function cronoDetach(){ if(S.cronoUnsub){ S.cronoUnsub.forEach(u=>{ try{u();}catch(_){} }); S.cronoUnsub=null; } }
+
+function cronoFlash(obj){ // mensaje en el form SIN re-render (preserva inputs)
+  const e=document.getElementById('cr-flash'); if(!e) return;
+  if(!obj){ e.innerHTML=''; e.style.display='none'; return; }
+  const col=obj.k==='ok'?'var(--g,#1D9E75)':obj.k==='warn'?'var(--o)':'var(--r)';
+  e.style.display='block';
+  e.innerHTML=`<div style="color:${col};font-size:.8rem">${esc(obj.t)}${obj.k==='warn'?` <button class="btn-o" style="width:auto;padding:.2rem .55rem;margin-top:.3rem;color:var(--o);border-color:var(--o)" onclick="cronoGuardar(true)">Guardar igual</button>`:''}</div>`;
+}
+
+function cronoPanel(){
+  if(!puede('gestionar_guardias')) return `<div class="card">No tenés permiso para gestionar guardias.</div>`;
+  if(!S.crono){ S.crono={weekStart:cronoMondayMs(Date.now()),guardias:null,moviles:null,personas:null,filtMov:{},filtPers:{},edit:null,form:null,flash:null,err:''}; cronoAttach(); }
+  if(S.crono.err) return `<div class="card">No se pudo cargar el cronograma: ${esc(S.crono.err)}</div>`;
+  const fl=S.crono.flash;
+  const flashHtml = fl?`<div style="margin-bottom:.5rem;font-size:.8rem;font-weight:600;color:${fl.k==='ok'?'var(--g,#1D9E75)':fl.k==='warn'?'var(--o)':'var(--r)'}">${esc(fl.t)}</div>`:'';
+  if(S.crono.edit!=null) return `<div style="font-weight:700;margin:.1rem 0 .6rem">Cronograma de guardias</div>${flashHtml}${cronoForm()}`;
+  if(S.crono.guardias===null||S.crono.moviles===null) return `<div class="card">Cargando cronograma…</div>`;
+
+  const ws=S.crono.weekStart, we=ws+6*86400000;
+  const dd=ms=>{const d=new Date(ms);return `${d.getDate()}/${d.getMonth()+1}`;};
+  const header=`
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+    <div style="font-weight:700">Cronograma <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
+    <button class="btn-r" style="width:auto;padding:.4rem .7rem" onclick="cronoNueva()">+ Nueva</button>
+  </div>
+  <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.5rem">
+    <button class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:0" onclick="cronoWeek(-1)">←</button>
+    <button class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:0" onclick="cronoHoy()">Hoy</button>
+    <button class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:0" onclick="cronoWeek(1)">→</button>
+    <span style="font-size:.75rem;color:var(--ink2);font-weight:600">${dd(ws)} – ${dd(we)}</span>
+  </div>`;
+
+  const chip=(txt,on,c,cb,dash)=>`<button onclick="${cb}" style="font-size:.62rem;padding:.2rem .5rem;border-radius:12px;border:1.5px ${dash?'dashed':'solid'} ${c};background:${on?c:'transparent'};color:${on?'#fff':c};cursor:pointer">${esc(txt)}</button>`;
+  const movChips=(S.crono.moviles||[]).map(m=>chip(m.nombre||m.id, S.crono.filtMov[m.id]!==false, cronoColorMovil(m.id), `cronoFilt('mov','${m.id}')`)).join('');
+  const pasChip=chip('Pasiva', S.crono.filtMov['__pasiva__']!==false, '#9a9a9a', `cronoFilt('mov','__pasiva__')`, true);
+  const persArr=Array.isArray(S.crono.personas)?S.crono.personas:[];
+  const persChips=persArr.map(p=>chip((p.nombre||p.uid).split(' ')[0], S.crono.filtPers[p.uid]!==false, p.rol==='chofer'?'#4A7A1A':'#2D6CDF', `cronoFilt('pers','${p.uid}')`)).join('');
+  const filters=`<div style="margin-bottom:.5rem">
+    <div style="font-size:.58rem;color:var(--ink3);letter-spacing:.08em;margin-bottom:.2rem">MÓVILES</div>
+    <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.4rem">${movChips}${pasChip}</div>
+    <div style="font-size:.58rem;color:var(--ink3);letter-spacing:.08em;margin-bottom:.2rem">PERSONAS</div>
+    <div style="display:flex;flex-wrap:wrap;gap:.3rem">${persChips||'<span style="font-size:.7rem;color:var(--ink3)">— sin choferes/médicos —</span>'}</div>
+  </div>`;
+
+  const days=[...Array(7)].map((_,i)=>ws+i*86400000);
+  const head=`<div style="display:flex;margin-left:30px">${days.map(dm=>{const d=new Date(dm);return `<div style="flex:1;min-width:80px;text-align:center;font-size:.6rem;font-weight:700;color:var(--ink2);padding:.2rem 0">${CRONO_WD[(d.getDay()+6)%7]} ${d.getDate()}</div>`;}).join('')}</div>`;
+  const gutter=`<div style="width:30px;flex:none">${[...Array(24)].map((_,h)=>`<div style="height:${CRONO_HH}px;font-size:.55rem;color:var(--ink3);text-align:right;padding-right:2px">${h}</div>`).join('')}</div>`;
+  const cols=days.map(dm=>{
+    const dayEnd=dm+86400000;
+    const blocks=(S.crono.guardias||[]).filter(cronoVisible).map(g=>{
+      const gi=gMs(g.inicio),gf=gMs(g.fin); if(gi==null||gf==null||gf<=dm||gi>=dayEnd) return '';
+      const top=Math.max(0,(Math.max(gi,dm)-dm)/3600000)*CRONO_HH;
+      const h=Math.max(15,(Math.min(gf,dayEnd)-Math.max(gi,dm))/3600000*CRONO_HH);
+      const pasiva=g.modalidad==='pasiva'||!g.movilId;
+      const c=pasiva?'#9a9a9a':cronoColorMovil(g.movilId);
+      const icon=g.rol==='chofer'?'🚗':'⚕️';
+      return `<div onclick="event.stopPropagation();cronoEditar('${g.id}')" title="${esc(g.personaNombre||'')}" style="position:absolute;top:${top}px;left:2px;right:2px;height:${h}px;background:${pasiva?'transparent':c};border:1.5px ${pasiva?'dashed':'solid'} ${c};border-radius:6px;color:${pasiva?c:'#fff'};font-size:.58rem;line-height:1.1;padding:2px 3px;overflow:hidden;cursor:pointer">${icon} ${esc((g.personaNombre||'').split(' ')[0])}${g.movilNombre?'<br>'+esc(g.movilNombre):''}</div>`;
+    }).join('');
+    return `<div onclick="cronoSlot(event,${dm})" style="flex:1;min-width:80px;position:relative;height:${24*CRONO_HH}px;border-left:1px solid var(--border)">${[...Array(24)].map(()=>`<div style="height:${CRONO_HH}px;border-bottom:1px solid var(--border)"></div>`).join('')}<div style="position:absolute;inset:0">${blocks}</div></div>`;
+  }).join('');
+  const grid=`<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;padding-bottom:2px"><div style="min-width:600px">${head}<div style="display:flex">${gutter}${cols}</div></div></div>`;
+
+  return header+flashHtml+filters+grid;
+}
+
+function cronoWeek(d){ if(S.crono){ S.crono.weekStart+=d*7*86400000; S.crono.flash=null; render(); } }
+function cronoHoy(){ if(S.crono){ S.crono.weekStart=cronoMondayMs(Date.now()); S.crono.flash=null; render(); } }
+function cronoFilt(kind,id){ if(!S.crono) return; const m=kind==='mov'?S.crono.filtMov:S.crono.filtPers; m[id]=(m[id]===false); render(); } // undefined/true -> false (off); false -> true (on)
+
+function cronoNueva(iniMs){
+  if(!S.crono) return;
+  const ini = iniMs || (function(){ const d=new Date(); d.setHours(8,0,0,0); return d.getTime(); })();
+  S.crono.flash=null;
+  S.crono.form={ personaId:'', rol:'', modalidad:'activa', movilId:'', inicio:cronoDTLocal(ini), fin:cronoDTLocal(ini+8*3600000), estado:'programada' };
+  S.crono.edit='new'; render();
+}
+function cronoSlot(ev,dayMs){
+  const rect=ev.currentTarget.getBoundingClientRect();
+  let hour=Math.floor((ev.clientY-rect.top)/CRONO_HH); if(hour<0)hour=0; if(hour>23)hour=23;
+  cronoNueva(dayMs+hour*3600000);
+}
+function cronoEditar(id){
+  const g=(S.crono&&S.crono.guardias||[]).find(x=>x.id===id); if(!g) return;
+  S.crono.flash=null;
+  S.crono.form={ personaId:g.personaId||'', rol:g.rol||'', modalidad:g.modalidad||'activa', movilId:g.movilId||'', inicio:cronoDTLocal(gMs(g.inicio)), fin:cronoDTLocal(gMs(g.fin)), estado:g.estado||'programada' };
+  S.crono.edit=id; render();
+}
+function cronoCancel(){ if(S.crono){ S.crono.edit=null; S.crono.form=null; } render(); }
+function cronoPersonaChange(){ const s=document.getElementById('cr-persona'); const o=s&&s.options[s.selectedIndex]; const r=document.getElementById('cr-rol'); if(r) r.textContent=(o&&o.dataset.rol)||'—'; }
+
+function cronoForm(){
+  const f=S.crono.form||{};
+  const isNew=S.crono.edit==='new';
+  const personas=S.crono.personas;
+  const moviles=(S.crono.moviles||[]).filter(m=>m.activo!==false);
+  let persField;
+  if(Array.isArray(personas)){
+    persField=`<select id="cr-persona" onchange="cronoPersonaChange()"><option value="">— Elegí persona —</option>${personas.map(p=>`<option value="${p.uid}" data-rol="${p.rol}" ${f.personaId===p.uid?'selected':''}>${esc(p.nombre||p.uid)} (${p.rol})</option>`).join('')}</select>`;
+  } else if(personas==='denied'){
+    persField=`<div style="font-size:.78rem;color:var(--ink3)">Tu rol no puede listar el personal (solo superadmin/admin). No podés elegir persona desde esta cuenta.</div>`;
+  } else { persField=`<div style="font-size:.78rem;color:var(--ink3)">Cargando personal…</div>`; }
+  return `<div class="card"><div class="ch">${isNew?'Nueva guardia':'Editar guardia'}</div>
+    <div class="field"><label>Persona</label>${persField}</div>
+    <div class="field"><label>Rol (derivado de la persona)</label><div id="cr-rol" style="font-size:.9rem;font-weight:700;color:var(--ink)">${f.rol||'—'}</div></div>
+    <div class="field"><label>Modalidad</label><select id="cr-modalidad" onchange="document.getElementById('cr-movil-row').style.display=this.value==='activa'?'':'none'"><option value="activa" ${f.modalidad!=='pasiva'?'selected':''}>Activa (en móvil de flota)</option><option value="pasiva" ${f.modalidad==='pasiva'?'selected':''}>Pasiva (backup / auto propio)</option></select></div>
+    <div class="field" id="cr-movil-row" style="display:${f.modalidad==='pasiva'?'none':''}"><label>Móvil</label><select id="cr-movil"><option value="">— Elegí móvil —</option>${moviles.map(m=>`<option value="${m.id}" data-nombre="${esc(m.nombre||'')}" ${f.movilId===m.id?'selected':''}>${esc(m.nombre||m.id)}${m.patente?(' · '+esc(m.patente)):''}</option>`).join('')}</select></div>
+    <div class="field"><label>Inicio</label><input type="datetime-local" id="cr-inicio" value="${f.inicio||''}"></div>
+    <div class="field"><label>Fin</label><input type="datetime-local" id="cr-fin" value="${f.fin||''}"></div>
+    <div class="field"><label>Estado</label><select id="cr-estado">${GUARDIA_ESTADOS.map(s=>`<option value="${s}" ${(f.estado||'programada')===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    <div id="cr-flash" style="display:none;margin:.4rem 0"></div>
+    <button class="btn-r" onclick="cronoGuardar(false)">Guardar</button>
+    <button class="btn-o" onclick="cronoCancel()">Cancelar</button>
+    ${isNew?'':`<button class="btn-o" style="color:var(--r);border-color:var(--r)" onclick="cronoEliminar('${S.crono.edit}')">Eliminar guardia</button>`}
+  </div>`;
+}
+
+async function cronoGuardar(force){
+  cronoFlash(null);
+  const persSel=document.getElementById('cr-persona');
+  if(!persSel) return; // personas no listables (denied)
+  const personaId=persSel.value||'';
+  if(!personaId){ cronoFlash({t:'Elegí una persona.',k:'err'}); return; }
+  const opt=persSel.options[persSel.selectedIndex];
+  const rol=(opt&&opt.dataset.rol)||'';
+  const personaNombre=(opt?opt.textContent.replace(/\s*\([^)]*\)\s*$/,''):'');
+  const modalidad=document.getElementById('cr-modalidad').value||'activa';
+  let movilId=null, movilNombre=null;
+  if(modalidad==='activa'){
+    const ms=document.getElementById('cr-movil');
+    movilId=ms.value||'';
+    if(!movilId){ cronoFlash({t:'Una guardia activa requiere móvil.',k:'err'}); return; }
+    const mo=ms.options[ms.selectedIndex]; movilNombre=(mo&&mo.dataset.nombre)||'';
+  }
+  const iniStr=document.getElementById('cr-inicio').value||'';
+  const finStr=document.getElementById('cr-fin').value||'';
+  if(!iniStr||!finStr){ cronoFlash({t:'Cargá inicio y fin.',k:'err'}); return; }
+  const inicio=firebase.firestore.Timestamp.fromDate(new Date(iniStr));
+  const fin=firebase.firestore.Timestamp.fromDate(new Date(finStr));
+  if(gMs(fin)<=gMs(inicio)){ cronoFlash({t:'El fin debe ser posterior al inicio.',k:'err'}); return; }
+  const estado=document.getElementById('cr-estado').value||'programada';
+  const datos={personaId,personaNombre,rol,modalidad,movilId,movilNombre,inicio,fin,estado};
+  const editId=(S.crono.edit&&S.crono.edit!=='new')?S.crono.edit:null;
+
+  if(editId){ // EDICIÓN: reusa gValidar (excluye la propia por id), update directo
+    if(!puede('gestionar_guardias')){ cronoFlash({t:'Sin permiso para gestionar guardias.',k:'err'}); return; }
+    const v=await gValidar({...datos,id:editId});
+    if(v.bloqueo.length){ cronoFlash({t:v.bloqueo.join(' '),k:'err'}); return; }
+    if(v.alertas.length && !force){ cronoFlash({t:v.alertas.join(' '),k:'warn'}); return; }
+    try{ await db.collection('guardias').doc(editId).set({...datos,actualizadoEn:FV()},{merge:true});
+      S.crono.edit=null; S.crono.form=null; S.crono.flash={t:'✓ Guardia actualizada.',k:'ok'}; render();
+    }catch(e){ cronoFlash({t:'No se pudo guardar: '+(e.message||e),k:'err'}); }
+  }else{ // ALTA: reusa gCrear (valida forma + solapes; force salta solo alertas)
+    const r=await gCrear(datos, force);
+    if(r.ok){ S.crono.edit=null; S.crono.form=null; S.crono.flash={t:'✓ Guardia creada.',k:'ok'}; render(); }
+    else if(r.bloqueo){ cronoFlash({t:r.bloqueo.join(' '),k:'err'}); }
+    else if(r.alertas){ cronoFlash({t:r.alertas.join(' '),k:'warn'}); }
+    else cronoFlash({t:r.error||'No se pudo crear.',k:'err'});
+  }
+}
+async function cronoEliminar(id){
+  if(!confirm('¿Eliminar esta guardia? No se puede deshacer.')) return;
+  try{ await db.collection('guardias').doc(id).delete(); S.crono.edit=null; S.crono.form=null; S.crono.flash={t:'Guardia eliminada.',k:'ok'}; render(); }
+  catch(e){ cronoFlash({t:'No se pudo eliminar: '+(e.message||e),k:'err'}); }
 }
 
 function bind(){
