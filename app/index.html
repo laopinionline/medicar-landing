@@ -2698,7 +2698,7 @@ function cronoNueva(iniMs){
   const ini = iniMs || (function(){ const d=new Date(); d.setHours(8,0,0,0); return d.getTime(); })();
   S.crono.flash=null;
   S.crono.form={ personaId:'', rol:'', modalidad:'activa', movilId:'', inicio:cronoDTLocal(ini), fin:cronoDTLocal(ini+8*3600000), estado:'programada' };
-  S.crono.edit='new'; render();
+  S.crono.confirmDel=null; S.crono.edit='new'; render();
 }
 function cronoSlot(ev,dayMs){
   const rect=ev.currentTarget.getBoundingClientRect();
@@ -2709,9 +2709,9 @@ function cronoEditar(id){
   const g=(S.crono&&S.crono.guardias||[]).find(x=>x.id===id); if(!g) return;
   S.crono.flash=null;
   S.crono.form={ personaId:g.personaId||'', rol:g.rol||'', modalidad:g.modalidad||'activa', movilId:g.movilId||'', inicio:cronoDTLocal(gMs(g.inicio)), fin:cronoDTLocal(gMs(g.fin)), estado:g.estado||'programada' };
-  S.crono.edit=id; render();
+  S.crono.confirmDel=null; S.crono.edit=id; render();
 }
-function cronoCancel(){ if(S.crono){ S.crono.edit=null; S.crono.form=null; } render(); }
+function cronoCancel(){ if(S.crono){ S.crono.edit=null; S.crono.form=null; S.crono.confirmDel=null; } render(); }
 function cronoPersonaChange(){ const s=document.getElementById('cr-persona'); const o=s&&s.options[s.selectedIndex]; const r=document.getElementById('cr-rol'); if(r) r.textContent=(o&&o.dataset.rol)||'—'; }
 
 function cronoForm(){
@@ -2736,7 +2736,13 @@ function cronoForm(){
     <div id="cr-flash" style="display:none;margin:.4rem 0"></div>
     <button class="btn-r" onclick="cronoGuardar(false)">Guardar</button>
     <button class="btn-o" onclick="cronoCancel()">Cancelar</button>
-    ${isNew?'':`<button class="btn-o" style="color:var(--r);border-color:var(--r)" onclick="cronoEliminar('${S.crono.edit}')">Eliminar guardia</button>`}
+    ${isNew?'':(S.crono.confirmDel===S.crono.edit
+      ? `<div style="margin-top:.6rem;padding:.7rem;border:1.5px solid var(--r);border-radius:10px;background:rgba(220,20,0,.06)">
+           <div style="font-size:.82rem;color:var(--r);font-weight:700;margin-bottom:.5rem">¿Eliminar esta guardia? No se puede deshacer.</div>
+           <button class="btn-r" onclick="cronoEliminarOk('${S.crono.edit}')">Sí, eliminar</button>
+           <button class="btn-o" onclick="cronoEliminarCancel()">No, volver</button>
+         </div>`
+      : `<button class="btn-o" style="color:var(--r);border-color:var(--r)" onclick="cronoEliminarAsk('${S.crono.edit}')">Eliminar guardia</button>`)}
   </div>`;
 }
 
@@ -2783,10 +2789,14 @@ async function cronoGuardar(force){
     else cronoFlash({t:r.error||'No se pudo crear.',k:'err'});
   }
 }
-async function cronoEliminar(id){
-  if(!confirm('¿Eliminar esta guardia? No se puede deshacer.')) return;
-  try{ await db.collection('guardias').doc(id).delete(); S.crono.edit=null; S.crono.form=null; S.crono.flash={t:'Guardia eliminada.',k:'ok'}; render(); }
-  catch(e){ cronoFlash({t:'No se pudo eliminar: '+(e.message||e),k:'err'}); }
+// Borrado en DOS pasos (en pantalla, no nativo): "Eliminar" revela la confirmación; "Sí, eliminar" borra.
+function cronoEliminarAsk(id){ if(S.crono){ S.crono.confirmDel=id; } render(); }
+function cronoEliminarCancel(){ if(S.crono){ S.crono.confirmDel=null; } render(); }
+async function cronoEliminarOk(id){
+  try{
+    await db.collection('guardias').doc(id).delete();
+    S.crono.edit=null; S.crono.form=null; S.crono.confirmDel=null; S.crono.flash={t:'Guardia eliminada.',k:'ok'}; render();
+  }catch(e){ cronoFlash({t:'No se pudo eliminar: '+(e.message||e),k:'err'}); }
 }
 
 function bind(){
