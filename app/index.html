@@ -362,7 +362,8 @@ const CAPS=[
   ['ver_dashboard','Ver dashboard'],
   ['ver_auditoria','Ver auditoría'],
   ['gestionar_afiliados','Gestionar afiliados'],
-  ['configurar_sistema','Configurar sistema']
+  ['configurar_sistema','Configurar sistema'],
+  ['gestionar_guardias','Gestionar guardias']
 ];
 function puede(cap){ return !!(S.user && (S.user.rol==='superadmin' || (S.user.permisos && S.user.permisos[cap]===true))); }
 
@@ -2501,6 +2502,90 @@ async function spGuardarPermisos(uid){
     await db.collection('usuarios').doc(uid).set({ permisos }, { merge:true });
     msg('✓ Permisos guardados.', true);
   }catch(err){ msg('No se pudo guardar: '+spErr(err)); }
+}
+
+/* ===================== GUARDIAS — Bloque 1 (BASE: modelo + validación cliente) =====================
+   Cronograma de tripulación. Una guardia = UNA persona (chofer o médico) en una ventana horaria,
+   en un móvil (modalidad 'activa') o sin móvil ('pasiva' = backup / auto propio).
+   Reparto de validación: SOLAPES y MÉDICO-SIN-CHOFER se validan acá (cliente, con query + cómputo
+   de intersección); las reglas Firestore controlan permiso + forma + coherencia local.
+   La UI (calendario con filtros) es el 2º prompt — acá solo el modelo, la validación y un alta mínima.
+   OJO: no usar S.guardias (lo ocupa el mock adGuardias del admin). Estado nuevo cuando haya UI: S.crono. */
+
+const GUARDIA_ROLES=['chofer','medico'];
+const GUARDIA_MODALIDADES=['activa','pasiva'];
+const GUARDIA_ESTADOS=['programada','activa','cerrada'];
+
+// Normaliza inicio/fin a ms. Acepta Timestamp de Firestore, {seconds}, Date, number o string ISO.
+function gMs(v){
+  if(v==null) return null;
+  if(typeof v==='number') return v;
+  if(typeof v.toMillis==='function') return v.toMillis();   // Firestore Timestamp
+  if(v.seconds!=null) return v.seconds*1000;                // {seconds, nanoseconds}
+  if(v instanceof Date) return v.getTime();
+  const t=Date.parse(v); return isNaN(t)?null:t;
+}
+// Solape = intersección temporal REAL (>0). Bordes que se tocan (finA==inicioB) NO es solape (relevo limpio).
+function gSolapan(aIni,aFin,bIni,bFin){
+  const ai=gMs(aIni),af=gMs(aFin),bi=gMs(bIni),bf=gMs(bFin);
+  if(ai==null||af==null||bi==null||bf==null) return false;
+  return ai < bf && bi < af;   // estricto: tocarse en el borde no cuenta
+}
+
+// Trae las guardias de un móvil (para validar solapes y dotación). Excluye la propia (al editar).
+async function gGuardiasDeMovil(movilId, excluirId){
+  if(!movilId) return [];
+  const snap=await db.collection('guardias').where('movilId','==',movilId).get();
+  return snap.docs.filter(d=>d.id!==excluirId).map(d=>({id:d.id,...d.data()}));
+}
+
+// Validación de una guardia ANTES de guardar -> {bloqueo:[], alertas:[]}. UNA sola pasada de query.
+//  - BLOQUEO DURO: otra persona del MISMO ROL, activa, en el MISMO MÓVIL, con intersección >0.
+//  - ALERTA (médico-sin-chofer): médico activo sin chofer solapado en ese móvil (deja guardar).
+async function gValidar(guardia){
+  const out={bloqueo:[],alertas:[]};
+  if(guardia.modalidad==='activa' && guardia.movilId){
+    const otras=await gGuardiasDeMovil(guardia.movilId, guardia.id||null);
+    const activas=otras.filter(g=>g.modalidad==='activa' && g.estado!=='cerrada');
+    for(const g of activas){ // bloqueo: mismo rol solapado
+      if(g.rol===guardia.rol && gSolapan(guardia.inicio,guardia.fin,g.inicio,g.fin)){
+        out.bloqueo.push(`Ya hay ${g.rol==='chofer'?'un chofer':'un médico'} (${g.personaNombre||g.personaId}) en este móvil en esa franja.`);
+      }
+    }
+    if(guardia.rol==='medico'){ // alerta: médico activo sin chofer solapado
+      const hayChofer=activas.some(g=>g.rol==='chofer' && gSolapan(guardia.inicio,guardia.fin,g.inicio,g.fin));
+      if(!hayChofer) out.alertas.push('Este móvil no tiene chofer en esa franja. Un móvil no puede operar sin chofer.');
+    }
+  }
+  return out;
+}
+
+// Alta mínima de una guardia (valida modelo/reglas; la UI viene en el 2º prompt).
+// force=true salta SOLO las ALERTAS (nunca el bloqueo duro). Devuelve {ok, id?, bloqueo?, alertas?, error?}.
+async function gCrear(datos, force){
+  if(!puede('gestionar_guardias')) return {ok:false,error:'Sin permiso para gestionar guardias.'};
+  const g={
+    personaId:datos.personaId||'', personaNombre:datos.personaNombre||'',
+    rol:datos.rol, modalidad:datos.modalidad,
+    movilId:(datos.modalidad==='activa')?(datos.movilId||null):null,
+    movilNombre:(datos.modalidad==='activa')?(datos.movilNombre||null):null,
+    inicio:datos.inicio, fin:datos.fin,
+    estado:datos.estado||'programada'
+  };
+  // forma mínima (coherente con la regla; la regla es la defensa real)
+  if(!GUARDIA_ROLES.includes(g.rol)) return {ok:false,error:'Rol inválido.'};
+  if(!GUARDIA_MODALIDADES.includes(g.modalidad)) return {ok:false,error:'Modalidad inválida.'};
+  if(!GUARDIA_ESTADOS.includes(g.estado)) return {ok:false,error:'Estado inválido.'};
+  if(g.modalidad==='activa' && !g.movilId) return {ok:false,error:'Una guardia activa requiere móvil.'};
+  if(gMs(g.inicio)==null || gMs(g.fin)==null) return {ok:false,error:'Inicio y fin son requeridos.'};
+  if(gMs(g.fin)<=gMs(g.inicio)) return {ok:false,error:'El fin debe ser posterior al inicio.'};
+  const v=await gValidar(g);
+  if(v.bloqueo.length) return {ok:false,bloqueo:v.bloqueo};
+  if(v.alertas.length && !force) return {ok:false,alertas:v.alertas};
+  try{
+    const ref=await db.collection('guardias').add({...g, creadoEn:FV(), creadoPor:S.user.uid});
+    return {ok:true, id:ref.id, alertas:v.alertas};
+  }catch(e){ return {ok:false,error:(e.message||String(e))}; }
 }
 
 function bind(){

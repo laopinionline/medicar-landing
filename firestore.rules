@@ -240,6 +240,29 @@ service cloud.firestore {
       allow create, update, delete: if esOperativo() && tienePermiso('gestionar_moviles');
     }
 
+    // guardias/{id}: cronograma de tripulacion (Bloque 1). Una guardia = UNA persona (chofer o medico)
+    // en una ventana horaria, en un movil ('activa') o sin movil ('pasiva' = backup / auto propio).
+    //  - Lectura: operativos (el chofer NO lee guardias todavia; eso es su propio bloque).
+    //  - Escritura: gestionar_guardias. La regla valida PERMISO + FORMA + COHERENCIA LOCAL (mira solo
+    //    el doc, sin queries). Los SOLAPES y medico-sin-chofer se validan en CLIENTE: las reglas no
+    //    pueden hacer queries de rango entre docs.
+    function guardiaFormaOK(d) {
+      return d.rol in ['chofer','medico']
+        && d.modalidad in ['activa','pasiva']
+        && d.estado in ['programada','activa','cerrada']
+        && (
+             (d.modalidad == 'activa' && d.get('movilId', null) != null)
+          || (d.modalidad == 'pasiva' && d.get('movilId', null) == null)
+        );
+    }
+    match /guardias/{id} {
+      allow read:           if esOperativo();
+      allow create, update: if esOperativo()
+                               && tienePermiso('gestionar_guardias')
+                               && guardiaFormaOK(request.resource.data);
+      allow delete:         if esOperativo() && tienePermiso('gestionar_guardias');
+    }
+
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
     match /{document=**} {
       allow read, write: if esSuperadmin();
