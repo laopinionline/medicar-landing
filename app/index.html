@@ -1407,12 +1407,11 @@ async function epLoad(id){
     const data={id:d.id,...d.data()};
     let paciente=null;
     if(data.pacienteId){ try{ const p=await db.collection('pacientes').doc(data.pacienteId).get(); if(p.exists) paciente={id:p.id,...p.data()}; }catch(_){} }
-    // Flota para el selector de recursos (solo el despachante asigna). Se trae acá, en el mismo
-    // ciclo, para que el <select> ya tenga la lista al primer render (sin re-render a mitad de edición).
+    // Dotación para el selector de despacho: guardias ACTIVAS ahora (móvil + tripulación vigente).
+    // Se trae acá, en el mismo ciclo, para que el <select> ya tenga la lista al primer render.
     if(S.user.rol==='despachante'){
-      try{ const ms=await db.collection('moviles').where('activo','==',true).get();
-        S.movilesDisponibles=ms.docs.map(m=>({id:m.id,nombre:(m.data().nombre||''),patente:(m.data().patente||''),estado:(m.data().estado||'')}));
-      }catch(_){ S.movilesDisponibles=[]; }
+      try{ S.guardiasActivas=await gGuardiasActivas(); }
+      catch(_){ S.guardiasActivas=[]; }
     }
     const stage=(S.ep&&S.ep.stage)||''; // preserva sub-paso (cerrar/cancelar) tras recargar
     S.ep={data,paciente,stage};
@@ -1446,14 +1445,24 @@ async function epAsignar(){
   if(S.recBusy) return;          // evita doble-submit concurrente
   S.recBusy=true; S.recFlash=null; epRecErr('');
   const epId=S.ep.data.id;
+  const prevMovilId0=S.ep.data.movilId||null;                   // lo que el episodio tenía (para saber si cambia)
   const nuevoMovilId=(document.getElementById('ep-movil')?.value||'').trim();
   const medicoUid=document.getElementById('ep-medico')?.value||'';
   const med=(S.staffMedico||[]).find(m=>m.uid===medicoUid);
+  const cambioMovil0=(nuevoMovilId||null)!==(prevMovilId0||null);
   try{
+    // Dotación VIGENTE resuelta FUERA de la tx (query — las tx no pueden querear). Solo al cambiar de móvil.
+    let chofer=null;
+    if(nuevoMovilId && cambioMovil0){
+      const dv=await gDotacionVigente(nuevoMovilId);
+      chofer=dv.chofer;
+      // Bloqueo de cliente: no se despacha un móvil sin chofer de guardia vigente (§2).
+      if(!chofer){ S.recFlash={text:'Ese móvil no tiene chofer de guardia vigente ahora. No se puede despachar un móvil sin chofer.', ok:false}; render(); S.recBusy=false; return; }
+    }
     let okMsg='';
     await db.runTransaction(async tx=>{
-      // === LECTURAS primero (requisito de runTransaction). NO dependemos del cache S.movilesDisponibles:
-      //     releemos el episodio y el móvil DENTRO de la tx, por id, que es la fuente de verdad. ===
+      // === LECTURAS primero (requisito de runTransaction). Releemos el episodio y el móvil DENTRO
+      //     de la tx, por id, que es la fuente de verdad (la dotación ya se resolvió por query pre-tx). ===
       const epRef=db.collection('episodios').doc(epId);
       const epSnap=await tx.get(epRef);
       if(!epSnap.exists) throw new Error('El episodio ya no existe.');
@@ -1484,20 +1493,25 @@ async function epAsignar(){
         liberarPrev = ps.exists && ps.data().episodioActivoId===epId; // solo si sigue ligado a ESTE episodio
       }
       // === ESCRITURAS ===
-      // Episodio: SOLO los campos de la whitelist de reglas (movil*/medico*).
+      // Episodio: campos de la whitelist (movil*/medico*/chofer*). Chofer = SNAPSHOT de la dotación vigente.
       const movilNombreFinal = !nuevoMovilId ? null
         : (nuevoReal ? nuevoNombre : (epNow.movilNombre||nuevoMovilId));   // legacy (id no-real): conservar texto
+      // Chofer: si cambia de móvil -> el resuelto pre-tx (snapshot). Si no cambia -> conservar el del episodio.
+      const choferIdFinal     = !nuevoMovilId ? null : (cambioMovil ? (chofer?chofer.id:null)     : (epNow.choferId||null));
+      const choferNombreFinal = !nuevoMovilId ? null : (cambioMovil ? (chofer?chofer.nombre:null) : (epNow.choferNombre||null));
       tx.update(epRef, {
         movilId: nuevoMovilId||null,
         movilNombre: movilNombreFinal,
         medicoId: medicoUid||null,
-        medicoNombre: med?med.nombre:null
+        medicoNombre: med?med.nombre:null,
+        choferId: choferIdFinal,
+        choferNombre: choferNombreFinal
       });
       if(liberarPrev)                       tx.update(prevRef,{estado:'disponible',episodioActivoId:null,actualizadoEn:FV()});
       if(nuevoRef && nuevoReal && cambioMovil) tx.update(nuevoRef,{estado:'ocupado',episodioActivoId:epId,actualizadoEn:FV()});
 
       okMsg = !nuevoMovilId ? '✓ Recursos guardados (sin móvil asignado).'
-        : nuevoReal ? ('✓ Móvil "'+(nuevoNombre||nuevoMovilId)+'" asignado'+(medicoUid?' · médico actualizado':'')+'.')
+        : nuevoReal ? ('✓ '+(nuevoNombre||nuevoMovilId)+' asignado'+(choferIdFinal?(' · chofer '+(choferNombreFinal||'')):'')+(medicoUid?' · médico '+(med?med.nombre:''):'')+'.')
         : '✓ Guardado (móvil histórico conservado).';
     });
     S.recFlash={text:okMsg, ok:true};      // feedback EXPLÍCITO de éxito (persiste al re-render)
@@ -1595,28 +1609,37 @@ function epRecursosCard(ep){
   const medOpts=['<option value="">Sin asignar</option>'].concat(
     (S.staffMedico||[]).map(m=>`<option value="${m.uid}" ${d.medicoId===m.uid?'selected':''}>${esc(m.nombre)}</option>`)
   ).join('');
-  // Selector de móvil: disponibles (activos) + SIEMPRE el actualmente asignado (aunque esté 'ocupado').
-  const flota=S.movilesDisponibles||[];
-  const asignadoReal=flota.find(m=>m.id===d.movilId);
-  const movOpts=flota
-    .filter(m=>m.estado==='disponible' || m.id===d.movilId)
-    .map(m=>`<option value="${m.id}" ${d.movilId===m.id?'selected':''}>${esc(m.nombre)}${m.patente?(' · '+esc(m.patente)):''}</option>`)
-    .join('');
-  // Legacy: movilId guardado que NO matchea un móvil real (texto libre histórico tipo "05").
-  // Se muestra como opción seleccionada y deshabilitada, para no perder el dato ni romper. NO se migra.
-  const esLegacy = !!d.movilId && !asignadoReal;
-  const legacyOpt = esLegacy ? `<option value="${esc(d.movilId)}" selected disabled>${esc(d.movilNombre||d.movilId)} (histórico)</option>` : '';
+  // Selector de DESPACHO = guardia ACTIVA ahora (móvil · chofer · médico vigentes). value = movilId.
+  const activas=S.guardiasActivas||[];
+  const inList=activas.some(a=>a.movilId===d.movilId);
+  const optFor=a=>`<option value="${a.movilId}" data-chid="${esc(a.chofer?a.chofer.id:'')}" data-chnom="${esc(a.chofer?a.chofer.nombre:'')}" data-meid="${esc(a.medico?a.medico.id:'')}" ${d.movilId===a.movilId?'selected':''}>${esc(a.movilNombre||a.movilId)} · ${a.chofer?esc(a.chofer.nombre):'⚠ SIN CHOFER'}${a.medico?(' · '+esc(a.medico.nombre)):' · s/médico'}</option>`;
+  const actOpts=activas.map(optFor).join('');
+  // Asignación ACTUAL que ya no está entre las activas (guardia terminada o móvil legacy): conservar como opción.
+  const curOpt=(d.movilId && !inList)
+    ? `<option value="${esc(d.movilId)}" selected data-chid="${esc(d.choferId||'')}" data-chnom="${esc(d.choferNombre||'')}" data-meid="${esc(d.medicoId||'')}">${esc(d.movilNombre||d.movilId)} (actual)</option>`
+    : '';
+  const choferLbl = d.choferNombre || (d.choferId?'asignado':'—');
   // Feedback persistente: sobrevive al re-render que dispara epLoad tras guardar.
   const fl=S.recFlash;
   const flashHtml = fl
     ? `<div class="err" style="display:block;margin-bottom:.5rem;color:${fl.ok?'var(--g,#1D9E75)':'var(--r)'}">${esc(fl.text)}</div>`
     : `<div id="ep-rec-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
   return `<div class="card"><div class="ch">Recursos</div>
-    <div class="field"><label>Móvil</label><select id="ep-movil"><option value="">Sin asignar</option>${legacyOpt}${movOpts}</select></div>
-    <div class="field"><label>Médico</label><select id="ep-medico">${medOpts}</select></div>
+    <div class="field"><label>Guardia activa (móvil · chofer · médico)</label><select id="ep-movil" onchange="epGuardiaChange()"><option value="">Sin asignar</option>${curOpt}${actOpts}</select></div>
+    <div class="field"><label>Chofer (de la guardia · snapshot)</label><div id="ep-chofer" style="font-size:.85rem;font-weight:600;color:var(--ink)">${esc(choferLbl)}</div></div>
+    <div class="field"><label>Médico (pre-cargado de la guardia · editable)</label><select id="ep-medico">${medOpts}</select></div>
     ${flashHtml}
     <button class="btn-o" onclick="epAsignar()">Guardar recursos</button>
   </div>`;
+}
+// Al elegir una guardia: actualiza el chofer derivado (label) y pre-carga el médico vigente (editable). Sin re-render.
+function epGuardiaChange(){
+  const s=document.getElementById('ep-movil'); const o=s&&s.options[s.selectedIndex];
+  const chNom=(o&&o.dataset.chnom)||''; const meId=(o&&o.dataset.meid!=null)?o.dataset.meid:'';
+  const chEl=document.getElementById('ep-chofer');
+  if(chEl) chEl.textContent = (o&&o.value) ? (chNom||'⚠ sin chofer vigente') : '—';
+  const meSel=document.getElementById('ep-medico');
+  if(meSel && o && o.value) meSel.value=meId||''; // pre-carga el médico de la guardia (o lo limpia si no hay)
 }
 
 function epEstadoCard(ep){
@@ -2541,6 +2564,34 @@ async function gGuardiasDeMovil(movilId, excluirId){
   if(!movilId) return [];
   const snap=await db.collection('guardias').where('movilId','==',movilId).get();
   return snap.docs.filter(d=>d.id!==excluirId).map(d=>({id:d.id,...d.data()}));
+}
+
+// Filtro "vigente ahora": guardia activa (no cerrada) cuyo intervalo contiene now.
+function gVigente(g){ const now=Date.now(); return g.modalidad==='activa' && g.estado!=='cerrada' && gMs(g.inicio)!=null && gMs(g.fin)!=null && gMs(g.inicio)<=now && now<gMs(g.fin); }
+
+// Dotación VIGENTE de un móvil = chofer + médico de guardia activa ahora. A lo sumo 1 de cada
+// (el bloqueo duro de solapes del Bloque 1 garantiza unicidad). Devuelve {chofer, medico} con {id,nombre}|null.
+async function gDotacionVigente(movilId){
+  if(!movilId) return {chofer:null,medico:null};
+  const vig=(await gGuardiasDeMovil(movilId,null)).filter(gVigente);
+  const ch=vig.find(g=>g.rol==='chofer'), me=vig.find(g=>g.rol==='medico');
+  return { chofer: ch?{id:ch.personaId,nombre:ch.personaNombre||''}:null,
+           medico: me?{id:me.personaId,nombre:me.personaNombre||''}:null };
+}
+
+// Guardias activas AHORA agrupadas por móvil (para poblar el selector de despacho).
+// Cada item = { movilId, movilNombre, chofer:{id,nombre}|null, medico:{id,nombre}|null }.
+async function gGuardiasActivas(){
+  const snap=await db.collection('guardias').where('modalidad','==','activa').get();
+  const vig=snap.docs.map(d=>({id:d.id,...d.data()})).filter(g=>g.movilId && gVigente(g));
+  const byMov={};
+  vig.forEach(g=>{
+    const k=g.movilId;
+    if(!byMov[k]) byMov[k]={movilId:k, movilNombre:g.movilNombre||'', chofer:null, medico:null};
+    const p={id:g.personaId,nombre:g.personaNombre||''};
+    if(g.rol==='chofer') byMov[k].chofer=p; else if(g.rol==='medico') byMov[k].medico=p;
+  });
+  return Object.values(byMov);
 }
 
 // Validación de una guardia ANTES de guardar -> {bloqueo:[], alertas:[]}. UNA sola pasada de query.
