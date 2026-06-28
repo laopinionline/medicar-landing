@@ -393,14 +393,58 @@ function pg(){
   return '';
 }
 
-// Placeholder para el chofer logueado: su vista operativa (asignación, episodios de su móvil)
-// es un bloque de diseño posterior. Por ahora solo confirma su acceso y ofrece su perfil.
+// Vista del chofer logueado: "mi despacho actual" (Bloque 3, SOLO LECTURA).
+// La regla de /episodios deja al chofer leer SOLO lo suyo (choferId == su uid),
+// por eso la query filtra por ese where (sin él, el list no pasa). Avanzar estado
+// (en_camino/arribo) es Bloque 4: acá no hay botones de acción, solo lectura.
 function choferHome(){
+  const c=S.chofer;
+  if(!c){ chLoad(); return `<div class="card">Cargando tu despacho…</div>`; }
+  if(c.loading) return `<div class="card">Cargando tu despacho…</div>`;
+  if(c.err) return `<div class="card">No se pudo cargar tu despacho: ${esc(c.err)}<br><button class="btn-o" onclick="chReload()" style="margin-top:.6rem">Reintentar</button></div>`;
+  return c.ep ? chDespachoCard(c.ep) : chVacio();
+}
+function chReload(){ S.chofer=null; render(); }
+
+async function chLoad(){
+  S.chofer={loading:true};
+  try{
+    // La regla exige el where choferId==uid para que el list pase. Estados activos y
+    // el más reciente primero -> tomo el primero como "mi despacho actual".
+    const snap=await db.collection('episodios').where('choferId','==',S.user.uid).get();
+    const activos=snap.docs.map(d=>({id:d.id,...d.data()}))
+      .filter(e=>FLUJO.includes(e.estado))
+      .sort((a,b)=>tsSec(b.creadoEn)-tsSec(a.creadoEn));
+    S.chofer={loading:false,ep:activos[0]||null};
+  }catch(e){ S.chofer={loading:false,err:(e.message||String(e))}; }
+  render();
+}
+
+function chVacio(){
   return `<div class="card" style="text-align:center;padding:2rem 1.2rem">
-    <div style="font-weight:700;margin-bottom:.5rem">Hola, ${esc(S.user.nombre||'chofer')}</div>
-    <div style="font-size:.85rem;color:var(--ink2);line-height:1.6">Tu cuenta de <b>chofer</b> está activa. La vista operativa de choferes (móvil asignado, despachos) estará disponible próximamente.</div>
-    <div style="font-size:.78rem;color:var(--ink3);margin-top:.8rem">Mientras tanto podés editar tu perfil desde la pestaña <b>Perfil</b>.</div>
+    <div style="font-size:2rem;line-height:1;margin-bottom:.6rem">🚐</div>
+    <div style="font-weight:700;margin-bottom:.4rem">Sin despacho asignado</div>
+    <div style="font-size:.85rem;color:var(--ink2);line-height:1.6">Hola, ${esc(S.user.nombre||'chofer')}. No tenés un despacho activo en este momento.</div>
+    <div style="font-size:.78rem;color:var(--ink3);margin-top:.8rem">Cuando te asignen a un episodio, vas a verlo acá.</div>
   </div>`;
+}
+
+function chDespachoCard(d){
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+    <div style="font-size:.8rem;color:var(--ink3);font-weight:700;letter-spacing:.06em;text-transform:uppercase">Mi despacho actual</div>
+    <span class="badge">${ESTADO_LBL[d.estado]||d.estado}</span>
+  </div>
+  ${d.nroIncidente?`<div style="font-size:.8rem;color:var(--ink3);font-weight:700;letter-spacing:.03em;margin-bottom:.5rem">${fmtIncidente(d.nroIncidente,añoDe(d.creadoEn))}</div>`:''}
+  <div class="card">
+    <div class="ir"><span class="il">Código</span><span class="iv" style="color:${codColor(d.codigoPresuntivo)};font-weight:700">${codEmoji(d.codigoPresuntivo)} ${d.codigoPresuntivo||'—'}</span></div>
+    <div class="ir"><span class="il">Motivo</span><span class="iv">${esc(d.motivoLlamado)||'—'}</span></div>
+    <div class="ir"><span class="il">Ubicación</span><span class="iv">${esc(d.domicilio)||'—'}${d.tipoLugar?(' · '+esc(tipoLugarLbl(d.tipoLugar))):''}</span></div>
+    <div class="ir"><span class="il">Móvil</span><span class="iv">${esc(d.movilNombre||d.movilId||'sin asignar')}</span></div>
+    ${d.medicoNombre?`<div class="ir"><span class="il">Médico</span><span class="iv">${esc(d.medicoNombre)}</span></div>`:''}
+    <div class="ir"><span class="il">Creado</span><span class="iv">${fechaDe(d)} ${horaDe(d)}</span></div>
+  </div>
+  <div style="font-size:.72rem;color:var(--ink3);text-align:center;margin-top:.2rem">Vista de solo lectura · Hola, ${esc(S.user.nombre||'chofer')}</div>`;
 }
 
 /* AFILIADO */
