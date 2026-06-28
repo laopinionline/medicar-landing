@@ -406,6 +406,22 @@ function choferHome(){
 }
 function chReload(){ S.chofer=null; render(); }
 
+// Avance de estado por el chofer (Bloque 4): solo despacho->en_camino y en_camino->arribo.
+// MISMA forma que epAvanzar (estado + transiciones.<nx> con serverTimestamp) para que la
+// regla hasOnly(['estado','transiciones']) pase. De arribo en mas, el flujo es del medico.
+async function chAvanzar(nx){
+  const ep=S.chofer&&S.chofer.ep; if(!ep) return;
+  const ok=(ep.estado==='despacho'&&nx==='en_camino')||(ep.estado==='en_camino'&&nx==='arribo');
+  if(!ok) return; // transicion no permitida para el chofer
+  try{
+    await db.collection('episodios').doc(ep.id).update({ estado:nx, ['transiciones.'+nx]:FV() });
+    chReload();                     // refresca "mi despacho actual"
+  }catch(e){
+    if(S.chofer) S.chofer.err='No se pudo actualizar: '+(e.message||e);
+    render();
+  }
+}
+
 async function chLoad(){
   S.chofer={loading:true};
   try{
@@ -444,7 +460,15 @@ function chDespachoCard(d){
     ${d.medicoNombre?`<div class="ir"><span class="il">Médico</span><span class="iv">${esc(d.medicoNombre)}</span></div>`:''}
     <div class="ir"><span class="il">Creado</span><span class="iv">${fechaDe(d)} ${horaDe(d)}</span></div>
   </div>
-  <div style="font-size:.72rem;color:var(--ink3);text-align:center;margin-top:.2rem">Vista de solo lectura · Hola, ${esc(S.user.nombre||'chofer')}</div>`;
+  ${S.chofer&&S.chofer.err?`<div class="card" style="color:var(--r);font-size:.8rem">${esc(S.chofer.err)}</div>`:''}
+  ${chAcciones(d)}`;
+}
+
+// Acciones del chofer segun el estado. Solo en_camino/arribo; de arribo en mas es del medico.
+function chAcciones(d){
+  if(d.estado==='despacho')  return `<button class="btn-r" onclick="chAvanzar('en_camino')">Avanzar a EN CAMINO</button>`;
+  if(d.estado==='en_camino') return `<button class="btn-r" onclick="chAvanzar('arribo')">Marcar ARRIBO</button>`;
+  return `<div style="font-size:.72rem;color:var(--ink3);text-align:center;margin-top:.2rem">Vista de solo lectura · Hola, ${esc(S.user.nombre||'chofer')}</div>`;
 }
 
 /* AFILIADO */

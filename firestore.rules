@@ -126,6 +126,16 @@ service cloud.firestore {
               || (resource.data.movilId != null && resource.data.medicoId != null)
             )
           )
+          // Chofer: avanza SU episodio (en_camino/arribo). Opcion B: sin medico. Requiere movil asignado.
+          || (
+            request.auth.uid == resource.data.choferId
+            && resource.data.movilId != null
+            && tocadas().hasOnly(['estado','transiciones'])
+            && (
+              (resource.data.estado == 'despacho'   && request.resource.data.estado == 'en_camino')
+              || (resource.data.estado == 'en_camino' && request.resource.data.estado == 'arribo')
+            )
+          )
           // Clinica + cierre: solo el medico ASIGNADO a este episodio. Origen: atencion.
           // No se permite si el caso esta ofrecido (el cedente ya no lo trabaja).
           || (
