@@ -367,18 +367,21 @@ const CAPS=[
   ['gestionar_guardias','Gestionar guardias']
 ];
 function puede(cap){ return !!(S.user && (S.user.rol==='superadmin' || (S.user.permisos && S.user.permisos[cap]===true))); }
+// Acceso al catálogo (prestaciones/planes, Estructura 3). Roles admin/superadmin, o capacidad configurar_sistema.
+function puedeConfig(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('configurar_sistema'))); }
 
 function getTabs(rol){
   // Tabs para operativos NO-superadmin que tengan el permiso (consumo de la capa de permisos).
   const movTab = puede('gestionar_moviles') ? [{id:'moviles',icon:'dispatch',lbl:'Móviles'}] : [];
   const cronoTab = puede('gestionar_guardias') ? [{id:'cronograma',icon:'history',lbl:'Cronograma'}] : [];
+  const catTab = puedeConfig() ? [{id:'catalogo',icon:'plan',lbl:'Catálogo'}] : [];
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...catTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
@@ -387,7 +390,7 @@ function pg(){
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
@@ -2206,7 +2209,7 @@ function perfilSuper(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['auditoria','Auditoría',false],['config','Configuración',false]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['auditoria','Auditoría',false],['config','Configuración',false]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -2227,6 +2230,7 @@ function superView(){
   else if(sec==='dashboard') body=dashSuper();
   else if(sec==='moviles') body=movPanel();
   else if(sec==='cronograma') body=cronoPanel();
+  else if(sec==='catalogo') body=catPanel();
   else body=`<div class="card"><div class="ch">${(SUPER_SECS.find(s=>s[0]===sec)||[,sec])[1]}</div><div style="font-size:.8rem;color:var(--ink3)">Próximamente. Módulo no disponible todavía.</div></div>`;
   return superMenu(sec)+body;
 }
@@ -2237,6 +2241,7 @@ function superNav(sec){
   if(S.superSec==='dashboard'){ dashDetach(); S.dash=null; }
   if(S.superSec==='moviles'){ movDetach(); S.mov=null; }
   if(S.superSec==='cronograma'){ cronoDetach(); S.crono=null; }
+  if(S.superSec==='catalogo'){ catDetach(); S.cat=null; }
   S.superSec=sec;
   render();
 }
@@ -2586,6 +2591,175 @@ async function tipoBaja(id,reactivar){
   movErr('');
   try{ await db.collection('tipos_movil').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
   catch(e){ movErr('No se pudo actualizar: '+(e.message||e)); }
+}
+
+/* ===================== CATÁLOGO — Prestaciones + Planes (Estructura 3, Administración) =====================
+   ABM del catálogo comercial. Gobernado por configurar_sistema (UI: puedeConfig(); reglas: isAdmin||cap).
+   Visible SOLO para admin/superadmin. Colecciones nuevas, arrancan vacías. NO toca la médica viva.
+   Dos subsecciones:
+     - prestaciones/{slug}: set base editable (nombre, activo). ID slug estable. Baja lógica (patrón tipos_movil).
+     - planes/{id}: nombre, descripcion, precio, carenciaDias, activo, coberturas{prestacionId:bool}.
+   REGLA de coberturas: una prestación nueva NO se asume cubierta. El editor de planes muestra TODAS las
+   prestaciones ACTIVAS como checkboxes; las ausentes del mapa coberturas se ven en false. */
+function catSlug(s){
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+}
+function catFormOpen(){ return !!(S.cat && (S.cat.pedit!=null || S.cat.ledit!=null)); }
+function catAttach(){
+  if(S.catUnsub) return;
+  const upd=()=>{ if(!catFormOpen()) render(); }; // no re-renderiza con un form abierto (perdería lo tipeado)
+  S.catUnsub=[
+    db.collection('prestaciones').onSnapshot(s=>{ if(!S.cat) return; S.cat.prest=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.cat){ S.cat.err=(e.message||String(e)); render(); } }),
+    db.collection('planes').onSnapshot(s=>{ if(!S.cat) return; S.cat.planes=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.cat){ S.cat.err=(e.message||String(e)); render(); } })
+  ];
+}
+function catDetach(){ if(S.catUnsub){ S.catUnsub.forEach(u=>{ try{u();}catch(_){} }); S.catUnsub=null; } }
+function catErr(t){ const e=document.getElementById('cat-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+
+function catPanel(){
+  if(!puedeConfig()) return `<div class="card"><div class="ch">Catálogo</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para configurar el catálogo.</div></div>`;
+  if(!S.cat){ S.cat={sub:'planes',prest:null,planes:null,pedit:null,ledit:null,err:'',showInactPrest:false,showInactPlanes:false}; catAttach(); }
+  if(S.cat.err) return `<div class="card">No se pudo cargar el catálogo: ${esc(S.cat.err)}</div>`;
+  const sub=S.cat.sub||'planes';
+  const tab=(id,lbl)=>`<button onclick="catSub('${id}')" style="flex:1;padding:.5rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.78rem;font-weight:600;letter-spacing:.04em;cursor:pointer">${lbl}</button>`;
+  const head=`
+  <div style="font-weight:700;margin:.1rem 0 .6rem">Catálogo <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
+  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('planes','Planes')}${tab('prestaciones','Prestaciones')}</div>
+  <div id="cat-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
+  return head + (sub==='prestaciones' ? catPrestView() : catPlanesView());
+}
+function catSub(id){ if(!S.cat) return; S.cat.sub=id; S.cat.pedit=null; S.cat.ledit=null; render(); }
+function catShowInact(which,on){ if(!S.cat) return; if(which==='prest') S.cat.showInactPrest=!!on; else S.cat.showInactPlanes=!!on; render(); }
+
+/* ---- Prestaciones (set base, baja lógica, id slug estable) ---- */
+function catPrestView(){
+  if(S.cat.prest===null) return `<div class="card">Cargando prestaciones…</div>`;
+  if(S.cat.pedit!=null) return catPrestForm();
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+  const showInact=!!S.cat.showInactPrest;
+  const nInact=(S.cat.prest||[]).filter(p=>p.activo===false).length;
+  const list=(S.cat.prest||[]).filter(p=> showInact || p.activo!==false);
+  const rows = list.length ? list.map(p=>{
+    const inact=p.activo===false;
+    const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="catPrestEditar('${p.id}')">Editar</button><button class="${btn}" onclick="catPrestBaja('${p.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
+    return `<div class="lr"${inact?' style="opacity:.5"':''}><div class="lrb"><div class="lrn">${esc(p.nombre||'—')}</div><div class="lrs">${esc(p.id)} · ${inact?'inactivo':'activo'}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin prestaciones${showInact?'':' activas'}</div>`;
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="catShowInact('prest',this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
+  return `<button class="btn-r" onclick="catPrestNuevo()" style="margin-bottom:.7rem">+ Nueva prestación</button>${toggle}<div class="card">${rows}</div>`;
+}
+function catPrestForm(){
+  const isNew=S.cat.pedit==='new';
+  const p=isNew?{}:((S.cat.prest||[]).find(x=>x.id===S.cat.pedit)||{});
+  return `<div class="card"><div class="ch">${isNew?'Nueva prestación':'Editar prestación'}</div>
+    <div class="field"><label>Nombre</label><input id="cat-p-nombre" value="${esc(p.nombre||'')}" placeholder="Ej. Emergencias"></div>
+    ${isNew?`<div style="font-size:.7rem;color:var(--ink3);margin:-.3rem 0 .6rem">El ID se genera del nombre (slug estable, ej. <code>atencion_medica</code>).</div>`:`<div class="field"><label>ID</label><div style="font-size:.78rem;color:var(--ink3)">${esc(p.id)} (no se cambia)</div></div><div class="field"><label>Estado de alta</label><select id="cat-p-activo"><option value="si" ${p.activo!==false?'selected':''}>Activo</option><option value="no" ${p.activo===false?'selected':''}>Baja lógica</option></select></div>`}
+    <button class="btn-r" onclick="catPrestGuardar()">Guardar</button>
+    <button class="btn-o" onclick="catPrestCancelar()">Cancelar</button>
+  </div>`;
+}
+function catPrestNuevo(){ if(!puedeConfig())return; S.cat.pedit='new'; render(); }
+function catPrestEditar(id){ if(!puedeConfig())return; S.cat.pedit=id; render(); }
+function catPrestCancelar(){ if(S.cat) S.cat.pedit=null; render(); }
+async function catPrestGuardar(){
+  if(!puedeConfig()) return; // la regla es la defensa real
+  catErr('');
+  const isNew=S.cat.pedit==='new';
+  const nombre=(document.getElementById('cat-p-nombre')?.value||'').trim();
+  if(!nombre){ catErr('El nombre es requerido.'); return; }
+  try{
+    if(isNew){
+      const id=catSlug(nombre);
+      if(!id){ catErr('El nombre no genera un ID válido.'); return; }
+      if((S.cat.prest||[]).some(x=>x.id===id)){ catErr('Ya existe una prestación con ese ID ('+id+').'); return; }
+      await db.collection('prestaciones').doc(id).set({nombre,activo:true,creadoEn:FV()});
+    } else {
+      const activo=(document.getElementById('cat-p-activo')?.value||'si')==='si';
+      await db.collection('prestaciones').doc(S.cat.pedit).set({nombre,activo,actualizadoEn:FV()},{merge:true});
+    }
+    S.cat.pedit=null; render();
+  }catch(e){ catErr('No se pudo guardar: '+(e.message||e)); }
+}
+async function catPrestBaja(id,reactivar){
+  if(!puedeConfig()) return;
+  catErr('');
+  try{ await db.collection('prestaciones').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
+  catch(e){ catErr('No se pudo actualizar: '+(e.message||e)); }
+}
+
+/* ---- Planes (coberturas = checkboxes por prestación ACTIVA) ---- */
+function catMoney(n){ const v=Number(n)||0; return '$'+v.toLocaleString('es-AR'); }
+function catPlanesView(){
+  if(S.cat.planes===null||S.cat.prest===null) return `<div class="card">Cargando planes…</div>`;
+  if(S.cat.ledit!=null) return catPlanForm();
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+  const showInact=!!S.cat.showInactPlanes;
+  const nInact=(S.cat.planes||[]).filter(p=>p.activo===false).length;
+  const list=(S.cat.planes||[]).filter(p=> showInact || p.activo!==false);
+  const rows = list.length ? list.map(p=>{
+    const inact=p.activo===false;
+    const nCob=p.coberturas?Object.keys(p.coberturas).filter(k=>p.coberturas[k]===true).length:0;
+    const meta=[catMoney(p.precio), p.carenciaDias?('· carencia '+p.carenciaDias+'d'):'', '· '+nCob+' prestación'+(nCob===1?'':'es'), inact?'· inactivo':''].filter(Boolean).join(' ');
+    const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="catPlanEditar('${p.id}')">Editar</button><button class="${btn}" onclick="catPlanBaja('${p.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(p.nombre||'—')}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin planes${showInact?'':' activos'}</div>`;
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="catShowInact('planes',this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
+  return `<button class="btn-r" onclick="catPlanNuevo()" style="margin-bottom:.7rem">+ Nuevo plan</button>${toggle}<div class="card">${rows}</div>`;
+}
+function catPlanForm(){
+  const isNew=S.cat.ledit==='new';
+  const p=isNew?{}:((S.cat.planes||[]).find(x=>x.id===S.cat.ledit)||{});
+  const cob=p.coberturas||{};
+  const all=(S.cat.prest||[]);
+  const act=all.filter(x=>x.activo!==false);
+  // Opción A: además de las activas, las prestaciones INACTIVAS que ESTE plan ya tiene en su
+  // mapa coberturas (key presente) se muestran igual — atenuadas y con "(inactiva)" — para no
+  // perderlas en silencio. Planes nuevos: solo activas. (El guardado parte del mapa existente,
+  // así que cualquier key no renderizada igual se preserva; esto es para que el usuario la VEA.)
+  const inactCub=isNew?[]:all.filter(x=>x.activo===false && Object.prototype.hasOwnProperty.call(cob,x.id));
+  const filas=act.map(pr=>({id:pr.id,nombre:(pr.nombre||pr.id),inactiva:false}))
+                 .concat(inactCub.map(pr=>({id:pr.id,nombre:(pr.nombre||pr.id),inactiva:true})));
+  const cobField = filas.length
+    ? filas.map(f=>`<label style="display:flex;align-items:center;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)${f.inactiva?';opacity:.55':''}"><span style="font-size:.85rem">${esc(f.nombre)}${f.inactiva?' <span style="color:var(--ink3)">(inactiva)</span>':''}</span><input type="checkbox" class="cat-cob" data-prest="${f.id}" ${cob[f.id]===true?'checked':''}></label>`).join('')
+    : `<div style="font-size:.78rem;color:var(--ink3)">No hay prestaciones activas. Creá prestaciones en la pestaña "Prestaciones" para asignar coberturas.</div>`;
+  return `<div class="card"><div class="ch">${isNew?'Nuevo plan':'Editar plan'}</div>
+    <div class="field"><label>Nombre</label><input id="cat-l-nombre" value="${esc(p.nombre||'')}" placeholder="Ej. Plan 01"></div>
+    <div class="field"><label>Descripción</label><textarea id="cat-l-desc" rows="2" placeholder="opcional">${esc(p.descripcion||'')}</textarea></div>
+    <div class="field"><label>Precio</label><input id="cat-l-precio" type="number" min="0" step="0.01" value="${p.precio!=null?esc(p.precio):'0'}"></div>
+    <div class="field"><label>Carencia (días)</label><input id="cat-l-carencia" type="number" min="0" step="1" value="${p.carenciaDias!=null?esc(p.carenciaDias):'0'}"></div>
+    ${isNew?'':`<div class="field"><label>Estado de alta</label><select id="cat-l-activo"><option value="si" ${p.activo!==false?'selected':''}>Activo</option><option value="no" ${p.activo===false?'selected':''}>Baja lógica</option></select></div>`}
+    <div class="field"><label>Coberturas (prestaciones)</label>${cobField}</div>
+    <button class="btn-r" onclick="catPlanGuardar()">Guardar</button>
+    <button class="btn-o" onclick="catPlanCancelar()">Cancelar</button>
+  </div>`;
+}
+function catPlanNuevo(){ if(!puedeConfig())return; S.cat.ledit='new'; render(); }
+function catPlanEditar(id){ if(!puedeConfig())return; S.cat.ledit=id; render(); }
+function catPlanCancelar(){ if(S.cat) S.cat.ledit=null; render(); }
+async function catPlanGuardar(){
+  if(!puedeConfig()) return; // la regla es la defensa real
+  catErr('');
+  const isNew=S.cat.ledit==='new';
+  const nombre=(document.getElementById('cat-l-nombre')?.value||'').trim();
+  if(!nombre){ catErr('El nombre es requerido.'); return; }
+  const precio=Number(document.getElementById('cat-l-precio')?.value||0)||0;
+  const carenciaDias=Math.max(0,Math.round(Number(document.getElementById('cat-l-carencia')?.value||0)||0));
+  // Coberturas: arranca del mapa existente (preserva prestaciones hoy inactivas) y sobreescribe
+  // con el estado de los checkboxes de las prestaciones ACTIVAS. true/false por prestacionId.
+  const base=isNew?{}:Object.assign({}, ((S.cat.planes||[]).find(x=>x.id===S.cat.ledit)||{}).coberturas||{});
+  document.querySelectorAll('.cat-cob').forEach(c=>{ base[c.getAttribute('data-prest')]=!!c.checked; });
+  const data={ nombre, descripcion:(document.getElementById('cat-l-desc')?.value||'').trim(), precio, carenciaDias, coberturas:base };
+  try{
+    if(isNew){ data.activo=true; data.creadoEn=FV(); await db.collection('planes').add(data); }
+    else{ data.activo=(document.getElementById('cat-l-activo')?.value||'si')==='si'; data.actualizadoEn=FV(); await db.collection('planes').doc(S.cat.ledit).set(data,{merge:true}); }
+    S.cat.ledit=null; render();
+  }catch(e){ catErr('No se pudo guardar: '+(e.message||e)); }
+}
+async function catPlanBaja(id,reactivar){
+  if(!puedeConfig()) return;
+  catErr('');
+  try{ await db.collection('planes').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
+  catch(e){ catErr('No se pudo actualizar: '+(e.message||e)); }
 }
 
 /* ===================== PERMISOS por persona (lo configura el superadmin en la ficha) ===================== */

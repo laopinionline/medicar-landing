@@ -45,6 +45,15 @@ service cloud.firestore {
       return tieneRol(['despachante', 'medico', 'admin', 'superadmin']);
     }
 
+    // Roles INTERNOS: cualquier usuario autenticado cuyo rol NO sea afiliado (incluye chofer).
+    // Para lectura del catalogo comercial (prestaciones/planes) por todo el personal. Fail-closed:
+    // exige doc usuarios existente; un afiliado (o sin doc) queda fuera.
+    function esInterno() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
+        && rolActual() != 'afiliado';
+    }
+
     // Claves que cambia este write (set de campos tocados).
     function tocadas() {
       return request.resource.data.diff(resource.data).affectedKeys();
@@ -282,6 +291,24 @@ service cloud.firestore {
                                && tienePermiso('gestionar_guardias')
                                && guardiaFormaOK(request.resource.data);
       allow delete:         if esOperativo() && tienePermiso('gestionar_guardias');
+    }
+
+    // prestaciones/{id}: catalogo base de prestaciones (Emergencias, Urgencias, ...). Estructura 3 (Admin).
+    //  - Lectura: cualquier rol INTERNO (no afiliado), incluido chofer — el personal lo consulta.
+    //  - Escritura (alta/edicion; baja LOGICA via campo 'activo'): admin/superadmin o configurar_sistema.
+    //    (tienePermiso ya cortocircuita superadmin a true.) Fail-closed.
+    //  - Sin delete desde la app (baja logica). Superadmin conserva borrado por el catch-all.
+    match /prestaciones/{id} {
+      allow read:           if esInterno();
+      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+    }
+
+    // planes/{id}: catalogo comercial de planes + mapa coberturas{prestacionId:bool}. Estructura 3 (Admin).
+    //  - Lectura: rol INTERNO (un afiliado podria leer su plan a futuro; por ahora restringido a internos).
+    //  - Escritura: admin/superadmin o configurar_sistema. Baja logica via 'activo', sin delete desde la app.
+    match /planes/{id} {
+      allow read:           if esInterno();
+      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
     }
 
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
