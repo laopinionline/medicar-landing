@@ -406,15 +406,34 @@ function choferHome(){
 }
 function chReload(){ S.chofer=null; render(); }
 
+// Geolocalizacion del chofer (Fase A, OPCIONAL): SIEMPRE resuelve, nunca rechaza.
+// Exito -> {lat,long}; sin soporte / permiso denegado / timeout / error -> {lat:null,long:null}.
+// A1: la geo jamas traba el arribo.
+function geoActual(){
+  return new Promise(resolve=>{
+    if(!navigator.geolocation){ resolve({lat:null,long:null}); return; }
+    navigator.geolocation.getCurrentPosition(
+      p=>resolve({lat:p.coords.latitude, long:p.coords.longitude}),
+      _=>resolve({lat:null,long:null}),
+      { enableHighAccuracy:true, timeout:8000, maximumAge:0 }
+    );
+  });
+}
+
 // Avance de estado por el chofer (Bloque 4): solo despacho->en_camino y en_camino->arribo.
 // MISMA forma que epAvanzar (estado + transiciones.<nx> con serverTimestamp) para que la
-// regla hasOnly(['estado','transiciones']) pase. De arribo en mas, el flujo es del medico.
+// regla hasOnly pase. En arribo ademas captura geo (Fase A, opcional). De arribo en mas, el flujo es del medico.
 async function chAvanzar(nx){
   const ep=S.chofer&&S.chofer.ep; if(!ep) return;
   const ok=(ep.estado==='despacho'&&nx==='en_camino')||(ep.estado==='en_camino'&&nx==='arribo');
   if(!ok) return; // transicion no permitida para el chofer
+  const upd={ estado:nx, ['transiciones.'+nx]:FV() };
+  if(nx==='arribo'){
+    const g=await geoActual();      // OPCIONAL: lat/long pueden venir null (no traba)
+    upd.arribo={ lat:g.lat, long:g.long, origenArribo:'chofer', proximidadOk:null };
+  }
   try{
-    await db.collection('episodios').doc(ep.id).update({ estado:nx, ['transiciones.'+nx]:FV() });
+    await db.collection('episodios').doc(ep.id).update(upd);
     chReload();                     // refresca "mi despacho actual"
   }catch(e){
     if(S.chofer) S.chofer.err='No se pudo actualizar: '+(e.message||e);
@@ -459,6 +478,7 @@ function chDespachoCard(d){
     <div class="ir"><span class="il">Móvil</span><span class="iv">${esc(d.movilNombre||d.movilId||'sin asignar')}</span></div>
     ${d.medicoNombre?`<div class="ir"><span class="il">Médico</span><span class="iv">${esc(d.medicoNombre)}</span></div>`:''}
     <div class="ir"><span class="il">Creado</span><span class="iv">${fechaDe(d)} ${horaDe(d)}</span></div>
+    ${d.estado==='arribo'&&d.arribo?`<div class="ir"><span class="il">Arribo</span><span class="iv">${d.arribo.lat!=null?'Geolocalizado ✓':'Sin geo'}</span></div>`:''}
   </div>
   ${S.chofer&&S.chofer.err?`<div class="card" style="color:var(--r);font-size:.8rem">${esc(S.chofer.err)}</div>`:''}
   ${chAcciones(d)}`;
