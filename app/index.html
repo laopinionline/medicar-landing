@@ -369,6 +369,8 @@ const CAPS=[
 function puede(cap){ return !!(S.user && (S.user.rol==='superadmin' || (S.user.permisos && S.user.permisos[cap]===true))); }
 // Acceso al catálogo (prestaciones/planes, Estructura 3). Roles admin/superadmin, o capacidad configurar_sistema.
 function puedeConfig(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('configurar_sistema'))); }
+// Acceso al padrón de afiliados (personas/socios, Estructura 3). Roles admin/superadmin, o capacidad gestionar_afiliados.
+function puedeAfil(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('gestionar_afiliados'))); }
 
 function getTabs(rol){
   // Tabs para operativos NO-superadmin que tengan el permiso (consumo de la capa de permisos).
@@ -390,7 +392,7 @@ function pg(){
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='afiliados')return adAfil();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
@@ -2209,7 +2211,7 @@ function perfilSuper(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['auditoria','Auditoría',false],['config','Configuración',false]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['auditoria','Auditoría',false],['config','Configuración',false]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -2231,6 +2233,7 @@ function superView(){
   else if(sec==='moviles') body=movPanel();
   else if(sec==='cronograma') body=cronoPanel();
   else if(sec==='catalogo') body=catPanel();
+  else if(sec==='afiliados') body=afPanel();
   else body=`<div class="card"><div class="ch">${(SUPER_SECS.find(s=>s[0]===sec)||[,sec])[1]}</div><div style="font-size:.8rem;color:var(--ink3)">Próximamente. Módulo no disponible todavía.</div></div>`;
   return superMenu(sec)+body;
 }
@@ -2242,6 +2245,7 @@ function superNav(sec){
   if(S.superSec==='moviles'){ movDetach(); S.mov=null; }
   if(S.superSec==='cronograma'){ cronoDetach(); S.crono=null; }
   if(S.superSec==='catalogo'){ catDetach(); S.cat=null; }
+  if(S.superSec==='afiliados'){ afDetach(); S.af=null; }
   S.superSec=sec;
   render();
 }
@@ -2761,6 +2765,217 @@ async function catPlanBaja(id,reactivar){
   try{ await db.collection('planes').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
   catch(e){ catErr('No se pudo actualizar: '+(e.message||e)); }
 }
+
+/* ===================== AFILIADOS — Socios + Personas (Estructura 3, Administración) =====================
+   Editor del padrón de socios. Gobernado por gestionar_afiliados (UI: puedeAfil(); reglas: isAdmin||cap).
+   Visible para admin/superadmin. Modelo (ver Disenio-Estructura-3-Administracion):
+     - personas/{id}: identidad + antecedentes CLÍNICOS. Si la persona proviene de un paciente, id == pacienteId.
+     - socios/{id}: personaId (ref), tipoAfiliado, numeroAfiliado, planId (ref a planes|null), vigenteDesde,
+       carenciaHasta, activo (baja lógica), creadoEn.
+   Alta = buscar la persona por DNI; si no existe se crea persona + socio juntos. NO toca pacientes ni episodios. */
+function afFormOpen(){ return !!(S.af && S.af.edit!=null); }
+function afAttach(){
+  if(S.afUnsub) return;
+  const upd=()=>{ if(!afFormOpen()) render(); };
+  S.afUnsub=[
+    db.collection('socios').onSnapshot(s=>{ if(!S.af) return; S.af.socios=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.af){ S.af.err=(e.message||String(e)); render(); } }),
+    db.collection('personas').onSnapshot(s=>{ if(!S.af) return; S.af.personas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.af){ S.af.err=(e.message||String(e)); render(); } }),
+    db.collection('planes').where('activo','==',true).onSnapshot(s=>{ if(!S.af) return; S.af.planes=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.af) S.af.planes=[]; })
+  ];
+}
+function afDetach(){ if(S.afUnsub){ S.afUnsub.forEach(u=>{ try{u();}catch(_){} }); S.afUnsub=null; } }
+function afErr(t){ const e=document.getElementById('af-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function afPersona(pid){ return (S.af.personas||[]).find(x=>x.id===pid)||null; }
+function afNombre(pid){ const p=afPersona(pid); if(!p) return '(persona '+esc(pid||'?')+')'; const n=((p.apellido||'')+', '+(p.nombre||'')).replace(/^, /,'').replace(/, $/,''); return esc(n||p.dni||pid); }
+function afPlanNom(planId){ if(!planId) return 'sin plan'; const pl=(S.af.planes||[]).find(x=>x.id===planId); return pl?esc(pl.nombre||planId):('plan '+esc(planId)); }
+function afMs(ts){ if(!ts) return null; if(ts.toMillis) return ts.toMillis(); if(ts.seconds!=null) return ts.seconds*1000; if(typeof ts==='number') return ts; return null; }
+function afFmtFecha(ts){ const ms=afMs(ts); if(ms==null) return '—'; const d=new Date(ms); return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear(); }
+function afFechaToTs(str){ return str?firebase.firestore.Timestamp.fromDate(new Date(str+'T00:00:00')):null; }
+function afTsToInput(ts){ const ms=afMs(ts); if(ms==null) return ''; const d=new Date(ms); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+
+function afPanel(){
+  if(!puedeAfil()) return `<div class="card"><div class="ch">Afiliados</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para gestionar afiliados.</div></div>`;
+  if(!S.af){ S.af={socios:null,personas:null,planes:null,edit:null,showInact:false,err:'',lk:null}; afAttach(); }
+  if(S.af.err) return `<div class="card">No se pudo cargar afiliados: ${esc(S.af.err)}</div>`;
+  if(S.af.edit!=null) return afForm();
+  if(S.af.socios===null||S.af.personas===null) return `<div class="card">Cargando afiliados…</div>`;
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+  const showInact=!!S.af.showInact;
+  const nInact=(S.af.socios||[]).filter(s=>s.activo===false).length;
+  const list=(S.af.socios||[]).filter(s=> showInact || s.activo!==false);
+  const rows = list.length ? list.map(s=>{
+    const inact=s.activo===false;
+    const meta=['N° '+esc(s.numeroAfiliado||'—'), '· '+afPlanNom(s.planId), '· desde '+afFmtFecha(s.vigenteDesde), '· '+esc(s.tipoAfiliado||'—'), inact?'· inactivo':''].filter(Boolean).join(' ');
+    const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="afEditar('${s.id}')">Editar</button><button class="${btn}" onclick="afBaja('${s.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin socios${showInact?'':' activos'}</div>`;
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="afShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
+  const head=`<div style="font-weight:700;margin:.1rem 0 .6rem">Afiliados <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>`;
+  return `${head}<button class="btn-r" onclick="afNuevo()" style="margin-bottom:.7rem">+ Nuevo socio</button>${toggle}<div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div><div class="card">${rows}</div>`;
+}
+function afShowInact(on){ if(!S.af) return; S.af.showInact=!!on; render(); }
+function afNuevo(){ if(!puedeAfil())return; S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; render(); }
+function afEditar(id){ if(!puedeAfil())return; S.af.edit=id; S.af.lk=null; render(); }
+function afCancelar(){ if(S.af){ S.af.edit=null; S.af.lk=null; } render(); }
+function afForm(){ return S.af.edit==='new' ? afFormNew() : afFormEdit(); }
+
+function afFormNew(){
+  const lk=S.af.lk||{dni:'',searched:false,persona:null};
+  const planOpts=`<option value="">— Sin plan —</option>`+(S.af.planes||[]).map(p=>`<option value="${p.id}">${esc(p.nombre||p.id)}</option>`).join('');
+  const dniBlock=`<div class="field"><label>DNI</label><div style="display:flex;gap:.5rem"><input id="af-dni" value="${esc(lk.dni||'')}" placeholder="Sin puntos" style="flex:1"><button class="btn-o" style="width:auto;margin-top:0;padding:.4rem .8rem" onclick="afBuscarPersona()">Buscar</button></div></div>`;
+  let personaBlock='';
+  if(lk.searched){
+    personaBlock = lk.persona
+      ? `<div class="card" style="background:var(--bg)"><div style="font-size:.82rem"><b>Persona encontrada:</b> ${afNombre(lk.persona.id)}</div><div style="font-size:.72rem;color:var(--ink3)">DNI ${esc(lk.persona.dni||'—')} · se usa esta persona (id ${esc(lk.persona.id)})</div></div>`
+      : `<div class="card" style="background:var(--bg)"><div style="font-size:.78rem;color:var(--ink3);margin-bottom:.4rem">No existe una persona con ese DNI. Completá sus datos para crearla junto con el socio:</div>
+          <div class="field"><label>Apellido</label><input id="af-p-apellido" placeholder="Apellido"></div>
+          <div class="field"><label>Nombre</label><input id="af-p-nombre" placeholder="Nombre"></div>
+          <div class="field"><label>Sexo</label><select id="af-p-sexo"><option value="">—</option><option value="F">F</option><option value="M">M</option><option value="X">X</option></select></div>
+          <div class="field"><label>Fecha de nacimiento</label><input id="af-p-fnac" type="date"></div>
+          <div class="field"><label>Teléfono</label><input id="af-p-tel" placeholder="opcional"></div>
+          <div class="field"><label>Dirección</label><input id="af-p-dir" placeholder="opcional"></div></div>`;
+  }
+  const socioBlock = lk.searched ? `
+    <div class="field"><label>Tipo de afiliado</label><select id="af-tipo"><option value="directo">Directo</option><option value="corporativo">Corporativo</option></select></div>
+    <div class="field"><label>N° de afiliado</label><input id="af-num" placeholder="Ej. 20789"></div>
+    <div class="field"><label>Plan</label><select id="af-planid">${planOpts}</select></div>
+    <div class="field"><label>Vigente desde</label><input id="af-vig" type="date" value="${afTsToInput(firebase.firestore.Timestamp.now())}"></div>
+    <div class="field"><label>Carencia hasta (opcional)</label><input id="af-car" type="date"></div>
+    <button class="btn-r" onclick="afGuardarNuevo()">Guardar socio</button>` : '';
+  return `<div class="card"><div class="ch">Nuevo socio</div>
+    <div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    ${dniBlock}${personaBlock}${socioBlock}
+    <button class="btn-o" onclick="afCancelar()">Cancelar</button>
+  </div>`;
+}
+async function afBuscarPersona(){
+  if(!S.af) return;
+  afErr('');
+  const dni=(document.getElementById('af-dni')?.value||'').trim();
+  if(!dni){ afErr('Ingresá un DNI para buscar.'); return; }
+  try{
+    const qs=await db.collection('personas').where('dni','==',dni).limit(1).get();
+    S.af.lk={dni,searched:true,persona: qs.empty?null:{id:qs.docs[0].id,...qs.docs[0].data()}};
+    render();
+  }catch(e){ afErr('No se pudo buscar: '+(e.message||e)); }
+}
+async function afGuardarNuevo(){
+  if(!puedeAfil()) return; // la regla es la defensa real
+  afErr('');
+  const lk=S.af.lk||{};
+  if(!lk.searched){ afErr('Primero buscá la persona por DNI.'); return; }
+  const numero=(document.getElementById('af-num')?.value||'').trim();
+  if(!numero){ afErr('El N° de afiliado es requerido.'); return; }
+  if((S.af.socios||[]).some(s=>String(s.numeroAfiliado)===numero)){ afErr('Ya existe un socio con el N° '+numero+'.'); return; }
+  const tipoAfiliado=document.getElementById('af-tipo')?.value||'directo';
+  const planId=document.getElementById('af-planid')?.value||null;
+  const vig=afFechaToTs(document.getElementById('af-vig')?.value||'');
+  const car=afFechaToTs(document.getElementById('af-car')?.value||'');
+  try{
+    let personaId;
+    if(lk.persona){ personaId=lk.persona.id; }
+    else{
+      const apellido=(document.getElementById('af-p-apellido')?.value||'').trim();
+      const nombre=(document.getElementById('af-p-nombre')?.value||'').trim();
+      if(!apellido && !nombre){ afErr('Completá al menos apellido o nombre de la persona.'); return; }
+      const pdata={ dni:lk.dni, apellido, nombre, sexo:document.getElementById('af-p-sexo')?.value||'', fechaNacimiento:(document.getElementById('af-p-fnac')?.value||''), telefono:(document.getElementById('af-p-tel')?.value||'').trim(), direccion:(document.getElementById('af-p-dir')?.value||'').trim(), antecedentesCronicos:[], antecedentesOtros:'', creadoEn:FV() };
+      const ref=await db.collection('personas').add(pdata);
+      personaId=ref.id;
+    }
+    await db.collection('socios').add({ personaId, tipoAfiliado, numeroAfiliado:numero, planId:planId||null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV() });
+    S.af.edit=null; S.af.lk=null; render();
+  }catch(e){ afErr('No se pudo guardar: '+(e.message||e)); }
+}
+
+function afFormEdit(){
+  const s=(S.af.socios||[]).find(x=>x.id===S.af.edit)||{};
+  const planOpts=`<option value="">— Sin plan —</option>`+(S.af.planes||[]).map(p=>`<option value="${p.id}" ${s.planId===p.id?'selected':''}>${esc(p.nombre||p.id)}</option>`).join('');
+  const extraPlan=(s.planId && !(S.af.planes||[]).some(p=>p.id===s.planId))?`<option value="${s.planId}" selected>(plan inactivo ${esc(s.planId)})</option>`:'';
+  return `<div class="card"><div class="ch">Editar socio</div>
+    <div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <div class="field"><label>Persona</label><div style="font-size:.8rem;color:var(--ink3)">${afNombre(s.personaId)} (no se cambia acá)</div></div>
+    <div class="field"><label>Tipo de afiliado</label><select id="af-e-tipo"><option value="directo" ${s.tipoAfiliado==='directo'?'selected':''}>Directo</option><option value="corporativo" ${s.tipoAfiliado==='corporativo'?'selected':''}>Corporativo</option></select></div>
+    <div class="field"><label>N° de afiliado</label><input id="af-e-num" value="${esc(s.numeroAfiliado||'')}"></div>
+    <div class="field"><label>Plan</label><select id="af-e-planid">${planOpts}${extraPlan}</select></div>
+    <div class="field"><label>Vigente desde</label><input id="af-e-vig" type="date" value="${afTsToInput(s.vigenteDesde)}"></div>
+    <div class="field"><label>Carencia hasta (opcional)</label><input id="af-e-car" type="date" value="${afTsToInput(s.carenciaHasta)}"></div>
+    <div class="field"><label>Estado de alta</label><select id="af-e-activo"><option value="si" ${s.activo!==false?'selected':''}>Activo</option><option value="no" ${s.activo===false?'selected':''}>Baja lógica</option></select></div>
+    <button class="btn-r" onclick="afGuardarEdit('${s.id}')">Guardar</button>
+    <button class="btn-o" onclick="afCancelar()">Cancelar</button>
+  </div>`;
+}
+async function afGuardarEdit(id){
+  if(!puedeAfil()) return;
+  afErr('');
+  const numero=(document.getElementById('af-e-num')?.value||'').trim();
+  if(!numero){ afErr('El N° de afiliado es requerido.'); return; }
+  if((S.af.socios||[]).some(s=>s.id!==id && String(s.numeroAfiliado)===numero)){ afErr('Ya existe otro socio con el N° '+numero+'.'); return; }
+  const data={
+    tipoAfiliado:document.getElementById('af-e-tipo')?.value||'directo',
+    numeroAfiliado:numero,
+    planId:document.getElementById('af-e-planid')?.value||null,
+    vigenteDesde:afFechaToTs(document.getElementById('af-e-vig')?.value||'')||null,
+    carenciaHasta:afFechaToTs(document.getElementById('af-e-car')?.value||''),
+    activo:(document.getElementById('af-e-activo')?.value||'si')==='si',
+    actualizadoEn:FV()
+  };
+  try{ await db.collection('socios').doc(id).set(data,{merge:true}); S.af.edit=null; render(); }
+  catch(e){ afErr('No se pudo guardar: '+(e.message||e)); }
+}
+async function afBaja(id,reactivar){
+  if(!puedeAfil()) return;
+  afErr('');
+  try{ await db.collection('socios').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
+  catch(e){ afErr('No se pudo actualizar: '+(e.message||e)); }
+}
+
+/* ---- Migración puntual: paciente -> persona (MISMO id) + socio. Idempotente. NO la corre la app sola;
+   se invoca a mano en verificación (consola del navegador / Claude in Chrome) con sesión admin/superadmin.
+   NO toca el paciente ni los episodios (que siguen apuntando por pacienteId == personaId). ---- */
+async function migrarPacienteAAfiliado(pacienteId){
+  if(!pacienteId) throw new Error('Falta pacienteId');
+  const out={pacienteId, persona:null, socio:null, skipped:[]};
+  const psnap=await db.collection('pacientes').doc(pacienteId).get();
+  if(!psnap.exists) throw new Error('No existe pacientes/'+pacienteId);
+  const pac=psnap.data();
+  // 1) persona con el MISMO id que el paciente (idempotente: si ya existe, no la pisa)
+  const perRef=db.collection('personas').doc(pacienteId);
+  if((await perRef.get()).exists){ out.skipped.push('persona ya existía'); out.persona=pacienteId; }
+  else{
+    await perRef.set({
+      dni: pac.dni||'', apellido: pac.apellido||'', nombre: pac.nombre||'',
+      sexo: pac.sexo||'', fechaNacimiento: pac.fechaNacimiento||'',
+      telefono: pac.telefono||'', direccion: pac.direccion||'',
+      antecedentesCronicos: Array.isArray(pac.antecedentesCronicos)?pac.antecedentesCronicos:[],
+      antecedentesOtros: pac.antecedentesOtros||'',
+      creadoEn: FV()
+    });
+    out.persona=pacienteId;
+  }
+  // 2) socio (id autogenerado). Idempotente: por numeroAfiliado si lo hay, si no por personaId.
+  const numero = pac.numeroAfiliado || '';
+  let existeSocio=false;
+  if(numero){ existeSocio = !(await db.collection('socios').where('numeroAfiliado','==',numero).limit(1).get()).empty; }
+  else{ existeSocio = !(await db.collection('socios').where('personaId','==',pacienteId).limit(1).get()).empty; }
+  if(existeSocio){ out.skipped.push('socio ya existía'); }
+  else{
+    const sref=await db.collection('socios').add({
+      personaId: pacienteId,
+      tipoAfiliado: pac.tipoAfiliado || 'directo',
+      numeroAfiliado: numero,
+      planId: null,
+      vigenteDesde: pac.creadoEn || FV(),
+      carenciaHasta: null,
+      activo: true,
+      creadoEn: FV()
+    });
+    out.socio=sref.id;
+  }
+  console.log('[migrarPacienteAAfiliado]', out);
+  return out;
+}
+// Atajo para la única paciente real (María Pérez). Idempotente. Invocar: migrarMaria()
+async function migrarMaria(){ return migrarPacienteAAfiliado('aquCX0nf5ZOkesi7sNTz'); }
 
 /* ===================== PERMISOS por persona (lo configura el superadmin en la ficha) ===================== */
 function spCardPermisos(u){
