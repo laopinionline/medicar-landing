@@ -1284,6 +1284,42 @@ function gatherNuevo(){
   return o;
 }
 
+/* resolverAtribucion(personaId): resuelve el socio ACTIVO de la persona y congela su plan, para
+   pegar los ganchos de atribución administrativa al episodio (Estructura 3 → futura Contable/1).
+   PRINCIPIO DURO: la atención NUNCA se bloquea por la atribución. Ante CUALQUIER fallo (paciente
+   no migrado / sin socio / socio sin plan / plan inexistente / error de query) devuelve
+   {socioId:null, planSnapshot:null} — nunca tira. Corre FUERA de la transacción (runTransaction no
+   puede querear). personaId == pacienteId solo para pacientes migrados (Opción A, Bloque 2); para
+   no migrados la query no encuentra socio → degrada a null. Aditivo, no toca el resto del alta. */
+async function resolverAtribucion(personaId){
+  try{
+    if(!personaId) return { socioId:null, planSnapshot:null };
+    const qs=await db.collection('socios').where('personaId','==',personaId).where('activo','==',true).limit(1).get();
+    if(qs.empty) return { socioId:null, planSnapshot:null };
+    const socioId=qs.docs[0].id;
+    const socio=qs.docs[0].data();
+    let planSnapshot=null;
+    if(socio.planId){
+      const ps=await db.collection('planes').doc(socio.planId).get();
+      if(ps.exists){
+        const pl=ps.data();
+        planSnapshot={
+          planId: socio.planId,
+          nombre: pl.nombre||'',
+          precio: (pl.precio!=null?pl.precio:0),
+          carenciaDias: (pl.carenciaDias!=null?pl.carenciaDias:0),
+          coberturas: pl.coberturas||{},
+          vigenteAlMomento: firebase.firestore.Timestamp.now() // congelado (client Timestamp: valor plano, seguro en map anidado)
+        };
+      }
+    }
+    return { socioId, planSnapshot }; // socio sin plan (o plan inexistente) => socioId seteado, planSnapshot null
+  }catch(e){
+    console.warn('[resolverAtribucion] degradado a null (la atención sigue):', e);
+    return { socioId:null, planSnapshot:null };
+  }
+}
+
 async function dspCrear(){
   const d=dspState();
   dspMsg('');
@@ -1327,6 +1363,8 @@ async function dspCrear(){
       snapAfil=afilOf(nuevo);
     }
 
+    // Ganchos de atribución administrativa: resolver ANTES de la tx (que no puede querear). Degrada a null.
+    const atrib=await resolverAtribucion(pid);
     const year=new Date().getFullYear();
     const counterRef=db.collection('contadores').doc('episodios');
     const epRef=db.collection('episodios').doc();
@@ -1347,7 +1385,8 @@ async function dspCrear(){
         antecedentes:antec,
         antecedentesOtros:antecedentesOtros, // texto libre del "otros" (campo aparte, lista queda limpia)
         creadoEn:FV(),
-        transiciones:{ despacho:FV() }     // timestamp de SERVIDOR de la transición
+        transiciones:{ despacho:FV() },    // timestamp de SERVIDOR de la transición
+        atribucion:{ socioId:atrib.socioId, planSnapshot:atrib.planSnapshot, resueltoEn:FV() } // ganchos Estructura 3→1 (aditivo; degrada a null si no hay socio/plan)
       });
       return next;
     });
