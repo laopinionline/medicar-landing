@@ -328,6 +328,16 @@ service cloud.firestore {
       allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
     }
 
+    // staff/{id}: padron laboral del personal (Estructura 3, Bloque 3). id == uid del usuario; apunta a
+    // personas via personaId (== id). rol laboral medico|chofer|despachante|administrativo + matricula.
+    //  - Lectura: rol INTERNO.
+    //  - Escritura (alta/edicion): admin/superadmin o gestionar_personal. Baja LOGICA via 'activo', sin
+    //    delete desde la app. NO altera las reglas de usuarios (cuentas) ni staff_medico (intactas).
+    match /staff/{id} {
+      allow read:           if esInterno();
+      allow create, update: if isAdmin() || tienePermiso('gestionar_personal');
+    }
+
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
     match /{document=**} {
       allow read, write: if esSuperadmin();

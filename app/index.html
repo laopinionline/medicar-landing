@@ -2024,7 +2024,10 @@ function spAttach(){
   if(S.spUnsub) return;
   S.spUnsub=[
     db.collection('usuarios').onSnapshot(s=>{ if(!S.sp) return; S.sp.users=s.docs.map(d=>({uid:d.id,...d.data()})); if(spIdle()) render(); }, e=>{ if(S.sp){ S.sp.err=spErr(e); render(); } }),
-    db.collection('staff_medico').onSnapshot(s=>{ if(!S.sp) return; const o={}; s.docs.forEach(d=>{ o[d.id]=d.data(); }); S.sp.staff=o; if(spIdle()) render(); }, ()=>{})
+    db.collection('staff_medico').onSnapshot(s=>{ if(!S.sp) return; const o={}; s.docs.forEach(d=>{ o[d.id]=d.data(); }); S.sp.staff=o; if(spIdle()) render(); }, ()=>{}),
+    // Bloque 3 (staff): padrón laboral + identidad. Read-only acá para mostrar/editar; el alta de CUENTA sigue por la CF.
+    db.collection('staff').onSnapshot(s=>{ if(!S.sp) return; const o={}; s.docs.forEach(d=>{ o[d.id]=d.data(); }); S.sp.staffDocs=o; if(spIdle()) render(); }, ()=>{}),
+    db.collection('personas').onSnapshot(s=>{ if(!S.sp) return; const o={}; s.docs.forEach(d=>{ o[d.id]=d.data(); }); S.sp.personas=o; if(spIdle()) render(); }, ()=>{})
   ];
 }
 function spDetach(){ if(S.spUnsub){ S.spUnsub.forEach(u=>{ try{u();}catch(_){} }); S.spUnsub=null; } }
@@ -2038,7 +2041,7 @@ function spOpenEdit(uid){ if(S.sp){ S.sp.edit=uid; S.sp.creating=false; } render
 function spBack(){ if(S.sp){ S.sp.edit=null; S.sp.creating=false; } render(); }
 
 function spPanel(){
-  if(!S.sp){ S.sp={tab:'personal',edit:null,creating:false,users:null,staff:{}}; spAttach(); }
+  if(!S.sp){ S.sp={tab:'personal',edit:null,creating:false,users:null,staff:{},staffDocs:{},personas:{}}; spAttach(); }
   if(S.sp.err) return `<div class="card">No se pudo cargar: ${esc(S.sp.err)}<br><button class="btn-o" onclick="spReintentar()" style="margin-top:.6rem">Reintentar</button></div>`;
   if(S.sp.users===null) return `<div class="card">Cargando personal…</div>`;
   if(S.sp.creating) return spCreateView();
@@ -2075,10 +2078,13 @@ function spRow(u){
   const st=S.sp.staff[u.uid];
   const asignable=esMed && st && st.activo!==false;
   const medMark=esMed?` · ${asignable?'🩺 asignable':'🩺 no asignable'}`:'';
+  // Ficha de staff (Bloque 3): rol laboral + estado, si existe.
+  const sd=(S.sp.staffDocs||{})[u.uid];
+  const staffMark=sd?` · staff: ${esc(sd.rol||'—')}${sd.activo===false?' (inactivo)':''}`:'';
   const badge=activo?`<span class="badge bg">activo</span>`:`<span class="badge br">inactivo</span>`;
   return `<div class="lr" onclick="spOpenEdit('${u.uid}')" style="cursor:pointer">
     <div class="lrb"><div class="lrn">${esc(u.nombre||'—')}</div>
-      <div class="lrs">${esc(u.email||'')} · ${esc(u.rol||'—')}${medMark}</div></div>
+      <div class="lrs">${esc(u.email||'')} · ${esc(u.rol||'—')}${medMark}${staffMark}</div></div>
     ${badge}
   </div>`;
 }
@@ -2107,7 +2113,19 @@ async function spCrear(){
   if(pass.length<6){ spMsg('La contraseña debe tener al menos 6 caracteres.'); return; }
   const btn=document.getElementById('sp-c-btn'); if(btn){ btn.disabled=true; btn.textContent='Creando…'; }
   try{
-    await fnsCall('createUser',{email,nombre,rol,passwordInicial:pass});
+    const res=await fnsCall('createUser',{email,nombre,rol,passwordInicial:pass});
+    const uid=res&&res.uid;
+    // Bloque 3: tras el alta de CUENTA (CF intacta), engancho persona+staff client-side con el uid devuelto.
+    // Excluye afiliado/superadmin (no integran el padrón staff). Si el enganche falla, la cuenta YA quedó
+    // creada por la CF; se completa luego con migrarStaffUno(uid). NO altera la CF ni la cuenta.
+    if(uid && rol!=='afiliado' && rol!=='superadmin'){
+      try{
+        const np=parseNombre(nombre);
+        await db.collection('personas').doc(uid).set({ apellido:np.apellido, nombre:np.nombre, dni:'', fechaNacimiento:'', telefono:'', email, direccion:'', antecedentesCronicos:[], antecedentesOtros:'', creadoEn:FV() },{merge:true});
+        await db.collection('staff').doc(uid).set({ personaId:uid, rol:staffRolDe(rol), matricula:'', activo:true, creadoEn:FV() },{merge:true});
+        await db.collection('usuarios').doc(uid).set({ personaId:uid },{merge:true});
+      }catch(e2){ console.warn('[spCrear] enganche staff/persona falló (la cuenta se creó OK):',e2); }
+    }
     if(S.sp) S.sp.creating=false; render(); // el listener trae el nuevo registro
   }catch(e){ if(btn){ btn.disabled=false; btn.textContent='Crear'; } spMsg(spErr(e)); }
 }
@@ -2141,6 +2159,7 @@ function spEditView(){
     <button class="btn-o" onclick="spResetPass('${u.uid}')">Resetear contraseña</button>
   </div>
   ${spCardPermisos(u)}
+  ${spStaffPersonaCards(u)}
   <div class="card"><div class="ch">Zona peligrosa</div>
     ${esSelf
       ? `<div style="font-size:.78rem;color:var(--ink3)">No podés borrar tu propia cuenta.</div>`
@@ -2193,6 +2212,129 @@ async function spBorrar(uid){
     if(r&&r.deleted) alert('Persona borrada.');
     else if(r&&r.deactivated) alert('Tenía episodios asociados: se desactivó (baja lógica) en vez de borrarse.');
   }catch(e){ spMsg(spErr(e)); }
+}
+
+/* ===================== STAFF + PERSONA del personal (Estructura 3, Bloque 3) =====================
+   Se SUMA alrededor de la gestión de cuentas existente; NO la reemplaza. Las Cloud Functions
+   (createUser/setPassword/deleteUser) quedan intactas. staff/{uid} y personas/{uid} reusan el uid
+   del usuario (personaId == uid), igual que socios/personas reusan pacienteId en el Bloque 2.
+   Excluye del padrón a 'afiliado' (es socio/paciente) y 'superadmin' (dueño, caso especial). */
+function parseNombre(full){ const w=String(full||'').trim().split(/\s+/).filter(Boolean); if(!w.length) return {apellido:'',nombre:''}; if(w.length===1) return {apellido:'',nombre:w[0]}; return {apellido:w[w.length-1], nombre:w.slice(0,-1).join(' ')}; }
+const STAFF_ROL={medico:'medico',chofer:'chofer',despachante:'despachante',admin:'administrativo'};
+function staffRolDe(userRol){ return STAFF_ROL[userRol]||'administrativo'; }
+
+// Tarjetas en la ficha de la persona (spEditView): ficha laboral (staff) + identidad (persona).
+function spStaffPersonaCards(u){
+  if(u.rol==='afiliado'||u.rol==='superadmin'){
+    return `<div class="card"><div class="ch">Ficha de staff / Identidad</div>
+      <div style="font-size:.78rem;color:var(--ink3)">El rol <b>${esc(u.rol)}</b> no integra el padrón de staff (Estructura 3). No lleva ficha laboral.</div></div>`;
+  }
+  const sd=(S.sp.staffDocs||{})[u.uid]||{};
+  const per=(S.sp.personas||{})[u.uid]||{};
+  const rolLab=sd.rol||staffRolDe(u.rol);
+  const ROLES_LAB=[['medico','Médico'],['chofer','Chofer'],['despachante','Despachante'],['administrativo','Administrativo']];
+  const rolOpts=ROLES_LAB.map(([v,l])=>`<option value="${v}" ${rolLab===v?'selected':''}>${l}</option>`).join('');
+  const tieneStaff=!!(S.sp.staffDocs||{})[u.uid];
+  const tienePer=!!(S.sp.personas||{})[u.uid];
+  const subt=s=>` <span style="font-size:.62rem;color:var(--ink3);font-weight:400">${s}</span>`;
+  return `
+  <div class="card"><div class="ch">Ficha de staff${tieneStaff?'':subt('(sin crear)')}</div>
+    <div class="field"><label>Rol laboral</label><select id="sp-st-rol">${rolOpts}</select></div>
+    <div class="field"><label>Matrícula</label><input id="sp-st-mat" value="${esc(sd.matricula||'')}" placeholder="${rolLab==='medico'?'Matrícula profesional':'opcional'}"></div>
+    <div class="field"><label>Estado</label><select id="sp-st-activo"><option value="si" ${sd.activo!==false?'selected':''}>Activo</option><option value="no" ${sd.activo===false?'selected':''}>Inactivo (baja lógica)</option></select></div>
+    <div id="sp-st-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <button class="btn-r" onclick="spGuardarStaff('${u.uid}')">${tieneStaff?'Guardar ficha staff':'Crear ficha staff'}</button>
+  </div>
+  <div class="card"><div class="ch">Identidad (persona)${tienePer?'':subt('(sin crear)')}</div>
+    <div style="font-size:.66rem;color:var(--ink3);margin-bottom:.4rem">Identidad del núcleo. id = uid (mismo que la cuenta). El DNI se completa acá.</div>
+    <div class="field"><label>Apellido</label><input id="sp-pe-ape" value="${esc(per.apellido||'')}"></div>
+    <div class="field"><label>Nombre</label><input id="sp-pe-nom" value="${esc(per.nombre||'')}"></div>
+    <div class="field"><label>DNI</label><input id="sp-pe-dni" value="${esc(per.dni||'')}" placeholder="sin puntos"></div>
+    <div class="field"><label>Fecha de nacimiento</label><input id="sp-pe-fnac" type="date" value="${esc(per.fechaNacimiento||'')}"></div>
+    <div class="field"><label>Teléfono</label><input id="sp-pe-tel" value="${esc(per.telefono||'')}" placeholder="opcional"></div>
+    <div class="field"><label>Email</label><input id="sp-pe-email" value="${esc(per.email||u.email||'')}" placeholder="opcional"></div>
+    <div class="field"><label>Dirección</label><input id="sp-pe-dir" value="${esc(per.direccion||'')}" placeholder="opcional"></div>
+    <div id="sp-pe-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <button class="btn-r" onclick="spGuardarPersona('${u.uid}')">${tienePer?'Guardar identidad':'Crear identidad'}</button>
+  </div>`;
+}
+function spStMsg(id,t){ const e=document.getElementById(id); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+async function spGuardarStaff(uid){
+  spStMsg('sp-st-err','');
+  const rol=document.getElementById('sp-st-rol')?.value||'administrativo';
+  const matricula=(document.getElementById('sp-st-mat')?.value||'').trim();
+  const activo=(document.getElementById('sp-st-activo')?.value||'si')==='si';
+  const exists=!!(S.sp.staffDocs||{})[uid];
+  const data={ personaId:uid, rol, matricula, activo, actualizadoEn:FV() };
+  if(!exists) data.creadoEn=FV();
+  try{
+    await db.collection('staff').doc(uid).set(data,{merge:true});
+    S.sp.staffDocs[uid]=Object.assign({}, S.sp.staffDocs[uid]||{}, {personaId:uid,rol,matricula,activo}); // optimista
+    render();
+  }catch(e){ spStMsg('sp-st-err','No se pudo guardar la ficha: '+spErr(e)); }
+}
+async function spGuardarPersona(uid){
+  spStMsg('sp-pe-err','');
+  const apellido=(document.getElementById('sp-pe-ape')?.value||'').trim();
+  const nombre=(document.getElementById('sp-pe-nom')?.value||'').trim();
+  if(!apellido && !nombre){ spStMsg('sp-pe-err','Completá al menos apellido o nombre.'); return; }
+  const exists=!!(S.sp.personas||{})[uid];
+  const data={ apellido, nombre,
+    dni:(document.getElementById('sp-pe-dni')?.value||'').trim(),
+    fechaNacimiento:(document.getElementById('sp-pe-fnac')?.value||''),
+    telefono:(document.getElementById('sp-pe-tel')?.value||'').trim(),
+    email:(document.getElementById('sp-pe-email')?.value||'').trim(),
+    direccion:(document.getElementById('sp-pe-dir')?.value||'').trim(),
+    actualizadoEn:FV() };
+  if(!exists){ data.antecedentesCronicos=[]; data.antecedentesOtros=''; data.creadoEn=FV(); }
+  try{
+    await db.collection('personas').doc(uid).set(data,{merge:true});
+    S.sp.personas[uid]=Object.assign({}, S.sp.personas[uid]||{}, data); // optimista
+    render();
+  }catch(e){ spStMsg('sp-pe-err','No se pudo guardar la identidad: '+spErr(e)); }
+}
+
+/* ---- Migración Bloque 3: usuarios -> persona + staff (MISMO uid), idempotente. NO la corre la app sola;
+   se invoca a mano en verificación con sesión superadmin (consola / Claude in Chrome). NO toca cuentas Auth,
+   NO borra staff_medico (queda intacto), NO toca afiliado/superadmin, NO toca episodios. ---- */
+async function migrarStaffUno(uid, uData){
+  const out={uid, persona:null, staff:null, personaIdBackfill:false, skipped:[]};
+  let u=uData;
+  if(!u){ const us=await db.collection('usuarios').doc(uid).get(); if(!us.exists) throw new Error('No existe usuarios/'+uid); u=us.data(); }
+  if(u.rol==='afiliado'||u.rol==='superadmin'){ out.skipped.push('rol '+u.rol+' excluido del padrón staff'); console.log('[migrarStaffUno]',out); return out; }
+  // 1) persona/{uid} (mismo id), idempotente. Identidad mínima parseada del nombre del usuario.
+  const perRef=db.collection('personas').doc(uid);
+  if((await perRef.get()).exists){ out.skipped.push('persona ya existía'); out.persona=uid; }
+  else{
+    const np=parseNombre(u.nombre);
+    await perRef.set({ apellido:np.apellido, nombre:np.nombre, dni:'', fechaNacimiento:'', telefono:'', email:u.email||'', direccion:'', antecedentesCronicos:[], antecedentesOtros:'', creadoEn:FV() });
+    out.persona=uid;
+  }
+  // 2) staff/{uid} (mismo id), idempotente. Para médicos arrastra 'activo' de staff_medico si existe.
+  const stRef=db.collection('staff').doc(uid);
+  if((await stRef.get()).exists){ out.skipped.push('staff ya existía'); out.staff=uid; }
+  else{
+    let activo=true;
+    if(u.rol==='medico'){ const sm=await db.collection('staff_medico').doc(uid).get(); if(sm.exists) activo=sm.data().activo!==false; }
+    await stRef.set({ personaId:uid, rol:staffRolDe(u.rol), matricula:'', activo, creadoEn:FV() });
+    out.staff=uid;
+  }
+  // 3) backfill usuarios/{uid}.personaId = uid (cierra el enlace; la regla de usuarios exige superadmin).
+  await db.collection('usuarios').doc(uid).set({ personaId:uid },{merge:true});
+  out.personaIdBackfill=true;
+  console.log('[migrarStaffUno]', out);
+  return out;
+}
+async function migrarStaff(){
+  const snap=await db.collection('usuarios').get();
+  const res=[];
+  for(const d of snap.docs){
+    const u=d.data();
+    if(u.rol==='afiliado'||u.rol==='superadmin'){ continue; }
+    res.push(await migrarStaffUno(d.id, u));
+  }
+  console.log('[migrarStaff] procesados:', res.length, res);
+  return res;
 }
 
 function perfilSuper(){
