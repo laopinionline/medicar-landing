@@ -377,13 +377,14 @@ function getTabs(rol){
   const movTab = puede('gestionar_moviles') ? [{id:'moviles',icon:'dispatch',lbl:'Móviles'}] : [];
   const cronoTab = puede('gestionar_guardias') ? [{id:'cronograma',icon:'history',lbl:'Cronograma'}] : [];
   const catTab = puedeConfig() ? [{id:'catalogo',icon:'plan',lbl:'Catálogo'}] : [];
+  const factTab = puedeConfig() ? [{id:'facturacion',icon:'chart',lbl:'Facturación'}] : [];
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...catTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...catTab,...factTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
@@ -392,7 +393,7 @@ function pg(){
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
@@ -2392,7 +2393,7 @@ function perfilSuper(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['auditoria','Auditoría',false],['config','Configuración',false]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['auditoria','Auditoría',false],['config','Configuración',false]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -2415,6 +2416,7 @@ function superView(){
   else if(sec==='cronograma') body=cronoPanel();
   else if(sec==='catalogo') body=catPanel();
   else if(sec==='afiliados') body=afPanel();
+  else if(sec==='facturacion') body=facPanel();
   else body=`<div class="card"><div class="ch">${(SUPER_SECS.find(s=>s[0]===sec)||[,sec])[1]}</div><div style="font-size:.8rem;color:var(--ink3)">Próximamente. Módulo no disponible todavía.</div></div>`;
   return superMenu(sec)+body;
 }
@@ -2427,6 +2429,7 @@ function superNav(sec){
   if(S.superSec==='cronograma'){ cronoDetach(); S.crono=null; }
   if(S.superSec==='catalogo'){ catDetach(); S.cat=null; }
   if(S.superSec==='afiliados'){ afDetach(); S.af=null; }
+  if(S.superSec==='facturacion'){ facDetach(); S.fac=null; }
   S.superSec=sec;
   render();
 }
@@ -2945,6 +2948,107 @@ async function catPlanBaja(id,reactivar){
   catErr('');
   try{ await db.collection('planes').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
   catch(e){ catErr('No se pudo actualizar: '+(e.message||e)); }
+}
+
+/* ===================== FACTURACIÓN — Tarifas (Estructura 1, Contable) =====================
+   Catálogo de tarifas (base para los motores de facturación futuros). Modelo de negocio mixto
+   (abono mensual + extras por uso); este bloque construye SOLO el catálogo. Gobernado por
+   configurar_sistema (UI: puedeConfig(); reglas: isAdmin||cap). Colección nueva, arranca vacía.
+   NO toca episodios, ni despacho, ni Admin. Sub-secciones (por ahora una): Tarifas.
+   tarifas/{id}: nombre, tipoCalculo('fija'|'por_km'), precioBase, valorPorKm (0 si fija), activo, creadoEn. */
+function facFormOpen(){ return !!(S.fac && S.fac.edit!=null); }
+function facAttach(){
+  if(S.facUnsub) return;
+  const upd=()=>{ if(!facFormOpen()) render(); }; // no re-renderiza con un form abierto
+  S.facUnsub=[
+    db.collection('tarifas').onSnapshot(s=>{ if(!S.fac) return; S.fac.tarifas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.fac){ S.fac.err=(e.message||String(e)); render(); } })
+  ];
+}
+function facDetach(){ if(S.facUnsub){ S.facUnsub.forEach(u=>{ try{u();}catch(_){} }); S.facUnsub=null; } }
+function facErr(t){ const e=document.getElementById('fac-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function facMoney(n){ const v=Number(n)||0; return '$'+v.toLocaleString('es-AR'); }
+function facTipoLbl(t){ return t==='por_km'?'Por km':'Fija'; }
+
+function facPanel(){
+  if(!puedeConfig()) return `<div class="card"><div class="ch">Facturación</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para configurar facturación.</div></div>`;
+  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,edit:null,showInact:false,err:''}; facAttach(); }
+  if(S.fac.err) return `<div class="card">No se pudo cargar facturación: ${esc(S.fac.err)}</div>`;
+  const sub=S.fac.sub||'tarifas';
+  const tab=(id,lbl)=>`<button onclick="facSub('${id}')" style="flex:1;padding:.5rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.78rem;font-weight:600;letter-spacing:.04em;cursor:pointer">${lbl}</button>`;
+  const head=`
+  <div style="font-weight:700;margin:.1rem 0 .6rem">Facturación <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
+  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('tarifas','Tarifas')}</div>
+  <div id="fac-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
+  return head + facTarifasView();
+}
+function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; render(); }
+
+/* ---- Tarifas (ABM, baja lógica) ---- */
+function facTarifasView(){
+  if(S.fac.tarifas===null) return `<div class="card">Cargando tarifas…</div>`;
+  if(S.fac.edit!=null) return facTarifaForm();
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+  const showInact=!!S.fac.showInact;
+  const nInact=(S.fac.tarifas||[]).filter(t=>t.activo===false).length;
+  const list=(S.fac.tarifas||[]).filter(t=> showInact || t.activo!==false);
+  const rows = list.length ? list.map(t=>{
+    const inact=t.activo===false;
+    const meta=[facTipoLbl(t.tipoCalculo), '· base '+facMoney(t.precioBase), (t.tipoCalculo==='por_km'?('· '+facMoney(t.valorPorKm)+'/km'):''), inact?'· inactivo':''].filter(Boolean).join(' ');
+    const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="facEditar('${t.id}')">Editar</button><button class="${btn}" onclick="facBaja('${t.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(t.nombre||'—')}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin tarifas${showInact?'':' activas'}</div>`;
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="facShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
+  return `<button class="btn-r" onclick="facNuevo()" style="margin-bottom:.7rem">+ Nueva tarifa</button>${toggle}<div class="card">${rows}</div>`;
+}
+function facShowInact(on){ if(!S.fac) return; S.fac.showInact=!!on; render(); }
+function facNuevo(){ if(!puedeConfig())return; S.fac.edit='new'; render(); }
+function facEditar(id){ if(!puedeConfig())return; S.fac.edit=id; render(); }
+function facCancelar(){ if(S.fac) S.fac.edit=null; render(); }
+function facToggleKm(v){ const w=document.getElementById('fac-km-wrap'); if(w) w.style.display=(v==='por_km')?'block':'none'; }
+function facTarifaForm(){
+  const isNew=S.fac.edit==='new';
+  const t=isNew?{tipoCalculo:'fija'}:((S.fac.tarifas||[]).find(x=>x.id===S.fac.edit)||{tipoCalculo:'fija'});
+  const tipo=t.tipoCalculo||'fija';
+  return `<div class="card"><div class="ch">${isNew?'Nueva tarifa':'Editar tarifa'}</div>
+    <div class="field"><label>Nombre</label><input id="fac-f-nombre" value="${esc(t.nombre||'')}" placeholder="Ej. Traslado interurbano"></div>
+    <div class="field"><label>Tipo de cálculo</label><select id="fac-f-tipo" onchange="facToggleKm(this.value)">
+      <option value="fija" ${tipo==='fija'?'selected':''}>Fija</option>
+      <option value="por_km" ${tipo==='por_km'?'selected':''}>Por km</option>
+    </select></div>
+    <div class="field"><label>Precio base</label><input id="fac-f-base" type="number" min="0" step="0.01" value="${t.precioBase!=null?esc(t.precioBase):'0'}"></div>
+    <div id="fac-km-wrap" class="field" style="display:${tipo==='por_km'?'block':'none'}"><label>Valor por km</label><input id="fac-f-km" type="number" min="0" step="0.01" value="${t.valorPorKm!=null?esc(t.valorPorKm):'0'}"></div>
+    <div style="font-size:.68rem;color:var(--ink3);margin:-.2rem 0 .6rem">por_km: precio = precioBase + valorPorKm × kilómetros. En "Fija", el valor por km no aplica.</div>
+    ${isNew?'':`<div class="field"><label>Estado de alta</label><select id="fac-f-activo"><option value="si" ${t.activo!==false?'selected':''}>Activo</option><option value="no" ${t.activo===false?'selected':''}>Baja lógica</option></select></div>`}
+    <button class="btn-r" onclick="facGuardar()">Guardar</button>
+    <button class="btn-o" onclick="facCancelar()">Cancelar</button>
+  </div>`;
+}
+async function facGuardar(){
+  if(!puedeConfig()) return; // la regla es la defensa real
+  facErr('');
+  const isNew=S.fac.edit==='new';
+  const nombre=(document.getElementById('fac-f-nombre')?.value||'').trim();
+  if(!nombre){ facErr('El nombre es requerido.'); return; }
+  const tipoCalculo=document.getElementById('fac-f-tipo')?.value||'fija';
+  const precioBase=Number(document.getElementById('fac-f-base')?.value||0)||0;
+  let valorPorKm=Number(document.getElementById('fac-f-km')?.value||0)||0;
+  if(tipoCalculo==='por_km'){
+    if(!(valorPorKm>0)){ facErr('En "Por km", el valor por km debe ser mayor a 0.'); return; }
+  } else {
+    valorPorKm=0; // fija: el valor por km no aplica
+  }
+  const data={ nombre, tipoCalculo, precioBase, valorPorKm };
+  try{
+    if(isNew){ data.activo=true; data.creadoEn=FV(); await db.collection('tarifas').add(data); }
+    else{ data.activo=(document.getElementById('fac-f-activo')?.value||'si')==='si'; data.actualizadoEn=FV(); await db.collection('tarifas').doc(S.fac.edit).set(data,{merge:true}); }
+    S.fac.edit=null; render();
+  }catch(e){ facErr('No se pudo guardar: '+(e.message||e)); }
+}
+async function facBaja(id,reactivar){
+  if(!puedeConfig()) return;
+  facErr('');
+  try{ await db.collection('tarifas').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
+  catch(e){ facErr('No se pudo actualizar: '+(e.message||e)); }
 }
 
 /* ===================== AFILIADOS — Socios + Personas (Estructura 3, Administración) =====================

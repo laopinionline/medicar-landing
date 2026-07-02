@@ -338,6 +338,16 @@ service cloud.firestore {
       allow create, update: if isAdmin() || tienePermiso('gestionar_personal');
     }
 
+    // tarifas/{id}: catalogo de tarifas de facturacion (Estructura 1, Contable). tipoCalculo fija|por_km,
+    // precioBase, valorPorKm. Base para los motores de facturacion futuros.
+    //  - Lectura: rol INTERNO (no afiliado).
+    //  - Escritura (alta/edicion; baja LOGICA via 'activo'): admin/superadmin o configurar_sistema.
+    //    Sin delete desde la app. Superadmin conserva borrado por el catch-all.
+    match /tarifas/{id} {
+      allow read:           if esInterno();
+      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+    }
+
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
     match /{document=**} {
       allow read, write: if esSuperadmin();
