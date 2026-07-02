@@ -2956,12 +2956,14 @@ async function catPlanBaja(id,reactivar){
    configurar_sistema (UI: puedeConfig(); reglas: isAdmin||cap). Colección nueva, arranca vacía.
    NO toca episodios, ni despacho, ni Admin. Sub-secciones (por ahora una): Tarifas.
    tarifas/{id}: nombre, tipoCalculo('fija'|'por_km'), precioBase, valorPorKm (0 si fija), activo, creadoEn. */
-function facFormOpen(){ return !!(S.fac && S.fac.edit!=null); }
+function facFormOpen(){ return !!(S.fac && (S.fac.edit!=null || S.fac.cedit!=null)); }
 function facAttach(){
   if(S.facUnsub) return;
   const upd=()=>{ if(!facFormOpen()) render(); }; // no re-renderiza con un form abierto
   S.facUnsub=[
-    db.collection('tarifas').onSnapshot(s=>{ if(!S.fac) return; S.fac.tarifas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.fac){ S.fac.err=(e.message||String(e)); render(); } })
+    db.collection('tarifas').onSnapshot(s=>{ if(!S.fac) return; S.fac.tarifas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.fac){ S.fac.err=(e.message||String(e)); render(); } }),
+    db.collection('prestaciones').onSnapshot(s=>{ if(!S.fac) return; S.fac.prest=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.prest=[]; }),
+    db.collection('cargos').onSnapshot(s=>{ if(!S.fac) return; S.fac.cargos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.cargos=[]; })
   ];
 }
 function facDetach(){ if(S.facUnsub){ S.facUnsub.forEach(u=>{ try{u();}catch(_){} }); S.facUnsub=null; } }
@@ -2971,17 +2973,17 @@ function facTipoLbl(t){ return t==='por_km'?'Por km':'Fija'; }
 
 function facPanel(){
   if(!puedeConfig()) return `<div class="card"><div class="ch">Facturación</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para configurar facturación.</div></div>`;
-  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,edit:null,showInact:false,err:''}; facAttach(); }
+  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,edit:null,cedit:null,showInact:false,showAnul:false,err:'',report:null}; facAttach(); }
   if(S.fac.err) return `<div class="card">No se pudo cargar facturación: ${esc(S.fac.err)}</div>`;
   const sub=S.fac.sub||'tarifas';
   const tab=(id,lbl)=>`<button onclick="facSub('${id}')" style="flex:1;padding:.5rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.78rem;font-weight:600;letter-spacing:.04em;cursor:pointer">${lbl}</button>`;
   const head=`
   <div style="font-weight:700;margin:.1rem 0 .6rem">Facturación <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
-  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('tarifas','Tarifas')}</div>
+  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('tarifas','Tarifas')}${tab('cargos','Cargos')}</div>
   <div id="fac-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
-  return head + facTarifasView();
+  return head + (sub==='cargos' ? facCargosView() : facTarifasView());
 }
-function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; render(); }
+function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; S.fac.cedit=null; render(); }
 
 /* ---- Tarifas (ABM, baja lógica) ---- */
 function facTarifasView(){
@@ -2993,7 +2995,8 @@ function facTarifasView(){
   const list=(S.fac.tarifas||[]).filter(t=> showInact || t.activo!==false);
   const rows = list.length ? list.map(t=>{
     const inact=t.activo===false;
-    const meta=[facTipoLbl(t.tipoCalculo), '· base '+facMoney(t.precioBase), (t.tipoCalculo==='por_km'?('· '+facMoney(t.valorPorKm)+'/km'):''), inact?'· inactivo':''].filter(Boolean).join(' ');
+    const prNom=t.prestacionId?((S.fac.prest||[]).find(p=>p.id===t.prestacionId)||{}).nombre||t.prestacionId:'';
+    const meta=[facTipoLbl(t.tipoCalculo), '· base '+facMoney(t.precioBase), (t.tipoCalculo==='por_km'?('· '+facMoney(t.valorPorKm)+'/km'):''), (prNom?('· '+esc(prNom)):''), (t.siempreExtra?'· siempre extra':''), inact?'· inactivo':''].filter(Boolean).join(' ');
     const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="facEditar('${t.id}')">Editar</button><button class="${btn}" onclick="facBaja('${t.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
     return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(t.nombre||'—')}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin tarifas${showInact?'':' activas'}</div>`;
@@ -3009,8 +3012,11 @@ function facTarifaForm(){
   const isNew=S.fac.edit==='new';
   const t=isNew?{tipoCalculo:'fija'}:((S.fac.tarifas||[]).find(x=>x.id===S.fac.edit)||{tipoCalculo:'fija'});
   const tipo=t.tipoCalculo||'fija';
+  const prestActivas=(S.fac.prest||[]).filter(p=>p.activo!==false);
+  const prestOpts=`<option value="">— Sin prestación —</option>`+prestActivas.map(p=>`<option value="${p.id}" ${t.prestacionId===p.id?'selected':''}>${esc(p.nombre||p.id)}</option>`).join('');
   return `<div class="card"><div class="ch">${isNew?'Nueva tarifa':'Editar tarifa'}</div>
     <div class="field"><label>Nombre</label><input id="fac-f-nombre" value="${esc(t.nombre||'')}" placeholder="Ej. Traslado interurbano"></div>
+    <div class="field"><label>Prestación (a qué le pone precio)</label><select id="fac-f-prest">${prestOpts}</select></div>
     <div class="field"><label>Tipo de cálculo</label><select id="fac-f-tipo" onchange="facToggleKm(this.value)">
       <option value="fija" ${tipo==='fija'?'selected':''}>Fija</option>
       <option value="por_km" ${tipo==='por_km'?'selected':''}>Por km</option>
@@ -3018,6 +3024,7 @@ function facTarifaForm(){
     <div class="field"><label>Precio base</label><input id="fac-f-base" type="number" min="0" step="0.01" value="${t.precioBase!=null?esc(t.precioBase):'0'}"></div>
     <div id="fac-km-wrap" class="field" style="display:${tipo==='por_km'?'block':'none'}"><label>Valor por km</label><input id="fac-f-km" type="number" min="0" step="0.01" value="${t.valorPorKm!=null?esc(t.valorPorKm):'0'}"></div>
     <div style="font-size:.68rem;color:var(--ink3);margin:-.2rem 0 .6rem">por_km: precio = precioBase + valorPorKm × kilómetros. En "Fija", el valor por km no aplica.</div>
+    <label style="display:flex;align-items:center;justify-content:space-between;padding:.4rem 0;border-top:1px solid var(--border);margin-bottom:.4rem"><span style="font-size:.85rem">Siempre extra <span style="font-size:.7rem;color:var(--ink3)">(se cobra aunque el plan la cubra)</span></span><input type="checkbox" id="fac-f-siempre" ${t.siempreExtra?'checked':''}></label>
     ${isNew?'':`<div class="field"><label>Estado de alta</label><select id="fac-f-activo"><option value="si" ${t.activo!==false?'selected':''}>Activo</option><option value="no" ${t.activo===false?'selected':''}>Baja lógica</option></select></div>`}
     <button class="btn-r" onclick="facGuardar()">Guardar</button>
     <button class="btn-o" onclick="facCancelar()">Cancelar</button>
@@ -3037,7 +3044,9 @@ async function facGuardar(){
   } else {
     valorPorKm=0; // fija: el valor por km no aplica
   }
-  const data={ nombre, tipoCalculo, precioBase, valorPorKm };
+  const prestacionId=document.getElementById('fac-f-prest')?.value||'';
+  const siempreExtra=!!(document.getElementById('fac-f-siempre')?.checked);
+  const data={ nombre, tipoCalculo, precioBase, valorPorKm, prestacionId:prestacionId||null, siempreExtra };
   try{
     if(isNew){ data.activo=true; data.creadoEn=FV(); await db.collection('tarifas').add(data); }
     else{ data.activo=(document.getElementById('fac-f-activo')?.value||'si')==='si'; data.actualizadoEn=FV(); await db.collection('tarifas').doc(S.fac.edit).set(data,{merge:true}); }
@@ -3049,6 +3058,149 @@ async function facBaja(id,reactivar){
   facErr('');
   try{ await db.collection('tarifas').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
   catch(e){ facErr('No se pudo actualizar: '+(e.message||e)); }
+}
+
+/* ---- Cargos: motor de facturación directa + ABM (Estructura 1) ----
+   Facturación DIRECTA (decisión Lucas): los cargos nacen a precio de catálogo (precioSugerido=precioFinal),
+   se ajustan/anulan DESPUÉS. Sin bandeja de aprobación previa. El motor SOLO LEE episodios (nunca escribe).
+   Mapeo FIJO codigo→prestación (valores reales verificados en CODIGOS): */
+const COD_PRESTACION={ rojo:'emergencias', amarillo:'urgencias', verde:'atencion_medica', traslado:'traslados' };
+const REGLA_LBL={ no_socio:'No socio', fuera_cobertura:'Fuera de cobertura', siempre_extra:'Siempre extra' };
+
+function facCargosView(){
+  if(S.fac.cargos===null) return `<div class="card">Cargando cargos…</div>`;
+  if(S.fac.cedit!=null) return facCargoForm();
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+  const showAnul=!!S.fac.showAnul;
+  const nAnul=(S.fac.cargos||[]).filter(c=>c.estado==='anulado').length;
+  const list=(S.fac.cargos||[]).filter(c=> showAnul || c.estado!=='anulado').slice().sort((a,b)=>((b.nroIncidente||0)-(a.nroIncidente||0)));
+  const rows = list.length ? list.map(c=>{
+    const anul=c.estado==='anulado';
+    const kmBadge=c.kmPendiente?` <span style="background:var(--o,#E0A23B);color:#fff;border-radius:6px;padding:.05rem .35rem;font-size:.6rem;font-weight:700">km pendiente</span>`:'';
+    const meta=[REGLA_LBL[c.regla]||c.regla, '· '+esc(c.tarifaNombre||'—'), '· '+facMoney(c.precioFinal), anul?'· ANULADO':''].filter(Boolean).join(' ');
+    const acts=anul?'':`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="facCargoEditar('${c.id}')">Editar</button></div>`;
+    return `<div class="lr" style="flex-wrap:wrap${anul?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(c.nroIncidenteFmt||('INC '+(c.nroIncidente!=null?c.nroIncidente:'—')))} · ${esc(c.pacNombre||'—')}${kmBadge}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin cargos${showAnul?'':' activos'}</div>`;
+  const report = S.fac.report ? `<div class="card" style="background:var(--bg)"><div style="font-size:.78rem;font-weight:700;margin-bottom:.3rem">Última corrida</div><div style="font-size:.75rem;color:var(--ink2);line-height:1.6">${S.fac.report}</div></div>` : '';
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="facShowAnul(this.checked)" ${showAnul?'checked':''}>Ver anulados${nAnul?(' ('+nAnul+')'):''}</label>`;
+  return `<button class="btn-r" onclick="generarCargos()" style="margin-bottom:.4rem">⚙️ GENERAR CARGOS</button>
+    <div style="font-size:.66rem;color:var(--ink3);margin:0 0 .7rem">Sobre episodios <b>cerrados</b> sin cargo. Idempotente (no duplica). Solo lee episodios.</div>
+    ${report}${toggle}<div class="card">${rows}</div>`;
+}
+function facShowAnul(on){ if(!S.fac) return; S.fac.showAnul=!!on; render(); }
+function facCargoEditar(id){ if(!puedeConfig())return; S.fac.cedit=id; render(); }
+function facCargoCancelar(){ if(S.fac) S.fac.cedit=null; render(); }
+
+async function generarCargos(){
+  if(!puedeConfig()) return; // la regla es la defensa real
+  facErr('');
+  if(!Array.isArray(S.fac.tarifas)){ facErr('Esperá a que carguen las tarifas.'); return; }
+  const rep={ generados:0, sinTarifa:0, sinCargo:0, yaTenian:0, sinAtribucion:0, errores:0 };
+  try{
+    // SOLO LECTURA de episodios cerrados + cargos existentes (idempotencia por episodioId).
+    const [epsSnap, cgSnap] = await Promise.all([
+      db.collection('episodios').where('estado','==','cerrado').get(),
+      db.collection('cargos').get()
+    ]);
+    const conCargo=new Set(cgSnap.docs.map(d=>d.data().episodioId));
+    for(const doc of epsSnap.docs){
+      const ep=doc.data(), epId=doc.id;
+      if(conCargo.has(epId)){ rep.yaTenian++; continue; }
+      // codigo = codigoReal (desenlace) || codigoPresuntivo (top-level). Mapeo fijo a prestación.
+      const codigo=(ep.desenlace && ep.desenlace.codigoReal) || ep.codigoPresuntivo || '';
+      const prestacionId=COD_PRESTACION[codigo]||null;
+      if(!prestacionId){ rep.sinTarifa++; continue; }
+      const tarifa=(S.fac.tarifas||[]).find(t=>t.activo!==false && t.prestacionId===prestacionId);
+      if(!tarifa){ rep.sinTarifa++; continue; } // no generar cargo en 0
+      const atrib=ep.atribucion||null;
+      const sinAtrib=!atrib;
+      const socioId=(atrib && atrib.socioId)?atrib.socioId:null;
+      const cob=(atrib && atrib.planSnapshot && atrib.planSnapshot.coberturas)?atrib.planSnapshot.coberturas:{};
+      let regla=null;
+      if(socioId==null){ regla='no_socio'; }              // a. no socio (o episodio histórico sin atribución)
+      else if(cob[prestacionId]!==true){ regla='fuera_cobertura'; } // b. fuera de cobertura
+      else if(tarifa.siempreExtra){ regla='siempre_extra'; }       // c. tipo siempre-extra
+      else { rep.sinCargo++; continue; }                  // d. cubierto por el abono → no genera
+      if(sinAtrib) rep.sinAtribucion++;                   // histórico: se cuenta aparte (subconjunto de no_socio)
+      const porKm=tarifa.tipoCalculo==='por_km';
+      const base=Number(tarifa.precioBase)||0;
+      const cargo={
+        episodioId:epId,
+        nroIncidente:(ep.nroIncidente!=null?ep.nroIncidente:null),
+        nroIncidenteFmt:(ep.nroIncidente!=null?fmtIncidente(ep.nroIncidente,añoDe(ep.creadoEn)):'—'),
+        personaId:ep.pacienteId||null,
+        socioId,
+        pacNombre:(ep.pac && ep.pac.nombre)||'',
+        regla,
+        tarifaId:tarifa.id, tarifaNombre:tarifa.nombre||'', tipoCalculo:tarifa.tipoCalculo||'fija',
+        precioSugerido:base,
+        valorPorKm:(porKm?(Number(tarifa.valorPorKm)||0):0),
+        km:null, kmPendiente:porKm,
+        precioFinal:base,
+        motivoAjuste:null,
+        estado:'generado', generadoEn:FV(), generadoPor:S.user.uid
+      };
+      try{ await db.collection('cargos').add(cargo); rep.generados++; }
+      catch(e){ rep.errores++; console.warn('[generarCargos] fallo al crear cargo de',epId,e); }
+    }
+    S.fac.report=`Generados: <b>${rep.generados}</b> · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
+    render();
+  }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
+}
+
+function facCMsg(t){ const e=document.getElementById('fac-c-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function facCargoKmRecalc(precioSugerido, valorPorKm){
+  const km=Number(document.getElementById('fac-c-km')?.value||0)||0;
+  const f=document.getElementById('fac-c-final'); if(f) f.value=(precioSugerido + km*valorPorKm).toFixed(2);
+}
+function facCargoForm(){
+  const c=(S.fac.cargos||[]).find(x=>x.id===S.fac.cedit)||{};
+  const porKm=c.tipoCalculo==='por_km';
+  const kmField = porKm
+    ? `<div class="field"><label>Kilómetros</label><input id="fac-c-km" type="number" min="0" step="0.1" value="${c.km!=null?esc(c.km):''}" oninput="facCargoKmRecalc(${Number(c.precioSugerido)||0},${Number(c.valorPorKm)||0})" placeholder="cargar km"><div style="font-size:.66rem;color:var(--ink3);margin-top:.25rem">Al cargar km: precio = ${facMoney(c.precioSugerido)} + km × ${facMoney(c.valorPorKm)}/km (recalcula automático, apaga "km pendiente").</div></div>`
+    : '';
+  return `<div class="card"><div class="ch">Cargo · ${esc(c.nroIncidenteFmt||('INC '+(c.nroIncidente!=null?c.nroIncidente:'—')))}</div>
+    <div style="font-size:.78rem;color:var(--ink3);margin-bottom:.5rem">${esc(c.pacNombre||'—')} · ${REGLA_LBL[c.regla]||c.regla} · ${esc(c.tarifaNombre||'—')} (${facTipoLbl(c.tipoCalculo)})</div>
+    <div class="ir"><span class="il">Precio sugerido</span><span class="iv">${facMoney(c.precioSugerido)}</span></div>
+    <div id="fac-c-err" class="err" style="display:none;margin:.4rem 0"></div>
+    ${kmField}
+    <div class="field"><label>Precio final</label><input id="fac-c-final" type="number" min="0" step="0.01" value="${c.precioFinal!=null?esc(c.precioFinal):'0'}"></div>
+    <div class="field"><label>Motivo de ajuste</label><input id="fac-c-motivo" value="${esc(c.motivoAjuste||'')}" placeholder="Obligatorio si cambiás el precio final a mano"></div>
+    <button class="btn-r" onclick="facCargoGuardar('${c.id}')">Guardar</button>
+    <button class="btn-o" onclick="facCargoCancelar()">Cancelar</button>
+    <div class="card" style="margin-top:.8rem;background:var(--bg)"><div style="font-size:.75rem;font-weight:700;margin-bottom:.3rem">Anular cargo (lógico, nunca se borra)</div>
+      <div class="field"><label>Motivo de anulación</label><input id="fac-c-anmotivo" placeholder="requerido"></div>
+      <button class="btn-o" onclick="facCargoAnular('${c.id}')">Anular</button>
+    </div>
+  </div>`;
+}
+async function facCargoGuardar(id){
+  if(!puedeConfig()) return;
+  facCMsg('');
+  const c=(S.fac.cargos||[]).find(x=>x.id===id); if(!c) return;
+  const porKm=c.tipoCalculo==='por_km';
+  let km=(c.km!=null?c.km:null), kmPendiente=!!c.kmPendiente;
+  if(porKm){
+    const kmRaw=(document.getElementById('fac-c-km')?.value||'').trim();
+    if(kmRaw!==''){ km=Number(kmRaw)||0; kmPendiente=false; }
+  }
+  const base=Number(c.precioSugerido)||0, vk=Number(c.valorPorKm)||0;
+  const expected=(porKm && km!=null) ? (base + km*vk) : base;
+  const precioFinal=Number(document.getElementById('fac-c-final')?.value||0)||0;
+  const motivoAjuste=(document.getElementById('fac-c-motivo')?.value||'').trim();
+  const manual=Math.abs(precioFinal-expected)>0.005;
+  if(manual && !motivoAjuste){ facCMsg('Cambiaste el precio final a mano: el motivo de ajuste es obligatorio.'); return; }
+  const data={ km, kmPendiente, precioFinal, motivoAjuste:(manual?motivoAjuste:(motivoAjuste||null)), actualizadoEn:FV() };
+  try{ await db.collection('cargos').doc(id).set(data,{merge:true}); S.fac.cedit=null; render(); }
+  catch(e){ facCMsg('No se pudo guardar: '+(e.message||e)); }
+}
+async function facCargoAnular(id){
+  if(!puedeConfig()) return;
+  facCMsg('');
+  const motivo=(document.getElementById('fac-c-anmotivo')?.value||'').trim();
+  if(!motivo){ facCMsg('El motivo de anulación es requerido.'); return; }
+  try{ await db.collection('cargos').doc(id).set({ estado:'anulado', motivoAnulacion:motivo, anuladoEn:FV(), anuladoPor:S.user.uid },{merge:true}); S.fac.cedit=null; render(); }
+  catch(e){ facCMsg('No se pudo anular: '+(e.message||e)); }
 }
 
 /* ===================== AFILIADOS — Socios + Personas (Estructura 3, Administración) =====================

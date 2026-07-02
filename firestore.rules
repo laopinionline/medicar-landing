@@ -348,6 +348,15 @@ service cloud.firestore {
       allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
     }
 
+    // cargos/{id}: cargos de facturacion generados por episodio (Estructura 1, Contable). DESVIO DELIBERADO
+    // del patron: es DATA FINANCIERA, NO se abre a todo el personal interno.
+    //  - Lectura Y escritura: SOLO admin/superadmin o configurar_sistema (NO esInterno).
+    //  - Anulacion LOGICA via estado:'anulado'; NUNCA delete desde la app.
+    match /cargos/{id} {
+      allow read:           if isAdmin() || tienePermiso('configurar_sistema');
+      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+    }
+
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
     match /{document=**} {
       allow read, write: if esSuperadmin();
