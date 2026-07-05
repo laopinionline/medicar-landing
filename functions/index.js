@@ -149,3 +149,79 @@ exports.liberarMovilAlCerrar = functions
     }, { merge: true });
     return null;
   });
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * crearLeadWeb — PUERTA PÚBLICA (Estructura 2 Marketing, Bloque 2).
+ * HTTP (onRequest, 1ra gen, southamerica-east1). El form público de la landing
+ * medicaronline.ar hace POST acá; escribimos leads/{auto} con Admin SDK, así las
+ * REGLAS de Firestore quedan CERRADAS al público (nadie escribe leads directo).
+ * Defensa v1: CORS lista blanca + honeypot + validación dura fail-closed.
+ * (Rate limiting: mejora futura si aparece spam.)
+ * ───────────────────────────────────────────────────────────────────────── */
+const CORS_WHITELIST = [
+  'https://medicaronline.ar',
+  'https://www.medicaronline.ar',
+  'http://127.0.0.1:8000', // pruebas locales
+];
+function limpiar(v) {
+  return String(v == null ? '' : v).replace(/<[^>]*>/g, '').trim(); // strip de tags básico + trim
+}
+function emailValido(e) {
+  return e.length <= 100 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+}
+
+exports.crearLeadWeb = fn.onRequest(async (req, res) => {
+  const origin = req.get('origin') || '';
+  // CORS: solo orígenes de la lista blanca. Fuera de lista -> 403 (también para preflight).
+  if (CORS_WHITELIST.indexOf(origin) === -1) {
+    return res.status(403).json({ ok: false, error: 'Origen no permitido.' });
+  }
+  res.set('Access-Control-Allow-Origin', origin);
+  res.set('Vary', 'Origin');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Max-Age', '3600');
+
+  if (req.method === 'OPTIONS') return res.status(204).send(''); // preflight
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Método no permitido.' });
+
+  try {
+    const body = (req.body && typeof req.body === 'object') ? req.body : {};
+
+    // HONEYPOT: si 'website' viene con contenido -> bot. 200 {ok:true} SIN crear nada (no dar pistas).
+    if (limpiar(body.website)) return res.status(200).json({ ok: true });
+
+    const nombre = limpiar(body.nombre);
+    const telefono = limpiar(body.telefono);
+    const email = limpiar(body.email);
+    const mensaje = limpiar(body.mensaje);
+
+    // VALIDACIÓN dura, fail-closed. Campos extra inesperados -> ignorados (no se leen).
+    const generico = { ok: false, error: 'Datos inválidos.' };
+    if (nombre.length < 2 || nombre.length > 80) return res.status(400).json(generico);
+    if (!telefono && !email) return res.status(400).json(generico);
+    if (telefono && (telefono.length < 6 || telefono.length > 25)) return res.status(400).json(generico);
+    if (email && !emailValido(email)) return res.status(400).json(generico);
+    if (mensaje.length > 500) return res.status(400).json(generico);
+
+    // Crear lead (MISMO schema que los leads internos -> aparece igual en el panel Marketing).
+    await db.collection('leads').add({
+      nombre,
+      telefono: telefono || '',
+      email: email || '',
+      origen: 'web',
+      estado: 'nuevo',
+      notas: mensaje || '',
+      motivoDescarte: null,
+      personaId: null,
+      socioId: null,
+      campanaId: null,
+      creadoEn: admin.firestore.FieldValue.serverTimestamp(),
+      creadoPor: 'web-publico',
+    });
+    return res.status(200).json({ ok: true });
+  } catch (e) {
+    console.error('[crearLeadWeb]', e);
+    return res.status(500).json({ ok: false, error: 'Error interno.' }); // 500 genérico, sin detalles
+  }
+});

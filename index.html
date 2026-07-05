@@ -867,6 +867,8 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
       <select id="f-plan"><option value="">Tipo de plan de interés</option><option>Plan Joven ($20.000/mes)</option><option>Plan Familiar ($40.000/mes)</option><option>Plan Senior ($60.000/mes)</option><option>Área Protegida ($70.000/mes)</option><option>Corporativo (a consultar)</option><option>No sé, quiero asesoramiento</option></select>
       <select id="f-motivo"><option value="">Motivo de consulta</option><option>Quiero afiliarme</option><option>Consulta sobre planes</option><option>Información corporativa</option><option>Otro</option></select>
       <textarea id="f-msg" placeholder="Mensaje (opcional)"></textarea>
+      <input type="text" id="f-website" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0">
+      <div id="form-status" style="display:none;font-size:.78rem;text-align:center;margin:.2rem 0;font-weight:600"></div>
       <button class="sub-btn" onclick="enviarFormulario()" style="background:var(--r);color:#fff;padding:.9rem;font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;border:none;cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:700">Enviar consulta</button>
       <p style="font-size:.72rem;color:var(--ink3);text-align:center;margin-top:.25rem">Sus datos son confidenciales y no serán compartidos con terceros.</p>
     </div>
@@ -993,15 +995,44 @@ function preselPlan(nombre) {
   }
 }
 
-function enviarFormulario() {
-  const nombre = document.getElementById('f-nombre').value.trim();
-  const tel = document.getElementById('f-tel').value.trim();
-  if (!nombre || !tel) {
-    alert('Por favor completá al menos tu nombre y teléfono.');
-    return;
+/* PUERTA PÚBLICA (Marketing B2): el form postea a la Cloud Function crearLeadWeb,
+   que valida y crea leads/{auto} con origen 'web' (Admin SDK; las reglas quedan cerradas al público). */
+const CF_LEAD_URL = 'https://southamerica-east1-medicar-sistema.cloudfunctions.net/crearLeadWeb'; // ⚠️ VERIFICAR/REEMPLAZAR con la URL que imprime el deploy de la CF
+function fcStatus(msg, ok) {
+  var el = document.getElementById('form-status');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
+  el.style.color = ok ? '#1D9E75' : 'var(--r)';
+}
+async function enviarFormulario() {
+  var g = function(id){ var el=document.getElementById(id); return el ? (el.value||'') : ''; };
+  var nombre = g('f-nombre').trim(), tel = g('f-tel').trim(), email = g('f-email').trim();
+  var dni = g('f-dni').trim(), plan = g('f-plan'), motivo = g('f-motivo'), msg = g('f-msg').trim();
+  var website = g('f-website'); // honeypot
+  fcStatus('');
+  if (!nombre || (!tel && !email)) { fcStatus('Completá tu nombre y al menos un teléfono o email.', false); return; }
+  // Componer mensaje para no perder plan/motivo/DNI elegidos en la landing.
+  var extra = [msg, plan?('Plan: '+plan):'', motivo?('Motivo: '+motivo):'', dni?('DNI: '+dni):''].filter(Boolean).join(' \u00b7 ');
+  var btn = document.querySelector('#form-contacto .sub-btn');
+  if (btn) { btn.disabled = true; btn.dataset.txt = btn.textContent; btn.textContent = 'Enviando…'; }
+  try {
+    var r = await fetch(CF_LEAD_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nombre: nombre, telefono: tel, email: email, mensaje: extra, website: website })
+    });
+    var data = {};
+    try { data = await r.json(); } catch (_) {}
+    if (!r.ok || !data || data.ok !== true) throw new Error('respuesta inválida');
+    fcStatus('¡Gracias, ' + nombre + '! Recibimos tu consulta y te contactaremos a la brevedad.', true);
+    ['f-nombre','f-tel','f-email','f-dni','f-msg'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
+    var sp=document.getElementById('f-plan'), sm=document.getElementById('f-motivo'); if(sp) sp.selectedIndex=0; if(sm) sm.selectedIndex=0;
+  } catch (e) {
+    fcStatus('No pudimos enviar tu consulta. Reintentá o llamanos al 443044.', false);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset.txt || 'Enviar consulta'; }
   }
-  alert('¡Gracias, ' + nombre + '! Recibimos tu consulta y te contactaremos a la brevedad.');
-  document.getElementById('form-contacto').reset();
 }
 </script>
 
