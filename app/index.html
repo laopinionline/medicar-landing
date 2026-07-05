@@ -2956,14 +2956,15 @@ async function catPlanBaja(id,reactivar){
    configurar_sistema (UI: puedeConfig(); reglas: isAdmin||cap). Colección nueva, arranca vacía.
    NO toca episodios, ni despacho, ni Admin. Sub-secciones (por ahora una): Tarifas.
    tarifas/{id}: nombre, tipoCalculo('fija'|'por_km'), precioBase, valorPorKm (0 si fija), activo, creadoEn. */
-function facFormOpen(){ return !!(S.fac && (S.fac.edit!=null || S.fac.cedit!=null)); }
+function facFormOpen(){ return !!(S.fac && (S.fac.edit!=null || S.fac.cedit!=null || S.fac.aedit!=null)); }
 function facAttach(){
   if(S.facUnsub) return;
   const upd=()=>{ if(!facFormOpen()) render(); }; // no re-renderiza con un form abierto
   S.facUnsub=[
     db.collection('tarifas').onSnapshot(s=>{ if(!S.fac) return; S.fac.tarifas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.fac){ S.fac.err=(e.message||String(e)); render(); } }),
     db.collection('prestaciones').onSnapshot(s=>{ if(!S.fac) return; S.fac.prest=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.prest=[]; }),
-    db.collection('cargos').onSnapshot(s=>{ if(!S.fac) return; S.fac.cargos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.cargos=[]; })
+    db.collection('cargos').onSnapshot(s=>{ if(!S.fac) return; S.fac.cargos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.cargos=[]; }),
+    db.collection('abonos').onSnapshot(s=>{ if(!S.fac) return; S.fac.abonos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.abonos=[]; })
   ];
 }
 function facDetach(){ if(S.facUnsub){ S.facUnsub.forEach(u=>{ try{u();}catch(_){} }); S.facUnsub=null; } }
@@ -2973,17 +2974,17 @@ function facTipoLbl(t){ return t==='por_km'?'Por km':'Fija'; }
 
 function facPanel(){
   if(!puedeConfig()) return `<div class="card"><div class="ch">Facturación</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para configurar facturación.</div></div>`;
-  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,edit:null,cedit:null,showInact:false,showAnul:false,err:'',report:null}; facAttach(); }
+  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,abonos:null,edit:null,cedit:null,aedit:null,showInact:false,showAnul:false,showAnulAb:false,periodo:facPeriodoActual(),err:'',report:null,reportAb:null}; facAttach(); }
   if(S.fac.err) return `<div class="card">No se pudo cargar facturación: ${esc(S.fac.err)}</div>`;
   const sub=S.fac.sub||'tarifas';
-  const tab=(id,lbl)=>`<button onclick="facSub('${id}')" style="flex:1;padding:.5rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.78rem;font-weight:600;letter-spacing:.04em;cursor:pointer">${lbl}</button>`;
+  const tab=(id,lbl)=>`<button onclick="facSub('${id}')" style="flex:1;padding:.5rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.72rem;font-weight:600;letter-spacing:.03em;cursor:pointer">${lbl}</button>`;
   const head=`
   <div style="font-weight:700;margin:.1rem 0 .6rem">Facturación <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
-  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('tarifas','Tarifas')}${tab('cargos','Cargos')}</div>
+  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('tarifas','Tarifas')}${tab('cargos','Cargos')}${tab('abonos','Abonos')}</div>
   <div id="fac-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
-  return head + (sub==='cargos' ? facCargosView() : facTarifasView());
+  return head + (sub==='cargos' ? facCargosView() : (sub==='abonos' ? facAbonosView() : facTarifasView()));
 }
-function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; S.fac.cedit=null; render(); }
+function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; S.fac.cedit=null; S.fac.aedit=null; render(); }
 
 /* ---- Tarifas (ABM, baja lógica) ---- */
 function facTarifasView(){
@@ -3201,6 +3202,119 @@ async function facCargoAnular(id){
   if(!motivo){ facCMsg('El motivo de anulación es requerido.'); return; }
   try{ await db.collection('cargos').doc(id).set({ estado:'anulado', motivoAnulacion:motivo, anuladoEn:FV(), anuladoPor:S.user.uid },{merge:true}); S.fac.cedit=null; render(); }
   catch(e){ facCMsg('No se pudo anular: '+(e.message||e)); }
+}
+
+/* ---- Abonos: corrida mensual de cuotas por socio (Estructura 1) ----
+   Mismo espíritu que cargos: facturación DIRECTA (nace a precio de catálogo, se ajusta/anula después) +
+   snapshot (el precio del plan se CONGELA a la corrida; si el plan cambia luego, los abonos ya generados
+   no se tocan). Sin prorrateo (mes completo). La carencia NO afecta el abono. El motor SOLO LEE
+   socios/planes/personas; escribe solo abonos. */
+function facPeriodoActual(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function facSetPeriodo(v){ if(!S.fac) return; S.fac.periodo=v||facPeriodoActual(); render(); }
+function facShowAnulAb(on){ if(!S.fac) return; S.fac.showAnulAb=!!on; render(); }
+function facAbonoEditar(id){ if(!puedeConfig())return; S.fac.aedit=id; render(); }
+function facAbonoCancelar(){ if(S.fac) S.fac.aedit=null; render(); }
+
+function facAbonosView(){
+  if(S.fac.abonos===null) return `<div class="card">Cargando abonos…</div>`;
+  if(S.fac.aedit!=null) return facAbonoForm();
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+  const periodo=S.fac.periodo||facPeriodoActual();
+  const showAnul=!!S.fac.showAnulAb;
+  const nAnul=(S.fac.abonos||[]).filter(a=>a.periodo===periodo && a.estado==='anulado').length;
+  const list=(S.fac.abonos||[]).filter(a=>a.periodo===periodo && (showAnul||a.estado!=='anulado')).slice().sort((a,b)=>(a.socioNombre||'').localeCompare(b.socioNombre||''));
+  const rows = list.length ? list.map(a=>{
+    const anul=a.estado==='anulado';
+    const meta=['N° '+esc(a.numeroAfiliado||'—'), '· '+esc(a.planNombre||'—'), '· '+facMoney(a.precioFinal), anul?'· ANULADO':''].filter(Boolean).join(' ');
+    const acts=anul?'':`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="facAbonoEditar('${a.id}')">Editar</button></div>`;
+    return `<div class="lr" style="flex-wrap:wrap${anul?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(a.socioNombre||'—')}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin abonos en ${esc(periodo)}${showAnul?'':' (activos)'}</div>`;
+  const report = S.fac.reportAb ? `<div class="card" style="background:var(--bg)"><div style="font-size:.78rem;font-weight:700;margin-bottom:.3rem">Última corrida</div><div style="font-size:.75rem;color:var(--ink2);line-height:1.6">${S.fac.reportAb}</div></div>` : '';
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="facShowAnulAb(this.checked)" ${showAnul?'checked':''}>Ver anulados${nAnul?(' ('+nAnul+')'):''}</label>`;
+  return `<div class="field" style="margin-bottom:.6rem"><label>Período</label><input id="fac-ab-periodo" type="month" value="${esc(periodo)}" onchange="facSetPeriodo(this.value)"></div>
+    <button class="btn-r" onclick="generarAbonos()" style="margin-bottom:.4rem">⚙️ GENERAR ABONOS</button>
+    <div style="font-size:.66rem;color:var(--ink3);margin:0 0 .7rem">Cuota mensual de cada socio activo con plan (precio congelado a la corrida). Idempotente por socio+período. Solo lee socios/planes/personas.</div>
+    ${report}${toggle}<div class="card">${rows}</div>`;
+}
+
+async function generarAbonos(){
+  if(!puedeConfig()) return; // la regla es la defensa real
+  facErr('');
+  const periodo=(document.getElementById('fac-ab-periodo')?.value||S.fac.periodo||'').trim();
+  if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
+  const rep={ generados:0, sinPlan:0, yaTenian:0, planInvalido:0, errores:0 };
+  try{
+    // SOLO LECTURA: socios activos + abonos de ese período (idempotencia por socioId+periodo).
+    const [socSnap, abSnap] = await Promise.all([
+      db.collection('socios').where('activo','==',true).get(),
+      db.collection('abonos').where('periodo','==',periodo).get()
+    ]);
+    const yaConAbono=new Set(abSnap.docs.map(d=>d.data().socioId)); // incluye anulados → no regenera
+    for(const sd of socSnap.docs){
+      const socio=sd.data(), socioId=sd.id;
+      if(yaConAbono.has(socioId)){ rep.yaTenian++; continue; }
+      if(!socio.planId){ rep.sinPlan++; continue; } // sin plan → no genera en 0
+      let plan=null;
+      try{ const pd=await db.collection('planes').doc(socio.planId).get(); if(pd.exists) plan=pd.data(); }catch(_){}
+      if(!plan || plan.activo===false){ rep.planInvalido++; continue; } // plan inexistente/inactivo
+      // denorm nombre del socio desde personas
+      let socioNombre='';
+      if(socio.personaId){
+        try{ const per=await db.collection('personas').doc(socio.personaId).get(); if(per.exists){ const p=per.data(); socioNombre=((p.apellido||'')+', '+(p.nombre||'')).replace(/^, /,'').replace(/, $/,'')||p.dni||''; } }catch(_){}
+      }
+      const precio=Number(plan.precio)||0; // precio CONGELADO a la corrida (snapshot)
+      const abono={
+        periodo, socioId, personaId:socio.personaId||null,
+        socioNombre, numeroAfiliado:socio.numeroAfiliado||'',
+        planId:socio.planId, planNombre:plan.nombre||'',
+        precioSugerido:precio, precioFinal:precio, motivoAjuste:null,
+        estado:'generado', generadoEn:FV(), generadoPor:S.user.uid
+      };
+      try{ await db.collection('abonos').add(abono); rep.generados++; }
+      catch(e){ rep.errores++; console.warn('[generarAbonos] fallo',socioId,e); }
+    }
+    S.fac.reportAb=`Período <b>${esc(periodo)}</b> — Generados: <b>${rep.generados}</b> · Sin plan: ${rep.sinPlan} · Ya tenían: ${rep.yaTenian} · Plan inválido: ${rep.planInvalido}${rep.errores?(' · Errores: '+rep.errores):''}`;
+    render();
+  }catch(e){ facErr('No se pudieron generar los abonos: '+(e.message||e)); }
+}
+
+function facAbMsg(t){ const e=document.getElementById('fac-ab-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function facAbonoForm(){
+  const a=(S.fac.abonos||[]).find(x=>x.id===S.fac.aedit)||{};
+  return `<div class="card"><div class="ch">Abono · ${esc(a.periodo||'—')}</div>
+    <div style="font-size:.78rem;color:var(--ink3);margin-bottom:.5rem">${esc(a.socioNombre||'—')} · N° ${esc(a.numeroAfiliado||'—')} · ${esc(a.planNombre||'—')}</div>
+    <div class="ir"><span class="il">Precio sugerido</span><span class="iv">${facMoney(a.precioSugerido)}</span></div>
+    <div id="fac-ab-err" class="err" style="display:none;margin:.4rem 0"></div>
+    <div class="field"><label>Precio final</label><input id="fac-ab-final" type="number" min="0" step="0.01" value="${a.precioFinal!=null?esc(a.precioFinal):'0'}"></div>
+    <div class="field"><label>Motivo de ajuste</label><input id="fac-ab-motivo" value="${esc(a.motivoAjuste||'')}" placeholder="Obligatorio si cambiás el precio final a mano"></div>
+    <button class="btn-r" onclick="facAbonoGuardar('${a.id}')">Guardar</button>
+    <button class="btn-o" onclick="facAbonoCancelar()">Cancelar</button>
+    <div class="card" style="margin-top:.8rem;background:var(--bg)"><div style="font-size:.75rem;font-weight:700;margin-bottom:.3rem">Anular abono (lógico, nunca se borra)</div>
+      <div class="field"><label>Motivo de anulación</label><input id="fac-ab-anmotivo" placeholder="requerido"></div>
+      <button class="btn-o" onclick="facAbonoAnular('${a.id}')">Anular</button>
+    </div>
+  </div>`;
+}
+async function facAbonoGuardar(id){
+  if(!puedeConfig()) return;
+  facAbMsg('');
+  const a=(S.fac.abonos||[]).find(x=>x.id===id); if(!a) return;
+  const base=Number(a.precioSugerido)||0;
+  const precioFinal=Number(document.getElementById('fac-ab-final')?.value||0)||0;
+  const motivoAjuste=(document.getElementById('fac-ab-motivo')?.value||'').trim();
+  const manual=Math.abs(precioFinal-base)>0.005;
+  if(manual && !motivoAjuste){ facAbMsg('Cambiaste el precio final a mano: el motivo de ajuste es obligatorio.'); return; }
+  const data={ precioFinal, motivoAjuste:(manual?motivoAjuste:(motivoAjuste||null)), actualizadoEn:FV() };
+  try{ await db.collection('abonos').doc(id).set(data,{merge:true}); S.fac.aedit=null; render(); }
+  catch(e){ facAbMsg('No se pudo guardar: '+(e.message||e)); }
+}
+async function facAbonoAnular(id){
+  if(!puedeConfig()) return;
+  facAbMsg('');
+  const motivo=(document.getElementById('fac-ab-anmotivo')?.value||'').trim();
+  if(!motivo){ facAbMsg('El motivo de anulación es requerido.'); return; }
+  try{ await db.collection('abonos').doc(id).set({ estado:'anulado', motivoAnulacion:motivo, anuladoEn:FV(), anuladoPor:S.user.uid },{merge:true}); S.fac.aedit=null; render(); }
+  catch(e){ facAbMsg('No se pudo anular: '+(e.message||e)); }
 }
 
 /* ===================== AFILIADOS — Socios + Personas (Estructura 3, Administración) =====================
