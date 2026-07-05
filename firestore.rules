@@ -384,6 +384,14 @@ service cloud.firestore {
       allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
     }
 
+    // campanas/{id}: campanas de captacion (Estructura 2, Marketing — Bloque 3). Datos de marketing.
+    //  - Lectura Y escritura: SOLO admin/superadmin o gestionar_afiliados (mismo gateo que leads).
+    //  - Baja LOGICA via 'activo'; NUNCA delete desde la app.
+    match /campanas/{id} {
+      allow read:           if isAdmin() || tienePermiso('gestionar_afiliados');
+      allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
+    }
+
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
     match /{document=**} {
       allow read, write: if esSuperadmin();

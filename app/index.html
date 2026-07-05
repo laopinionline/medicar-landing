@@ -3705,7 +3705,8 @@ function mktAttach(){
   if(S.mktUnsub) return;
   const upd=()=>{ if(!mktFormOpen()) render(); };
   S.mktUnsub=[
-    db.collection('leads').onSnapshot(s=>{ if(!S.mkt) return; S.mkt.leads=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.mkt){ S.mkt.err=(e.message||String(e)); render(); } })
+    db.collection('leads').onSnapshot(s=>{ if(!S.mkt) return; S.mkt.leads=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.mkt){ S.mkt.err=(e.message||String(e)); render(); } }),
+    db.collection('campanas').onSnapshot(s=>{ if(!S.mkt) return; S.mkt.campanas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.mkt) S.mkt.campanas=[]; })
   ];
 }
 function mktDetach(){ if(S.mktUnsub){ S.mktUnsub.forEach(u=>{ try{u();}catch(_){} }); S.mktUnsub=null; } }
@@ -3713,17 +3714,18 @@ function mktErr(t){ const e=document.getElementById('mkt-err'); if(e){ e.textCon
 
 function mktPanel(){
   if(!puedeAfil()) return `<div class="card"><div class="ch">Marketing</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para gestionar marketing.</div></div>`;
-  if(!S.mkt){ S.mkt={sub:'leads',leads:null,edit:null,showAll:false,err:''}; mktAttach(); }
+  if(!S.mkt){ S.mkt={sub:'leads',leads:null,campanas:null,edit:null,cedit:null,showAll:false,showInactC:false,metrics:null,err:''}; mktAttach(); }
   if(S.mkt.err) return `<div class="card">No se pudo cargar marketing: ${esc(S.mkt.err)}</div>`;
   const sub=S.mkt.sub||'leads';
-  const tab=(id,lbl)=>`<button onclick="mktSub('${id}')" style="flex:1;padding:.5rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.72rem;font-weight:600;letter-spacing:.03em;cursor:pointer">${lbl}</button>`;
+  const tab=(id,lbl)=>`<button onclick="mktSub('${id}')" style="flex:1;padding:.45rem .3rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.68rem;font-weight:600;letter-spacing:.02em;cursor:pointer">${lbl}</button>`;
   const head=`
   <div style="font-weight:700;margin:.1rem 0 .6rem">Marketing <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
-  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('leads','Leads')}</div>
+  <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${tab('leads','Leads')}${tab('campanas','Campañas')}${tab('metricas','Métricas')}</div>
   <div id="mkt-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
-  return head + mktLeadsView();
+  const body = sub==='campanas' ? mktCampanasView() : (sub==='metricas' ? mktMetricasView() : mktLeadsView());
+  return head + body;
 }
-function mktSub(id){ if(!S.mkt) return; S.mkt.sub=id; S.mkt.edit=null; render(); }
+function mktSub(id){ if(!S.mkt) return; S.mkt.sub=id; S.mkt.edit=null; S.mkt.cedit=null; render(); }
 
 /* ---- Leads (ABM + seguimiento + conversión) ---- */
 function mktLeadsView(){
@@ -3759,6 +3761,8 @@ function mktLeadForm(){
     </div>`;
   }
   const origenOpts=LEAD_ORIGENES.map(([v,lb])=>`<option value="${v}" ${(l.origen||'telefono')===v?'selected':''}>${lb}</option>`).join('');
+  const campActivas=(S.mkt.campanas||[]).filter(c=>c.activo!==false);
+  const campOpts=`<option value="">— Sin campaña —</option>`+campActivas.map(c=>`<option value="${c.id}" ${l.campanaId===c.id?'selected':''}>${esc(c.nombre||c.id)}</option>`).join('');
   const descartado=l.estado==='descartado';
   return `<div class="card"><div class="ch">${isNew?'Nuevo lead':('Lead '+leadEstBadge(l.estado))}</div>
     <div id="mkt-err" class="err" style="display:none;margin-bottom:.5rem"></div>
@@ -3766,6 +3770,7 @@ function mktLeadForm(){
     <div class="field"><label>Teléfono</label><input id="mkt-l-tel" value="${esc(l.telefono||'')}" placeholder="al menos uno de tel/email"></div>
     <div class="field"><label>Email</label><input id="mkt-l-email" value="${esc(l.email||'')}"></div>
     <div class="field"><label>Origen</label><select id="mkt-l-origen">${origenOpts}</select></div>
+    <div class="field"><label>Campaña</label><select id="mkt-l-campana">${campOpts}</select></div>
     <div class="field"><label>Notas</label><textarea id="mkt-l-notas" rows="2" placeholder="seguimiento">${esc(l.notas||'')}</textarea></div>
     <button class="btn-r" onclick="mktGuardar('${isNew?'new':l.id}')">Guardar</button>
     <button class="btn-o" onclick="mktCancelar()">Cancelar</button>
@@ -3786,10 +3791,11 @@ async function mktGuardar(id){
   const telefono=(document.getElementById('mkt-l-tel')?.value||'').trim();
   const email=(document.getElementById('mkt-l-email')?.value||'').trim();
   const origen=document.getElementById('mkt-l-origen')?.value||'otro';
+  const campanaId=document.getElementById('mkt-l-campana')?.value||'';
   const notas=(document.getElementById('mkt-l-notas')?.value||'').trim();
   if(!nombre){ mktErr('El nombre es requerido.'); return; }
   if(!telefono && !email){ mktErr('Cargá al menos un teléfono o un email.'); return; }
-  const data={ nombre, telefono, email, origen, notas, actualizadoEn:FV() };
+  const data={ nombre, telefono, email, origen, campanaId:campanaId||null, notas, actualizadoEn:FV() };
   try{
     if(id==='new'){ data.estado='nuevo'; data.motivoDescarte=null; data.personaId=null; data.socioId=null; data.creadoEn=FV(); data.creadoPor=S.user.uid; await db.collection('leads').add(data); }
     else{ await db.collection('leads').doc(id).set(data,{merge:true}); }
@@ -3822,6 +3828,119 @@ function mktConvertir(id){
   S.convLeadId=id; S.convPrefill={ nombre:l.nombre||'', telefono:l.telefono||'' }; S.convOpenAlta=true;
   if(S.user && S.user.rol==='superadmin'){ superNav('afiliados'); }
   else { S.tab='afiliados'; render(); }
+}
+
+/* ---- Campañas (ABM, baja lógica) ---- */
+function mktCampanasView(){
+  if(S.mkt.campanas===null) return `<div class="card">Cargando campañas…</div>`;
+  if(S.mkt.cedit!=null) return mktCampanaForm();
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+  const showInact=!!S.mkt.showInactC;
+  const nInact=(S.mkt.campanas||[]).filter(c=>c.activo===false).length;
+  const list=(S.mkt.campanas||[]).filter(c=> showInact || c.activo!==false).slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
+  const rows = list.length ? list.map(c=>{
+    const inact=c.activo===false;
+    const meta=[leadOrigenLbl(c.canal), '· costo '+facMoney(c.costo), inact?'· inactiva':''].filter(Boolean).join(' ');
+    const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="mktCampEditar('${c.id}')">Editar</button><button class="${btn}" onclick="mktCampBaja('${c.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(c.nombre||'—')}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin campañas${showInact?'':' activas'}</div>`;
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="mktShowInactC(this.checked)" ${showInact?'checked':''}>Ver inactivas${nInact?(' ('+nInact+')'):''}</label>`;
+  return `<button class="btn-r" onclick="mktCampNuevo()" style="margin-bottom:.7rem">+ Nueva campaña</button>${toggle}<div class="card">${rows}</div>`;
+}
+function mktShowInactC(on){ if(!S.mkt) return; S.mkt.showInactC=!!on; render(); }
+function mktCampNuevo(){ if(!puedeAfil())return; S.mkt.cedit='new'; render(); }
+function mktCampEditar(id){ if(!puedeAfil())return; S.mkt.cedit=id; render(); }
+function mktCampCancelar(){ if(S.mkt) S.mkt.cedit=null; render(); }
+function mktCampanaForm(){
+  const isNew=S.mkt.cedit==='new';
+  const c=isNew?{canal:'redes'}:((S.mkt.campanas||[]).find(x=>x.id===S.mkt.cedit)||{canal:'redes'});
+  const canalOpts=LEAD_ORIGENES.map(([v,lb])=>`<option value="${v}" ${(c.canal||'redes')===v?'selected':''}>${lb}</option>`).join('');
+  return `<div class="card"><div class="ch">${isNew?'Nueva campaña':'Editar campaña'}</div>
+    <div id="mkt-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <div class="field"><label>Nombre</label><input id="mkt-c-nombre" value="${esc(c.nombre||'')}" placeholder="Ej. Lanzamiento IG julio"></div>
+    <div class="field"><label>Canal</label><select id="mkt-c-canal">${canalOpts}</select></div>
+    <div class="field"><label>Costo (inversión total)</label><input id="mkt-c-costo" type="number" min="0" step="0.01" value="${c.costo!=null?esc(c.costo):'0'}"></div>
+    <div class="field"><label>Desde</label><input id="mkt-c-desde" type="date" value="${esc(c.fechaDesde||'')}"></div>
+    <div class="field"><label>Hasta</label><input id="mkt-c-hasta" type="date" value="${esc(c.fechaHasta||'')}"></div>
+    <div class="field"><label>Notas</label><textarea id="mkt-c-notas" rows="2" placeholder="opcional">${esc(c.notas||'')}</textarea></div>
+    ${isNew?'':`<div class="field"><label>Estado</label><select id="mkt-c-activo"><option value="si" ${c.activo!==false?'selected':''}>Activa</option><option value="no" ${c.activo===false?'selected':''}>Baja lógica</option></select></div>`}
+    <button class="btn-r" onclick="mktCampGuardar('${isNew?'new':c.id}')">Guardar</button>
+    <button class="btn-o" onclick="mktCampCancelar()">Cancelar</button>
+  </div>`;
+}
+async function mktCampGuardar(id){
+  if(!puedeAfil()) return; // la regla es la defensa real
+  mktErr('');
+  const nombre=(document.getElementById('mkt-c-nombre')?.value||'').trim();
+  if(!nombre){ mktErr('El nombre es requerido.'); return; }
+  const canal=document.getElementById('mkt-c-canal')?.value||'otro';
+  const costo=Number(document.getElementById('mkt-c-costo')?.value||0)||0;
+  const data={ nombre, canal, costo, fechaDesde:(document.getElementById('mkt-c-desde')?.value||'')||null, fechaHasta:(document.getElementById('mkt-c-hasta')?.value||'')||null, notas:(document.getElementById('mkt-c-notas')?.value||'').trim() };
+  try{
+    if(id==='new'){ data.activo=true; data.creadoEn=FV(); data.creadoPor=S.user.uid; await db.collection('campanas').add(data); }
+    else{ data.activo=(document.getElementById('mkt-c-activo')?.value||'si')==='si'; data.actualizadoEn=FV(); await db.collection('campanas').doc(id).set(data,{merge:true}); }
+    S.mkt.cedit=null; render();
+  }catch(e){ mktErr('No se pudo guardar: '+(e.message||e)); }
+}
+async function mktCampBaja(id,reactivar){
+  if(!puedeAfil()) return; mktErr('');
+  try{ await db.collection('campanas').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
+  catch(e){ mktErr('No se pudo actualizar: '+(e.message||e)); }
+}
+
+/* ---- Métricas (panel de solo lectura; cálculo on-demand, cruce con Contable) ---- */
+async function mktMetricasActualizar(){
+  if(!puedeAfil()) return;
+  const leads=S.mkt.leads||[], campanas=S.mkt.campanas||[];
+  // Cruce con Contable: facturado por socioId (facturas emitida|pagada). Permiso-gated → try/catch.
+  let facBySocio=null, facError=false;
+  try{
+    const fsnap=await db.collection('facturas').get();
+    facBySocio={};
+    fsnap.docs.forEach(d=>{ const f=d.data(); if((f.estado==='emitida'||f.estado==='pagada') && f.socioId){ facBySocio[f.socioId]=(facBySocio[f.socioId]||0)+(Number(f.total)||0); } });
+  }catch(e){ facError=true; facBySocio=null; }
+  // Funnel
+  const funnel={ total:leads.length, nuevo:0, contactado:0, convertido:0, descartado:0 };
+  leads.forEach(l=>{ if(funnel[l.estado]!=null) funnel[l.estado]++; });
+  // Por origen
+  const porOrigen={};
+  leads.forEach(l=>{ const o=l.origen||'otro'; if(!porOrigen[o]) porOrigen[o]={total:0,convertidos:0}; porOrigen[o].total++; if(l.estado==='convertido') porOrigen[o].convertidos++; });
+  // Por campaña (+ Sin campaña)
+  const camById={}; campanas.forEach(c=>{ camById[c.id]=c; });
+  const grupos={};
+  leads.forEach(l=>{ const k=l.campanaId||'__none__'; if(!grupos[k]) grupos[k]={leads:0,convertidos:0,socioIds:[]}; grupos[k].leads++; if(l.estado==='convertido'){ grupos[k].convertidos++; if(l.socioId) grupos[k].socioIds.push(l.socioId); } });
+  const porCampana=Object.keys(grupos).map(k=>{
+    const g=grupos[k], cam= k==='__none__'?null:camById[k];
+    const facturado = facBySocio ? g.socioIds.reduce((s,sid)=>s+(facBySocio[sid]||0),0) : null;
+    return { key:k, nombre: k==='__none__'?'Sin campaña':(cam?(cam.nombre||k):('(campaña '+k+')')), canal: cam?cam.canal:'', costo: cam?(Number(cam.costo)||0):null, leads:g.leads, convertidos:g.convertidos, facturado };
+  }).sort((a,b)=>{ if(a.key==='__none__') return 1; if(b.key==='__none__') return -1; return b.leads-a.leads; });
+  S.mkt.metrics={ funnel, porOrigen, porCampana, facturasOk: !facError };
+  render();
+}
+function mktMetricasView(){
+  const m=S.mkt.metrics;
+  const head=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem"><div style="font-size:.72rem;color:var(--ink3)">Cálculo on-demand (no en vivo)</div><button class="btn-r" style="width:auto;margin-top:0;padding:.4rem .8rem" onclick="mktMetricasActualizar()">Actualizar</button></div>`;
+  if(!m) return head+`<div class="card"><div style="font-size:.8rem;color:var(--ink3)">Tocá "Actualizar" para calcular las métricas.</div></div>`;
+  const f=m.funnel;
+  const funnelCard=`<div class="card"><div class="ch">Funnel de leads</div>
+    <div class="ir"><span class="il">Total</span><span class="iv">${f.total}</span></div>
+    <div class="ir"><span class="il">Nuevo</span><span class="iv">${f.nuevo}</span></div>
+    <div class="ir"><span class="il">Contactado</span><span class="iv">${f.contactado}</span></div>
+    <div class="ir"><span class="il">Convertido</span><span class="iv">${f.convertido}</span></div>
+    <div class="ir"><span class="il">Descartado</span><span class="iv">${f.descartado}</span></div></div>`;
+  const origenRows=Object.keys(m.porOrigen).sort().map(o=>{ const g=m.porOrigen[o]; const tasa=g.total?Math.round(g.convertidos/g.total*100):0; return `<div class="ir"><span class="il">${leadOrigenLbl(o)}</span><span class="iv">${g.convertidos}/${g.total} · ${tasa}%</span></div>`; }).join('')||`<div style="font-size:.78rem;color:var(--ink3)">Sin datos</div>`;
+  const origenCard=`<div class="card"><div class="ch">Conversión por origen</div>${origenRows}</div>`;
+  const campRows=m.porCampana.map(c=>{
+    const tasa=c.leads?Math.round(c.convertidos/c.leads*100):0;
+    const costo=c.costo!=null?facMoney(c.costo):'—';
+    const cpl=(c.costo!=null && c.leads)?facMoney(c.costo/c.leads):'—';
+    const cpc=(c.costo!=null && c.convertidos)?facMoney(c.costo/c.convertidos):'—';
+    const fac= m.facturasOk ? (c.facturado!=null?facMoney(c.facturado):'—') : '—';
+    return `<div class="lr" style="flex-wrap:wrap"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(c.nombre)}${c.canal?(' <span style="font-size:.62rem;color:var(--ink3)">('+leadOrigenLbl(c.canal)+')</span>'):''}</div><div class="lrs">${c.convertidos}/${c.leads} leads · ${tasa}% · costo ${costo} · CPL ${cpl} · CPC ${cpc} · Facturado ${fac}</div></div></div>`;
+  }).join('')||`<div style="font-size:.78rem;color:var(--ink3)">Sin datos</div>`;
+  const facNote= m.facturasOk ? `<div style="font-size:.66rem;color:var(--ink3);margin-top:.3rem">CPL = costo/lead · CPC = costo por captación (costo/convertidos) · Facturado = facturas emitida/pagada de los socios convertidos.</div>` : `<div style="font-size:.66rem;color:var(--o,#E0A23B);margin-top:.3rem">Facturado "—" (requiere permiso de facturación). El resto del panel es válido.</div>`;
+  const campCard=`<div class="card"><div class="ch">Por campaña</div>${campRows}${facNote}</div>`;
+  return head+funnelCard+origenCard+campCard;
 }
 
 /* ===================== PERMISOS por persona (lo configura el superadmin en la ficha) ===================== */
