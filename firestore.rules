@@ -366,6 +366,15 @@ service cloud.firestore {
       allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
     }
 
+    // facturas/{id}: cierre de Contable (Estructura 1). Agrupa abono + cargos por persona (items congelados).
+    // MISMO desvio financiero que /cargos y /abonos: DATA FINANCIERA.
+    //  - Lectura Y escritura: SOLO admin/superadmin o configurar_sistema (NO esInterno).
+    //  - Anulacion LOGICA via estado:'anulada' (libera el facturaId de los items); NUNCA delete desde la app.
+    match /facturas/{id} {
+      allow read:           if isAdmin() || tienePermiso('configurar_sistema');
+      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+    }
+
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
     match /{document=**} {
       allow read, write: if esSuperadmin();

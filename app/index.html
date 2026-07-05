@@ -2964,7 +2964,8 @@ function facAttach(){
     db.collection('tarifas').onSnapshot(s=>{ if(!S.fac) return; S.fac.tarifas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.fac){ S.fac.err=(e.message||String(e)); render(); } }),
     db.collection('prestaciones').onSnapshot(s=>{ if(!S.fac) return; S.fac.prest=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.prest=[]; }),
     db.collection('cargos').onSnapshot(s=>{ if(!S.fac) return; S.fac.cargos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.cargos=[]; }),
-    db.collection('abonos').onSnapshot(s=>{ if(!S.fac) return; S.fac.abonos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.abonos=[]; })
+    db.collection('abonos').onSnapshot(s=>{ if(!S.fac) return; S.fac.abonos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.abonos=[]; }),
+    db.collection('facturas').onSnapshot(s=>{ if(!S.fac) return; S.fac.facturas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.facturas=[]; })
   ];
 }
 function facDetach(){ if(S.facUnsub){ S.facUnsub.forEach(u=>{ try{u();}catch(_){} }); S.facUnsub=null; } }
@@ -2974,17 +2975,18 @@ function facTipoLbl(t){ return t==='por_km'?'Por km':'Fija'; }
 
 function facPanel(){
   if(!puedeConfig()) return `<div class="card"><div class="ch">Facturación</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para configurar facturación.</div></div>`;
-  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,abonos:null,edit:null,cedit:null,aedit:null,showInact:false,showAnul:false,showAnulAb:false,periodo:facPeriodoActual(),err:'',report:null,reportAb:null}; facAttach(); }
+  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,abonos:null,facturas:null,edit:null,cedit:null,aedit:null,fedit:null,showInact:false,showAnul:false,showAnulAb:false,showAnulF:false,periodo:facPeriodoActual(),err:'',report:null,reportAb:null,reportF:null}; facAttach(); }
   if(S.fac.err) return `<div class="card">No se pudo cargar facturación: ${esc(S.fac.err)}</div>`;
   const sub=S.fac.sub||'tarifas';
-  const tab=(id,lbl)=>`<button onclick="facSub('${id}')" style="flex:1;padding:.5rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.72rem;font-weight:600;letter-spacing:.03em;cursor:pointer">${lbl}</button>`;
+  const tab=(id,lbl)=>`<button onclick="facSub('${id}')" style="flex:1;padding:.45rem .3rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.68rem;font-weight:600;letter-spacing:.02em;cursor:pointer">${lbl}</button>`;
   const head=`
   <div style="font-weight:700;margin:.1rem 0 .6rem">Facturación <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
-  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('tarifas','Tarifas')}${tab('cargos','Cargos')}${tab('abonos','Abonos')}</div>
+  <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${tab('tarifas','Tarifas')}${tab('cargos','Cargos')}${tab('abonos','Abonos')}${tab('facturas','Facturas')}</div>
   <div id="fac-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
-  return head + (sub==='cargos' ? facCargosView() : (sub==='abonos' ? facAbonosView() : facTarifasView()));
+  const body = sub==='cargos' ? facCargosView() : (sub==='abonos' ? facAbonosView() : (sub==='facturas' ? facFacturasView() : facTarifasView()));
+  return head + body;
 }
-function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; S.fac.cedit=null; S.fac.aedit=null; render(); }
+function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; S.fac.cedit=null; S.fac.aedit=null; S.fac.fedit=null; render(); }
 
 /* ---- Tarifas (ABM, baja lógica) ---- */
 function facTarifasView(){
@@ -3156,6 +3158,13 @@ function facCargoKmRecalc(precioSugerido, valorPorKm){
 }
 function facCargoForm(){
   const c=(S.fac.cargos||[]).find(x=>x.id===S.fac.cedit)||{};
+  if(c.facturaId){ // facturado: no editable ni anulable hasta anular la factura (integridad financiera)
+    return `<div class="card"><div class="ch">Cargo · ${esc(c.nroIncidenteFmt||('INC '+(c.nroIncidente!=null?c.nroIncidente:'—')))}</div>
+      <div style="font-size:.78rem;color:var(--ink3);margin-bottom:.5rem">${esc(c.pacNombre||'—')} · ${REGLA_LBL[c.regla]||c.regla} · ${esc(c.tarifaNombre||'—')} · ${facMoney(c.precioFinal)}</div>
+      <div style="background:var(--o,#E0A23B);color:#fff;border-radius:8px;padding:.5rem .65rem;font-size:.78rem;font-weight:600">Facturado en ${facFacturaRef(c.facturaId)} — anulá la factura primero para editar o anular este cargo.</div>
+      <button class="btn-o" onclick="facCargoCancelar()" style="margin-top:.7rem">Volver</button>
+    </div>`;
+  }
   const porKm=c.tipoCalculo==='por_km';
   const kmField = porKm
     ? `<div class="field"><label>Kilómetros</label><input id="fac-c-km" type="number" min="0" step="0.1" value="${c.km!=null?esc(c.km):''}" oninput="facCargoKmRecalc(${Number(c.precioSugerido)||0},${Number(c.valorPorKm)||0})" placeholder="cargar km"><div style="font-size:.66rem;color:var(--ink3);margin-top:.25rem">Al cargar km: precio = ${facMoney(c.precioSugerido)} + km × ${facMoney(c.valorPorKm)}/km (recalcula automático, apaga "km pendiente").</div></div>`
@@ -3179,6 +3188,7 @@ async function facCargoGuardar(id){
   if(!puedeConfig()) return;
   facCMsg('');
   const c=(S.fac.cargos||[]).find(x=>x.id===id); if(!c) return;
+  if(c.facturaId){ facCMsg('Este cargo está facturado: anulá la factura primero.'); return; }
   const porKm=c.tipoCalculo==='por_km';
   let km=(c.km!=null?c.km:null), kmPendiente=!!c.kmPendiente;
   if(porKm){
@@ -3198,6 +3208,8 @@ async function facCargoGuardar(id){
 async function facCargoAnular(id){
   if(!puedeConfig()) return;
   facCMsg('');
+  const cg=(S.fac.cargos||[]).find(x=>x.id===id);
+  if(cg && cg.facturaId){ facCMsg('Este cargo está facturado: anulá la factura primero.'); return; }
   const motivo=(document.getElementById('fac-c-anmotivo')?.value||'').trim();
   if(!motivo){ facCMsg('El motivo de anulación es requerido.'); return; }
   try{ await db.collection('cargos').doc(id).set({ estado:'anulado', motivoAnulacion:motivo, anuladoEn:FV(), anuladoPor:S.user.uid },{merge:true}); S.fac.cedit=null; render(); }
@@ -3281,6 +3293,13 @@ async function generarAbonos(){
 function facAbMsg(t){ const e=document.getElementById('fac-ab-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
 function facAbonoForm(){
   const a=(S.fac.abonos||[]).find(x=>x.id===S.fac.aedit)||{};
+  if(a.facturaId){ // facturado: no editable ni anulable hasta anular la factura (integridad financiera)
+    return `<div class="card"><div class="ch">Abono · ${esc(a.periodo||'—')}</div>
+      <div style="font-size:.78rem;color:var(--ink3);margin-bottom:.5rem">${esc(a.socioNombre||'—')} · N° ${esc(a.numeroAfiliado||'—')} · ${esc(a.planNombre||'—')} · ${facMoney(a.precioFinal)}</div>
+      <div style="background:var(--o,#E0A23B);color:#fff;border-radius:8px;padding:.5rem .65rem;font-size:.78rem;font-weight:600">Facturado en ${facFacturaRef(a.facturaId)} — anulá la factura primero para editar o anular este abono.</div>
+      <button class="btn-o" onclick="facAbonoCancelar()" style="margin-top:.7rem">Volver</button>
+    </div>`;
+  }
   return `<div class="card"><div class="ch">Abono · ${esc(a.periodo||'—')}</div>
     <div style="font-size:.78rem;color:var(--ink3);margin-bottom:.5rem">${esc(a.socioNombre||'—')} · N° ${esc(a.numeroAfiliado||'—')} · ${esc(a.planNombre||'—')}</div>
     <div class="ir"><span class="il">Precio sugerido</span><span class="iv">${facMoney(a.precioSugerido)}</span></div>
@@ -3299,6 +3318,7 @@ async function facAbonoGuardar(id){
   if(!puedeConfig()) return;
   facAbMsg('');
   const a=(S.fac.abonos||[]).find(x=>x.id===id); if(!a) return;
+  if(a.facturaId){ facAbMsg('Este abono está facturado: anulá la factura primero.'); return; }
   const base=Number(a.precioSugerido)||0;
   const precioFinal=Number(document.getElementById('fac-ab-final')?.value||0)||0;
   const motivoAjuste=(document.getElementById('fac-ab-motivo')?.value||'').trim();
@@ -3311,10 +3331,138 @@ async function facAbonoGuardar(id){
 async function facAbonoAnular(id){
   if(!puedeConfig()) return;
   facAbMsg('');
+  const ab=(S.fac.abonos||[]).find(x=>x.id===id);
+  if(ab && ab.facturaId){ facAbMsg('Este abono está facturado: anulá la factura primero.'); return; }
   const motivo=(document.getElementById('fac-ab-anmotivo')?.value||'').trim();
   if(!motivo){ facAbMsg('El motivo de anulación es requerido.'); return; }
   try{ await db.collection('abonos').doc(id).set({ estado:'anulado', motivoAnulacion:motivo, anuladoEn:FV(), anuladoPor:S.user.uid },{merge:true}); S.fac.aedit=null; render(); }
   catch(e){ facAbMsg('No se pudo anular: '+(e.message||e)); }
+}
+
+/* ---- Facturas: cierre de Contable. Agrupa abono + cargos por PERSONA (modelo BARRIDO) ----
+   La factura toma todo lo CONFIRMADO y NO facturado de esa persona (abono del período + cargos pendientes de
+   cualquier fecha; los cargos no tienen período propio → los pendientes ruedan a la próxima factura). Los ítems
+   se congelan (monto = precioFinal al emitir). Integridad: se escribe facturaId en cada abono/cargo incluido →
+   no puede re-facturarse ni editarse hasta anular la factura (que libera sus ítems). estado pagada = cobranza
+   mínima. El motor SOLO LEE abonos/cargos y escribe facturas + el facturaId de los ítems. NUNCA delete físico. */
+function facFacturaRef(fid){ const f=(S.fac.facturas||[]).find(x=>x.id===fid); return f?('la factura '+esc(f.periodo||'')+' de '+esc(f.nombre||'—')):('factura '+esc(fid)); }
+function facShowAnulF(on){ if(!S.fac) return; S.fac.showAnulF=!!on; render(); }
+function facFacturaVer(id){ if(!puedeConfig())return; S.fac.fedit=id; render(); }
+function facFacturaCerrar(){ if(S.fac) S.fac.fedit=null; render(); }
+function facEstBadge(e){ const m={emitida:['#3B82F6','Emitida'],pagada:['#1D9E75','Pagada'],anulada:['#E5484D','Anulada']}; const x=m[e]||['#888',e]; return `<span style="background:${x[0]};color:#fff;border-radius:6px;padding:.05rem .4rem;font-size:.62rem;font-weight:700">${x[1]}</span>`; }
+
+function facFacturasView(){
+  if(S.fac.facturas===null) return `<div class="card">Cargando facturas…</div>`;
+  if(S.fac.fedit!=null) return facFacturaDetalle();
+  const periodo=S.fac.periodo||facPeriodoActual();
+  const showAnul=!!S.fac.showAnulF;
+  const nAnul=(S.fac.facturas||[]).filter(f=>f.periodo===periodo && f.estado==='anulada').length;
+  const list=(S.fac.facturas||[]).filter(f=>f.periodo===periodo && (showAnul||f.estado!=='anulada')).slice().sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
+  const rows = list.length ? list.map(f=>{
+    const n=(f.items||[]).length;
+    const afil=f.numeroAfiliado?('N° '+esc(f.numeroAfiliado)):'particular';
+    return `<div class="lr" style="cursor:pointer" onclick="facFacturaVer('${f.id}')"><div class="lrb"><div class="lrn">${esc(f.nombre||'—')}</div><div class="lrs">${afil} · ${n} item${n===1?'':'s'} · ${facMoney(f.total)}</div></div>${facEstBadge(f.estado)}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin facturas en ${esc(periodo)}${showAnul?'':' (activas)'}</div>`;
+  const report = S.fac.reportF ? `<div class="card" style="background:var(--bg)"><div style="font-size:.78rem;font-weight:700;margin-bottom:.3rem">Última corrida</div><div style="font-size:.75rem;color:var(--ink2);line-height:1.6">${S.fac.reportF}</div></div>` : '';
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="facShowAnulF(this.checked)" ${showAnul?'checked':''}>Ver anuladas${nAnul?(' ('+nAnul+')'):''}</label>`;
+  return `<div class="field" style="margin-bottom:.6rem"><label>Período</label><input id="fac-fc-periodo" type="month" value="${esc(periodo)}" onchange="facSetPeriodo(this.value)"></div>
+    <button class="btn-r" onclick="generarFacturas()" style="margin-bottom:.4rem">⚙️ GENERAR FACTURAS</button>
+    <div style="font-size:.66rem;color:var(--ink3);margin:0 0 .7rem">Barrido por persona: abono del período + TODOS los cargos pendientes (sin facturar, no anulados). Idempotente.</div>
+    ${report}${toggle}<div class="card">${rows}</div>`;
+}
+
+async function generarFacturas(){
+  if(!puedeConfig()) return; // la regla es la defensa real
+  facErr('');
+  const periodo=(document.getElementById('fac-fc-periodo')?.value||S.fac.periodo||'').trim();
+  if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
+  const rep={ facturas:0, items:0, sinPend:0, errores:0 };
+  try{
+    // Candidatos (SOLO LECTURA): abonos del período + TODOS los cargos (barrido). Anulados nunca entran.
+    const [abSnap, cgSnap] = await Promise.all([
+      db.collection('abonos').where('periodo','==',periodo).get(),
+      db.collection('cargos').get()
+    ]);
+    const grupos={}; const scopePersonas=new Set();
+    const push=(pid,meta,item)=>{ if(!pid) return; if(!grupos[pid]) grupos[pid]={items:[],socioId:null,nombre:'',numeroAfiliado:null}; const g=grupos[pid]; if(meta.socioId&&!g.socioId)g.socioId=meta.socioId; if(meta.nombre&&!g.nombre)g.nombre=meta.nombre; if(meta.numeroAfiliado&&!g.numeroAfiliado)g.numeroAfiliado=meta.numeroAfiliado; g.items.push(item); };
+    abSnap.docs.forEach(d=>{ const a=d.data(); if(a.estado==='anulado') return; if(a.personaId) scopePersonas.add(a.personaId); if(a.estado!=='generado'||a.facturaId) return; push(a.personaId,{socioId:a.socioId||null,nombre:a.socioNombre||'',numeroAfiliado:a.numeroAfiliado||null},{ tipo:'abono', refId:d.id, descripcion:('Abono '+(a.planNombre||'')+' '+(a.periodo||'')).trim(), monto:Number(a.precioFinal)||0 }); });
+    cgSnap.docs.forEach(d=>{ const c=d.data(); if(c.estado==='anulado') return; if(c.personaId) scopePersonas.add(c.personaId); if(c.estado!=='generado'||c.facturaId) return; push(c.personaId,{socioId:c.socioId||null,nombre:c.pacNombre||'',numeroAfiliado:null},{ tipo:'cargo', refId:d.id, descripcion:((c.tarifaNombre||'—')+' · '+(c.nroIncidenteFmt||('INC '+(c.nroIncidente!=null?c.nroIncidente:'—')))), monto:Number(c.precioFinal)||0 }); });
+    const pids=Object.keys(grupos);
+    for(const pid of pids){
+      const g=grupos[pid];
+      if(!g.items.length) continue;
+      const total=g.items.reduce((s,it)=>s+(Number(it.monto)||0),0);
+      try{
+        const ref=await db.collection('facturas').add({
+          periodo, personaId:pid, socioId:g.socioId||null, nombre:g.nombre||'', numeroAfiliado:g.numeroAfiliado||null,
+          items:g.items, total, estado:'emitida', emitidaEn:FV(), emitidaPor:S.user.uid
+        });
+        for(const it of g.items){ // vincular facturaId en cada ítem (integridad: ya no re-facturable/editable)
+          const col= it.tipo==='abono' ? 'abonos' : 'cargos';
+          try{ await db.collection(col).doc(it.refId).set({ facturaId:ref.id },{merge:true}); }
+          catch(e){ console.warn('[generarFacturas] no se pudo vincular',it.tipo,it.refId,e); }
+        }
+        rep.facturas++; rep.items+=g.items.length;
+      }catch(e){ rep.errores++; console.warn('[generarFacturas] fallo persona',pid,e); }
+    }
+    rep.sinPend = Math.max(0, scopePersonas.size - pids.length); // personas con historial en scope pero nada pendiente
+    S.fac.reportF=`Período <b>${esc(periodo)}</b> — Facturas emitidas: <b>${rep.facturas}</b> · Items facturados: ${rep.items} · Personas sin pendientes: ${rep.sinPend}${rep.errores?(' · Errores: '+rep.errores):''}`;
+    render();
+  }catch(e){ facErr('No se pudieron generar las facturas: '+(e.message||e)); }
+}
+
+function facFcMsg(t){ const e=document.getElementById('fac-fc-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function facFacturaDetalle(){
+  const f=(S.fac.facturas||[]).find(x=>x.id===S.fac.fedit); if(!f) return facFacturasView();
+  const items=(f.items||[]).map(it=>`<div class="ir"><span class="il">${esc(it.descripcion||it.tipo)}</span><span class="iv">${facMoney(it.monto)}</span></div>`).join('');
+  const afil=f.numeroAfiliado?('N° '+esc(f.numeroAfiliado)):'particular';
+  const est=f.estado||'emitida';
+  let acciones='';
+  if(est==='emitida'){
+    acciones=`<button class="btn-r" onclick="facFacturaPagar('${f.id}')">Marcar pagada</button>
+      <div class="card" style="margin-top:.8rem;background:var(--bg)"><div style="font-size:.75rem;font-weight:700;margin-bottom:.3rem">Anular factura (libera los ítems)</div>
+        <div class="field"><label>Motivo de anulación</label><input id="fac-fc-anmotivo" placeholder="requerido"></div>
+        <button class="btn-o" onclick="facFacturaAnular('${f.id}')">Anular</button></div>`;
+  } else if(est==='pagada'){
+    acciones=`<div style="background:var(--g,#1D9E75);color:#fff;border-radius:8px;padding:.5rem .65rem;font-size:.78rem;font-weight:600">Pagada${f.pagadaEn?'':''}. Una factura pagada no se anula directo (contradicción con la cobranza — decisión manual futura).</div>`;
+  } else {
+    acciones=`<div style="font-size:.78rem;color:var(--ink3)">Factura anulada${f.motivoAnulacion?(' · '+esc(f.motivoAnulacion)):''}. Los ítems quedaron liberados (re-facturables). Se conserva como registro histórico.</div>`;
+  }
+  return `<div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="facFacturaCerrar()">← Volver</button></div>
+    <div class="card"><div class="ch">Factura · ${esc(f.periodo||'—')} ${facEstBadge(est)}</div>
+    <div style="font-size:.9rem;font-weight:700">${esc(f.nombre||'—')}</div>
+    <div style="font-size:.75rem;color:var(--ink3);margin-bottom:.55rem">${afil}</div>
+    <div id="fac-fc-err" class="err" style="display:none;margin:.4rem 0"></div>
+    ${items}
+    <div class="ir" style="border-top:2px solid var(--border2);margin-top:.4rem;padding-top:.4rem"><span class="il" style="font-weight:700">Total</span><span class="iv" style="font-weight:700">${facMoney(f.total)}</span></div>
+    <div style="margin-top:.8rem">${acciones}</div>
+  </div>`;
+}
+async function facFacturaPagar(id){
+  if(!puedeConfig()) return;
+  facFcMsg('');
+  const f=(S.fac.facturas||[]).find(x=>x.id===id); if(!f) return;
+  if(f.estado!=='emitida'){ facFcMsg('Solo se puede marcar pagada una factura emitida.'); return; }
+  try{ await db.collection('facturas').doc(id).set({ estado:'pagada', pagadaEn:FV(), pagadaPor:S.user.uid },{merge:true}); render(); }
+  catch(e){ facFcMsg('No se pudo marcar pagada: '+(e.message||e)); }
+}
+async function facFacturaAnular(id){
+  if(!puedeConfig()) return;
+  facFcMsg('');
+  const f=(S.fac.facturas||[]).find(x=>x.id===id); if(!f) return;
+  if(f.estado==='pagada'){ facFcMsg('Una factura pagada no se anula directo (decisión manual futura).'); return; }
+  if(f.estado==='anulada'){ facFcMsg('La factura ya está anulada.'); return; }
+  const motivo=(document.getElementById('fac-fc-anmotivo')?.value||'').trim();
+  if(!motivo){ facFcMsg('El motivo de anulación es requerido.'); return; }
+  try{
+    for(const it of (f.items||[])){ // liberar facturaId de cada ítem → vuelven facturables/editables
+      const col= it.tipo==='abono' ? 'abonos' : 'cargos';
+      try{ await db.collection(col).doc(it.refId).set({ facturaId: firebase.firestore.FieldValue.delete() },{merge:true}); }
+      catch(e){ console.warn('[facFacturaAnular] no se pudo liberar',it.tipo,it.refId,e); }
+    }
+    await db.collection('facturas').doc(id).set({ estado:'anulada', motivoAnulacion:motivo, anuladaEn:FV(), anuladaPor:S.user.uid },{merge:true});
+    render();
+  }catch(e){ facFcMsg('No se pudo anular: '+(e.message||e)); }
 }
 
 /* ===================== AFILIADOS — Socios + Personas (Estructura 3, Administración) =====================
