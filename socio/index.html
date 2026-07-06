@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MEDICAR — Socio</title>
+<meta name="description" content="Credencial digital del socio de MEDICAR.">
+<meta name="theme-color" content="#DC1400">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MEDICAR">
+<meta name="mobile-web-app-capable" content="yes">
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+<style>
+:root{
+  --r:#DC1400; --r-dk:#B01000; --o:#F07800;
+  --bg:#F0EDE7; --card:#FFFFFF; --dark:#141414;
+  --ink:#1A1A1A; --ink2:#555555; --ink3:#999999;
+  --line:#E5E0D8; --g:#1D9E75;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+body{min-height:100svh;min-height:100vh}
+#app{max-width:480px;margin:0 auto;min-height:100svh;display:flex;flex-direction:column}
+button{font-family:inherit;cursor:pointer;border:none}
+input{font-family:inherit}
+
+/* ---------- LOGIN ---------- */
+.login{flex:1;display:flex;flex-direction:column;background:var(--dark);position:relative;overflow:hidden}
+.login-bg{position:absolute;right:-2rem;top:-1rem;font-size:9rem;font-weight:800;color:rgba(255,255,255,.04);letter-spacing:-.05em;pointer-events:none}
+.login-top{padding:3.2rem 1.6rem 1.6rem;position:relative;z-index:1}
+.login-logo{width:64px;height:64px;border-radius:16px;display:block}
+.login-h1{color:#fff;font-size:1.7rem;font-weight:800;margin-top:1rem;letter-spacing:-.02em}
+.login-h1 em{color:var(--r);font-style:normal}
+.login-sub{color:rgba(255,255,255,.55);font-size:.86rem;margin-top:.25rem}
+.sheet{background:var(--bg);border-radius:22px 22px 0 0;margin-top:auto;padding:1.7rem 1.6rem calc(1.6rem + env(safe-area-inset-bottom));position:relative;z-index:1}
+.sheet h2{font-size:1.15rem;font-weight:800;margin-bottom:1rem}
+.field{margin-bottom:.85rem}
+.field label{display:block;font-size:.74rem;font-weight:700;color:var(--ink2);margin-bottom:.32rem}
+.field input{width:100%;padding:.8rem .9rem;border:1.5px solid var(--line);border-radius:12px;font-size:1rem;background:#fff;outline:none}
+.field input:focus{border-color:var(--r)}
+.btn-r{width:100%;background:var(--r);color:#fff;font-weight:800;font-size:1rem;padding:.9rem;border-radius:12px}
+.btn-r:active{background:var(--r-dk)}
+.btn-o{width:100%;background:transparent;color:var(--ink);font-weight:700;font-size:.95rem;padding:.8rem;border-radius:12px;border:1.5px solid var(--line)}
+.btn-o:active{background:#0000000a}
+.err{display:none;background:#FDECEC;color:#B01000;font-size:.82rem;font-weight:600;padding:.6rem .75rem;border-radius:10px;margin-bottom:.8rem}
+.err.on{display:block}
+
+/* ---------- HOME ---------- */
+.home{flex:1;display:flex;flex-direction:column;padding:1.2rem 1.1rem calc(1.4rem + env(safe-area-inset-bottom))}
+.topbar{display:flex;align-items:center;gap:.6rem;margin-bottom:1.1rem}
+.topbar img{width:38px;height:38px;border-radius:10px}
+.topbar .tb-t{font-weight:800;font-size:1.05rem;letter-spacing:-.02em}
+.topbar .tb-t em{color:var(--r);font-style:normal}
+.topbar .tb-sp{margin-left:auto}
+.mini{background:none;color:var(--ink3);font-size:.78rem;font-weight:700;padding:.4rem .2rem}
+
+/* credencial */
+.cred{background:linear-gradient(150deg,#1c1c1c 0%,#2a1210 55%,var(--r-dk) 130%);color:#fff;border-radius:20px;padding:1.3rem 1.3rem 1.4rem;position:relative;overflow:hidden;box-shadow:0 10px 30px -12px rgba(0,0,0,.5)}
+.cred::after{content:"";position:absolute;right:-40px;bottom:-50px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.04)}
+.cred-top{display:flex;justify-content:space-between;align-items:flex-start;position:relative;z-index:1}
+.cred-brand{font-weight:800;letter-spacing:.02em;font-size:1rem}
+.cred-brand em{color:#ff6a58;font-style:normal}
+.cred-chip{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:.28rem .55rem;border-radius:999px}
+.chip-on{background:rgba(29,158,117,.25);color:#7ff0c8;border:1px solid rgba(29,158,117,.5)}
+.chip-off{background:rgba(229,72,77,.22);color:#ff9a9a;border:1px solid rgba(229,72,77,.5)}
+.cred-name{font-size:1.45rem;font-weight:800;margin-top:1.1rem;line-height:1.15;position:relative;z-index:1}
+.cred-num{font-size:1.5rem;font-weight:800;letter-spacing:.08em;margin-top:.9rem;font-variant-numeric:tabular-nums;position:relative;z-index:1}
+.cred-num-lbl{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.5);margin-bottom:.05rem}
+.cred-grid{display:flex;gap:1.4rem;margin-top:1rem;position:relative;z-index:1;flex-wrap:wrap}
+.cred-cell .cc-l{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:rgba(255,255,255,.5)}
+.cred-cell .cc-v{font-size:.95rem;font-weight:700;margin-top:.1rem}
+
+.sec{margin-top:1.3rem}
+.sec-h{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);margin:0 .2rem .5rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.row{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.85rem 1rem;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.row .rl{font-size:.8rem;color:var(--ink2);font-weight:600}
+.row .rv{font-size:.9rem;font-weight:700;text-align:right}
+
+.btn-emerg{display:flex;align-items:center;justify-content:center;gap:.6rem;width:100%;background:var(--r);color:#fff;font-weight:800;font-size:1.15rem;padding:1.05rem;border-radius:16px;text-decoration:none;margin-top:1.3rem;box-shadow:0 8px 20px -8px rgba(220,20,0,.6)}
+.btn-emerg:active{background:var(--r-dk)}
+.btn-emerg .em-sub{display:block;font-size:.66rem;font-weight:700;opacity:.85;letter-spacing:.04em}
+.btn-emerg svg{width:26px;height:26px;flex:none}
+
+.hint{display:flex;gap:.65rem;align-items:flex-start;background:#fff7ee;border:1px solid #f3d9b8;border-radius:14px;padding:.8rem .9rem;margin-top:1.2rem;font-size:.8rem;color:#8a5a10;line-height:1.45}
+.hint svg{width:20px;height:20px;flex:none;color:var(--o);margin-top:.05rem}
+.hint b{color:#6e4708}
+.installed{margin-top:1.2rem;text-align:center;font-size:.76rem;color:var(--g);font-weight:700}
+
+.footer{margin-top:auto;padding-top:1.5rem}
+.foot-note{text-align:center;font-size:.68rem;color:var(--ink3);margin-top:.9rem;line-height:1.5}
+
+/* estados especiales */
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:2rem 1.6rem;gap:.8rem}
+.center .big{font-size:2.6rem}
+.center h3{font-size:1.15rem;font-weight:800}
+.center p{font-size:.9rem;color:var(--ink2);line-height:1.5;max-width:22rem}
+.center .btn-o,.center .btn-r{max-width:16rem}
+.spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--r);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ============================================================
+   MEDICAR — App del Socio (PWA). Etapa 23 — esqueleto.
+   Login SOLO afiliado + credencial digital (read-only).
+   apiKey/firebaseConfig son públicos por diseño (frontend).
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyCXCkuaFC_8qMPAEIUlBoQiv7hBgFDq1iw",
+  authDomain: "medicar-sistema.firebaseapp.com",
+  projectId: "medicar-sistema",
+  storageBucket: "medicar-sistema.firebasestorage.app",
+  messagingSenderId: "598531879440",
+  appId: "1:598531879440:web:b630a162e9adb5981b9095"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const TEL_EMERG = '443044';
+const ICON = 'icon.svg';
+
+// Estado mínimo de la vista.
+const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null };
+const el = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function set(patch){ Object.assign(S, patch); render(); }
+
+/* ---------- Utilidades de credencial ---------- */
+function nombreDe(per, u){
+  const ap=(per&&per.apellido||'').trim(), no=(per&&per.nombre||'').trim();
+  const full=[ap,no].filter(Boolean).join(', ');
+  return full || (u&&u.nombre) || 'Socio/a';
+}
+function fmtDni(d){ const s=String(d||'').replace(/\D/g,''); if(!s) return '—'; return s.replace(/\B(?=(\d{3})+(?!\d))/g,'.'); }
+function tipoLbl(t){ return t==='corporativo'?'Corporativo':(t==='directo'?'Directo':(t||'—')); }
+
+/* ---------- Carga de datos del socio ---------- */
+async function cargarCredencial(uid){
+  const uDoc = await db.collection('usuarios').doc(uid).get();
+  if(!uDoc.exists) return { estado:'sin-vinculo', u:null };
+  const u = uDoc.data();
+  if(u.rol !== 'afiliado') return { estado:'no-afiliado', u };
+  const personaId = u.personaId;
+  if(!personaId) return { estado:'sin-vinculo', u };
+
+  // Identidad (persona)
+  let per = {};
+  try{ const p = await db.collection('personas').doc(personaId).get(); if(p.exists) per = p.data(); }catch(_){}
+
+  // Afiliación (socio por personaId; se prefiere la activa)
+  let socio = null;
+  try{
+    const snap = await db.collection('socios').where('personaId','==',personaId).get();
+    if(!snap.empty){
+      const arr = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      socio = arr.find(s=>s.activo!==false) || arr[0];
+    }
+  }catch(_){}
+
+  // Plan (catálogo)
+  let planNombre = '';
+  if(socio && socio.planId){
+    try{ const pl = await db.collection('planes').doc(socio.planId).get(); if(pl.exists) planNombre = pl.data().nombre || ''; }catch(_){}
+  }
+
+  return { estado:'ok', u, per, socio, planNombre, personaId };
+}
+
+/* ---------- Auth flow ---------- */
+auth.onAuthStateChanged(async user => {
+  if(!user){ set({ view:'login', cred:null, busy:false }); return; }
+  set({ view:'boot' });
+  try{
+    const cred = await cargarCredencial(user.uid);
+    if(cred.estado === 'no-afiliado'){ set({ view:'no-afiliado', cred }); return; }
+    if(cred.estado === 'sin-vinculo'){ set({ view:'sin-vinculo', cred }); return; }
+    set({ view:'home', cred });
+  }catch(e){
+    set({ view:'error-carga', err:(e&&e.message)||String(e) });
+  }
+});
+
+async function doLogin(){
+  if(S.busy) return;
+  const email=(el('em')?.value||'').trim();
+  const pw=el('pw')?.value||'';
+  if(!email || !pw){ set({ err:'Ingresá tu email y contraseña.' }); return; }
+  set({ busy:true, err:'' });
+  try{
+    await auth.signInWithEmailAndPassword(email, pw);
+    // onAuthStateChanged toma el control.
+  }catch(e){
+    const code=(e&&e.code)||'';
+    const msg = /wrong-password|user-not-found|invalid-credential|invalid-email/.test(code)
+      ? 'Email o contraseña incorrectos.'
+      : (/too-many-requests/.test(code) ? 'Demasiados intentos. Probá más tarde.' : 'No se pudo ingresar. Revisá tu conexión.');
+    set({ busy:false, err:msg });
+  }
+}
+function salir(){ auth.signOut(); }
+
+/* ---------- PWA install ---------- */
+let _installShown=false;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.deferredPrompt=e; if(S.view==='home') render(); });
+window.addEventListener('appinstalled', () => { S.deferredPrompt=null; if(S.view==='home') render(); });
+async function instalar(){
+  const dp=S.deferredPrompt; if(!dp) return;
+  dp.prompt(); try{ await dp.userChoice; }catch(_){}
+  S.deferredPrompt=null; render();
+}
+function esStandalone(){
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
+/* ---------- Iconos inline ---------- */
+const IC = {
+  phone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+  share:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>'
+};
+
+/* ---------- Vistas ---------- */
+function loginView(){
+  return `<div class="login">
+    <div class="login-bg">+</div>
+    <div class="login-top">
+      <img class="login-logo" src="${ICON}" alt="MEDICAR">
+      <div class="login-h1">MEDI<em>CAR</em></div>
+      <div class="login-sub">Emergencias médicas · Pergamino</div>
+    </div>
+    <div class="sheet">
+      <h2>Ingresá con tu cuenta de socio</h2>
+      <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
+      <div class="field"><label>Email</label><input id="em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com"></div>
+      <div class="field"><label>Contraseña</label><input id="pw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+      <button class="btn-r" onclick="doLogin()">${S.busy?'Ingresando…':'Ingresar'}</button>
+      <div class="foot-note">Esta app es exclusiva para socios de MEDICAR.<br>Ante una emergencia llamá al <b>${TEL_EMERG}</b>.</div>
+    </div>
+  </div>`;
+}
+
+function bootView(){ return `<div class="center"><div class="spin"></div><p>Cargando tu credencial…</p></div>`; }
+
+function noAfiliadoView(){
+  return `<div class="center">
+    <div class="big">🔒</div>
+    <h3>Esta app es para socios</h3>
+    <p>Tu cuenta no es una cuenta de socio de MEDICAR. Si sos parte del personal, usá el sistema interno.</p>
+    <button class="btn-r" onclick="salir()">Salir</button>
+  </div>`;
+}
+
+function sinVinculoView(){
+  return `<div class="center">
+    <div class="big">🔗</div>
+    <h3>Tu cuenta aún no está vinculada</h3>
+    <p>Todavía no asociamos tu cuenta con tu ficha de socio. Contactá a MEDICAR para completar la vinculación.</p>
+    <a class="btn-r" href="tel:${TEL_EMERG}" style="text-decoration:none;display:inline-block;text-align:center">Llamar a MEDICAR — ${TEL_EMERG}</a>
+    <button class="btn-o" onclick="salir()">Salir</button>
+  </div>`;
+}
+
+function errorCargaView(){
+  return `<div class="center">
+    <div class="big">⚠️</div>
+    <h3>No pudimos cargar tu credencial</h3>
+    <p>${esc(S.err||'Error inesperado.')}</p>
+    <button class="btn-r" onclick="location.reload()">Reintentar</button>
+    <button class="btn-o" onclick="salir()">Salir</button>
+  </div>`;
+}
+
+function homeView(){
+  const c=S.cred||{}; const per=c.per||{}; const u=c.u||{}; const socio=c.socio||null;
+  const nombre=nombreDe(per,u);
+  const activo = socio ? (socio.activo!==false) : false;
+  const numero = socio && socio.numeroAfiliado ? socio.numeroAfiliado : '—';
+  const plan = c.planNombre || '—';
+  const tipo = socio ? tipoLbl(socio.tipoAfiliado) : '—';
+  const estadoChip = socio
+    ? (activo ? `<span class="cred-chip chip-on">Activo</span>` : `<span class="cred-chip chip-off">Inactivo</span>`)
+    : `<span class="cred-chip chip-off">Sin afiliación</span>`;
+
+  // contacto (solo lectura)
+  const contacto = [
+    ['Teléfono', per.telefono||''],
+    ['Domicilio', per.direccion||''],
+    ['Email', per.email||u.email||'']
+  ].filter(r=>r[1]).map(r=>`<div class="row"><span class="rl">${r[0]}</span><span class="rv">${esc(r[1])}</span></div>`).join('')
+    || `<div class="row"><span class="rl">Sin datos de contacto cargados</span><span class="rv"></span></div>`;
+
+  // hint de instalación
+  let instalBlock='';
+  if(esStandalone()){
+    instalBlock = `<div class="installed">✓ App instalada en tu teléfono</div>`;
+  }else if(S.deferredPrompt){
+    instalBlock = `<button class="btn-o" style="margin-top:1.2rem" onclick="instalar()">＋ Agregar MEDICAR a mi pantalla de inicio</button>`;
+  }else{
+    instalBlock = `<div class="hint">${IC.share}<div>Agregá <b>MEDICAR</b> a tu pantalla de inicio para tenerla siempre a mano: tocá el menú <b>Compartir</b> del navegador y elegí <b>“Agregar a inicio”</b>.</div></div>`;
+  }
+
+  const sinAfilNota = socio ? '' : `<div class="foot-note" style="color:var(--o)">No encontramos tu ficha de afiliación. Contactá a MEDICAR para regularizarla.</div>`;
+
+  return `<div class="home">
+    <div class="topbar">
+      <img src="${ICON}" alt="">
+      <div class="tb-t">MEDI<em>CAR</em></div>
+      <div class="tb-sp"></div>
+      <button class="mini" onclick="salir()">Salir</button>
+    </div>
+
+    <div class="cred">
+      <div class="cred-top">
+        <div class="cred-brand">MEDI<em>CAR</em> · Credencial</div>
+        ${estadoChip}
+      </div>
+      <div class="cred-name">${esc(nombre)}</div>
+      <div style="margin-top:.9rem;position:relative;z-index:1">
+        <div class="cred-num-lbl">N° de afiliado</div>
+        <div class="cred-num">${esc(numero)}</div>
+      </div>
+      <div class="cred-grid">
+        <div class="cred-cell"><div class="cc-l">DNI</div><div class="cc-v">${esc(fmtDni(per.dni))}</div></div>
+        <div class="cred-cell"><div class="cc-l">Plan</div><div class="cc-v">${esc(plan)}</div></div>
+        <div class="cred-cell"><div class="cc-l">Tipo</div><div class="cc-v">${esc(tipo)}</div></div>
+      </div>
+    </div>
+    ${sinAfilNota}
+
+    <div class="sec">
+      <div class="sec-h">Mis datos de contacto</div>
+      <div class="card">${contacto}</div>
+    </div>
+
+    <a class="btn-emerg" href="tel:${TEL_EMERG}">${IC.phone}<span>EMERGENCIAS<span class="em-sub">Llamar al ${TEL_EMERG}</span></span></a>
+
+    ${instalBlock}
+
+    <div class="footer">
+      <div class="foot-note">Credencial digital · Solo lectura.<br>Los datos los administra MEDICAR.</div>
+    </div>
+  </div>`;
+}
+
+function render(){
+  const root=el('app'); if(!root) return;
+  let html='';
+  switch(S.view){
+    case 'login': html=loginView(); break;
+    case 'no-afiliado': html=noAfiliadoView(); break;
+    case 'sin-vinculo': html=sinVinculoView(); break;
+    case 'error-carga': html=errorCargaView(); break;
+    case 'home': html=homeView(); break;
+    default: html=bootView();
+  }
+  root.innerHTML=html;
+  // Enter para enviar el login.
+  const pw=el('pw'); if(pw){ pw.onkeydown=e=>{ if(e.key==='Enter') doLogin(); }; }
+  const em=el('em'); if(em){ em.onkeydown=e=>{ if(e.key==='Enter') el('pw')?.focus(); }; }
+}
+
+render();
+
+/* ---------- Service worker ---------- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(err => console.warn('[sw] no se registró:', err));
+  });
+}
+</script>
+</body>
+</html>

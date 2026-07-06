@@ -59,6 +59,14 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys();
     }
 
+    // personaId vinculado a la cuenta actual (app del socio, Etapa 23). Vive en usuarios/{uid}.personaId.
+    // SOLO se invoca en las ramas de lectura del AFILIADO (detras de un esInterno() que cortocircuita
+    // para el personal), asi no suma un get() a los operativos. Sin vinculo -> null (no matchea ningun
+    // id, deniega). Los internos nunca lo evaluan.
+    function miPersonaId() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.get('personaId', null);
+    }
+
     // Permisos granulares por persona (capa del centro de mando, ademas del rol).
     // Se guardan en usuarios/{uid}.permisos = { gestionar_moviles:bool, ... }.
     //  - superadmin: SIEMPRE true (cortocircuito; nunca depende del mapa).
@@ -310,27 +318,32 @@ service cloud.firestore {
     }
 
     // planes/{id}: catalogo comercial de planes + mapa coberturas{prestacionId:bool}. Estructura 3 (Admin).
-    //  - Lectura: rol INTERNO (un afiliado podria leer su plan a futuro; por ahora restringido a internos).
+    //  - Lectura: cualquier AUTENTICADO. El afiliado necesita leer el NOMBRE de su plan para la credencial
+    //    de la app del socio (Etapa 23); el catalogo comercial no es dato sensible. isSignedIn() no hace
+    //    get() (mas barato que esInterno) y cubre a todo el personal igual.
     //  - Escritura: admin/superadmin o configurar_sistema. Baja logica via 'activo', sin delete desde la app.
     match /planes/{id} {
-      allow read:           if esInterno();
+      allow read:           if isSignedIn();
       allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
     }
 
     // personas/{id}: identidad del nucleo (Estructura 3, Admin). Si proviene de un paciente, id == pacienteId
     // (los episodios siguen apuntando por pacienteId, sin tocarse). Lleva los antecedentes CLINICOS.
-    //  - Lectura: cualquier rol INTERNO (no afiliado).
+    //  - Lectura: cualquier rol INTERNO (no afiliado). ADEMAS el AFILIADO lee SOLO su propia persona
+    //    (id == su personaId) para la credencial de la app del socio (Etapa 23). Read-only.
     //  - Escritura (alta/edicion): admin/superadmin o gestionar_afiliados. Sin delete desde la app.
     match /personas/{id} {
-      allow read:           if esInterno();
+      allow read:           if esInterno() || (isSignedIn() && id == miPersonaId());
       allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
     }
 
     // socios/{id}: padron de afiliados (Estructura 3, Admin). Apunta a personas via personaId; planId a planes.
-    //  - Lectura: rol INTERNO.
+    //  - Lectura: rol INTERNO. ADEMAS el AFILIADO lee SOLO su(s) propia(s) afiliacion(es)
+    //    (socio.personaId == su personaId) para la credencial (Etapa 23). El != null evita el
+    //    caso null==null (afiliado sin vinculo leyendo un socio sin personaId). Read-only.
     //  - Escritura: admin/superadmin o gestionar_afiliados. Baja LOGICA via 'activo', sin delete desde la app.
     match /socios/{id} {
-      allow read:           if esInterno();
+      allow read:           if esInterno() || (isSignedIn() && miPersonaId() != null && resource.data.personaId == miPersonaId());
       allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
     }
 
