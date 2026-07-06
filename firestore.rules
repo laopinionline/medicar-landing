@@ -392,6 +392,16 @@ service cloud.firestore {
       allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
     }
 
+    // auditoria/{id}: registro transversal INMUTABLE de mutaciones (fire-and-forget desde la app).
+    //  - create: cualquier rol INTERNO (todo el personal que muta deja rastro).
+    //  - read: solo admin/superadmin o configurar_sistema.
+    //  - SIN update, SIN delete: inmutable (ni el superadmin edita/borra por esta regla; el catch-all
+    //    del superadmin igual podria, es intencional como valvula, pero desde la app nunca se toca).
+    match /auditoria/{id} {
+      allow create: if esInterno();
+      allow read:   if isAdmin() || tienePermiso('configurar_sistema');
+    }
+
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
     match /{document=**} {
       allow read, write: if esSuperadmin();

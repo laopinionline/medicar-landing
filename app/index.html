@@ -379,13 +379,14 @@ function getTabs(rol){
   const catTab = puedeConfig() ? [{id:'catalogo',icon:'plan',lbl:'Catálogo'}] : [];
   const factTab = puedeConfig() ? [{id:'facturacion',icon:'chart',lbl:'Facturación'}] : [];
   const mktTab = puedeAfil() ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : [];
+  const audTab = puedeConfig() ? [{id:'auditoria',icon:'history',lbl:'Auditoría'}] : [];
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...catTab,...factTab,...mktTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...catTab,...factTab,...mktTab,...audTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
@@ -394,7 +395,7 @@ function pg(){
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='marketing')return mktPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
@@ -1019,21 +1020,6 @@ function adHome(){
   </div>`;
 }
 
-function adAfil(){
-  const st=S.sub||'directos';
-  const dir=AFILIADOS.filter(a=>a.tipo==='directo');
-  const corp=AFILIADOS.filter(a=>a.tipo==='corp');
-  const os=AFILIADOS.filter(a=>a.tipo==='os');
-  return`<div class="atabs">
-    <button class="atab ${st==='directos'?'on':''}" onclick="set({sub:'directos'})">Directos (${dir.length})</button>
-    <button class="atab ${st==='corp'?'on':''}" onclick="set({sub:'corp'})">Corporativos</button>
-    <button class="atab ${st==='os'?'on':''}" onclick="set({sub:'os'})">Obras sociales</button>
-  </div>
-  ${st==='directos'?`<div class="card">${dir.map(a=>`<div class="lr"><div class="lrb"><div class="lrn">${a.nombre}</div><div class="lrs">DNI ${a.dni} · ${a.plan}</div></div><span class="badge ${a.estado==='activo'?'bg':'br'}">${a.estado}</span></div>`).join('')}</div><button class="btn-r">+ Nuevo afiliado</button>`:''}
-  ${st==='corp'?`<div class="card">${CORPS.map(c=>`<div class="lr"><div class="lrb"><div class="lrn">${c.nombre}</div><div class="lrs">${c.contacto} · ${c.n} afiliados</div></div><span style="color:var(--ink3);width:16px;height:16px">${IC.arrow}</span></div>`).join('')}</div><button class="btn-r">+ Nuevo convenio</button>`:''}
-  ${st==='os'?`<div class="card">${os.map(a=>`<div class="lr"><div class="lrb"><div class="lrn">${a.nombre}</div><div class="lrs">${a.os} · ${a.plan}</div></div><span class="badge ${a.estado==='activo'?'bg':'br'}">${a.estado}</span></div>`).join('')}</div>`:''}`;
-}
-
 function adAtenc(){
   return`<div class="card"><div class="ch">Registro del día</div>
     ${ATENC.map(a=>`<div class="lr"><div class="lrb"><div class="lrn">${a.afiliado}</div><div class="lrs">${a.fecha} · ${a.motivo} · U${a.u}</div></div><span class="badge ${a.estado==='en_curso'?'br':'bg'}">${a.estado==='en_curso'?'Activa':'Cerrada'}</span></div>`).join('')}
@@ -1071,6 +1057,18 @@ const CODIGOS=[
 ];
 const FV=()=>firebase.firestore.FieldValue.serverTimestamp();
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+/* Auditoría (FIRE-AND-FORGET): registra una mutación. NUNCA bloquea la acción — try/catch + promesa
+   swallowed; si falla el registro, se pierde el log, no la operación (mismo principio que la atribución). */
+function audit(accion, entidad, refId, detalle){
+  try{
+    var p=db.collection('auditoria').add({
+      accion:String(accion||''), entidad:String(entidad||''), refId:String(refId||''),
+      detalle:String(detalle==null?'':detalle).slice(0,200),
+      uid:(S.user&&S.user.uid)||'', email:(S.user&&S.user.email)||'', en:FV()
+    });
+    if(p&&p.catch) p.catch(function(){}); // no await, no romper si rechaza
+  }catch(_){}
+}
 
 function dspState(){ if(!S.dsp) S.dsp={stage:'buscar'}; return S.dsp; }
 function calcEdad(f){
@@ -1393,6 +1391,7 @@ async function dspCrear(){
       return next;
     });
 
+    audit('despacho_creado','episodio',epRef.id,'INC '+nro);
     S.dsp={ stage:'creado', creado:{ nro, fmt:fmtIncidente(nro,year) } };
     render();
   }catch(e){
@@ -1580,8 +1579,12 @@ async function epAsignar(){
   S.recBusy=true; S.recFlash=null; epRecErr('');
   const epId=S.ep.data.id;
   const prevMovilId0=S.ep.data.movilId||null;                   // lo que el episodio tenía (para saber si cambia)
-  const nuevoMovilId=(document.getElementById('ep-movil')?.value||'').trim();
-  const medicoUid=document.getElementById('ep-medico')?.value||'';
+  const movEl=document.getElementById('ep-movil');
+  const nuevoMovilId=(movEl?.value||'').trim();
+  let medicoUid=document.getElementById('ep-medico')?.value||'';
+  // Robustez (fleco): si el select de médico no se pobló porque el ep-movil se seteó por vía
+  // programática (no dispara onchange/epGuardiaChange), resolvé el médico desde la guardia elegida.
+  if(!medicoUid && movEl){ const o=movEl.options[movEl.selectedIndex]; if(o && o.dataset && o.dataset.meid) medicoUid=o.dataset.meid; }
   const med=(S.staffMedico||[]).find(m=>m.uid===medicoUid);
   const cambioMovil0=(nuevoMovilId||null)!==(prevMovilId0||null);
   try{
@@ -1648,6 +1651,7 @@ async function epAsignar(){
         : nuevoReal ? ('✓ '+(nuevoNombre||nuevoMovilId)+' asignado'+(choferIdFinal?(' · chofer '+(choferNombreFinal||'')):'')+(medicoUid?' · médico '+(med?med.nombre:''):'')+'.')
         : '✓ Guardado (móvil histórico conservado).';
     });
+    audit('recursos_asignados','episodio',epId,okMsg);
     S.recFlash={text:okMsg, ok:true};      // feedback EXPLÍCITO de éxito (persiste al re-render)
     await epLoad(epId);                    // recarga episodio + flota
   }catch(e){
@@ -1662,11 +1666,12 @@ async function epAvanzar(){
   if(nx==='cerrado'){ S.ep.clin=freshClin(); epStage('cerrar'); return; }   // el cierre abre la carga clínica
   await epUpdate({ estado:nx, ['transiciones.'+nx]:FV() });
 }
-async function epCerrar(res){ await epUpdate({ estado:'cerrado', resolucion:res, ['transiciones.cerrado']:FV() }); }
+async function epCerrar(res){ await epUpdate({ estado:'cerrado', resolucion:res, ['transiciones.cerrado']:FV() }); audit('episodio_cerrado','episodio',(S.ep&&S.ep.data&&S.ep.data.id)||'','resolucion '+res); }
 async function epCancelarOk(){
   const motivo=(document.getElementById('ep-cancel-motivo')?.value||'').trim();
   if(!motivo){ epMsg('Cargá un motivo de cancelación'); return; }
   await epUpdate({ estado:'cancelado', motivoCancelacion:motivo, ['transiciones.cancelado']:FV() });
+  audit('episodio_cancelado','episodio',(S.ep&&S.ep.data&&S.ep.data.id)||'',motivo||'');
 }
 
 function dEpDetalle(){
@@ -1981,6 +1986,7 @@ async function clinCerrar(){
       por: S.user.uid
     })
   });
+  audit('episodio_cerrado','episodio',(S.ep&&S.ep.data&&S.ep.data.id)||'','clinico'+((desenlace&&desenlace.codigoReal)?(' '+desenlace.codigoReal):''));
 }
 
 // Reapertura: cerrado -> atencion. Solo médico ASIGNADO o admin (la regla es la defensa real).
@@ -2108,7 +2114,7 @@ function spListView(){
   <button class="btn-r" onclick="spOpenCreate()" style="margin-bottom:.7rem">+ Crear persona</button>
   <div style="display:flex;gap:.4rem;margin-bottom:.7rem">
     ${tabBtn('personal','Personal ('+nPers+')')}
-    ${tabBtn('afiliados','Afiliados ('+nAfil+')')}
+    ${tabBtn('afiliados','Cuentas afiliado ('+nAfil+')')}
   </div>
   <div class="card">${rows}</div>`;
 }
@@ -2310,6 +2316,7 @@ async function spGuardarStaff(uid){
   if(!exists) data.creadoEn=FV();
   try{
     await db.collection('staff').doc(uid).set(data,{merge:true});
+    audit('staff_guardado','staff',uid,rol);
     S.sp.staffDocs[uid]=Object.assign({}, S.sp.staffDocs[uid]||{}, {personaId:uid,rol,matricula,activo}); // optimista
     render();
   }catch(e){ spStMsg('sp-st-err','No se pudo guardar la ficha: '+spErr(e)); }
@@ -2394,7 +2401,7 @@ function perfilSuper(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['marketing','Marketing',true],['auditoria','Auditoría',false],['config','Configuración',false]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['marketing','Marketing',true],['auditoria','Auditoría',true]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -2419,6 +2426,7 @@ function superView(){
   else if(sec==='afiliados') body=afPanel();
   else if(sec==='facturacion') body=facPanel();
   else if(sec==='marketing') body=mktPanel();
+  else if(sec==='auditoria') body=audPanel();
   else body=`<div class="card"><div class="ch">${(SUPER_SECS.find(s=>s[0]===sec)||[,sec])[1]}</div><div style="font-size:.8rem;color:var(--ink3)">Próximamente. Módulo no disponible todavía.</div></div>`;
   return superMenu(sec)+body;
 }
@@ -2433,6 +2441,7 @@ function superNav(sec){
   if(S.superSec==='afiliados'){ afDetach(); S.af=null; }
   if(S.superSec==='facturacion'){ facDetach(); S.fac=null; }
   if(S.superSec==='marketing'){ mktDetach(); S.mkt=null; }
+  if(S.superSec==='auditoria'){ audDetach(); S.aud=null; }
   S.superSec=sec;
   render();
 }
@@ -2864,6 +2873,7 @@ async function catPrestGuardar(){
       if(!id){ catErr('El nombre no genera un ID válido.'); return; }
       if((S.cat.prest||[]).some(x=>x.id===id)){ catErr('Ya existe una prestación con ese ID ('+id+').'); return; }
       await db.collection('prestaciones').doc(id).set({nombre,activo:true,creadoEn:FV()});
+      audit('prestacion_creada','prestacion',id,nombre);
     } else {
       const activo=(document.getElementById('cat-p-activo')?.value||'si')==='si';
       await db.collection('prestaciones').doc(S.cat.pedit).set({nombre,activo,actualizadoEn:FV()},{merge:true});
@@ -2941,7 +2951,7 @@ async function catPlanGuardar(){
   document.querySelectorAll('.cat-cob').forEach(c=>{ base[c.getAttribute('data-prest')]=!!c.checked; });
   const data={ nombre, descripcion:(document.getElementById('cat-l-desc')?.value||'').trim(), precio, carenciaDias, coberturas:base };
   try{
-    if(isNew){ data.activo=true; data.creadoEn=FV(); await db.collection('planes').add(data); }
+    if(isNew){ data.activo=true; data.creadoEn=FV(); await db.collection('planes').add(data); audit('plan_creado','plan','',nombre); }
     else{ data.activo=(document.getElementById('cat-l-activo')?.value||'si')==='si'; data.actualizadoEn=FV(); await db.collection('planes').doc(S.cat.ledit).set(data,{merge:true}); }
     S.cat.ledit=null; render();
   }catch(e){ catErr('No se pudo guardar: '+(e.message||e)); }
@@ -3054,7 +3064,7 @@ async function facGuardar(){
   const siempreExtra=!!(document.getElementById('fac-f-siempre')?.checked);
   const data={ nombre, tipoCalculo, precioBase, valorPorKm, prestacionId:prestacionId||null, siempreExtra };
   try{
-    if(isNew){ data.activo=true; data.creadoEn=FV(); await db.collection('tarifas').add(data); }
+    if(isNew){ data.activo=true; data.creadoEn=FV(); await db.collection('tarifas').add(data); audit('tarifa_creada','tarifa','',nombre); }
     else{ data.activo=(document.getElementById('fac-f-activo')?.value||'si')==='si'; data.actualizadoEn=FV(); await db.collection('tarifas').doc(S.fac.edit).set(data,{merge:true}); }
     S.fac.edit=null; render();
   }catch(e){ facErr('No se pudo guardar: '+(e.message||e)); }
@@ -3149,6 +3159,7 @@ async function generarCargos(){
       try{ await db.collection('cargos').add(cargo); rep.generados++; }
       catch(e){ rep.errores++; console.warn('[generarCargos] fallo al crear cargo de',epId,e); }
     }
+    audit('cargos_generados','cargos','',rep.generados+' generados, '+rep.sinTarifa+' sin tarifa');
     S.fac.report=`Generados: <b>${rep.generados}</b> · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
@@ -3205,7 +3216,7 @@ async function facCargoGuardar(id){
   const manual=Math.abs(precioFinal-expected)>0.005;
   if(manual && !motivoAjuste){ facCMsg('Cambiaste el precio final a mano: el motivo de ajuste es obligatorio.'); return; }
   const data={ km, kmPendiente, precioFinal, motivoAjuste:(manual?motivoAjuste:(motivoAjuste||null)), actualizadoEn:FV() };
-  try{ await db.collection('cargos').doc(id).set(data,{merge:true}); S.fac.cedit=null; render(); }
+  try{ await db.collection('cargos').doc(id).set(data,{merge:true}); audit('cargo_ajustado','cargo',id,'$'+precioFinal); S.fac.cedit=null; render(); }
   catch(e){ facCMsg('No se pudo guardar: '+(e.message||e)); }
 }
 async function facCargoAnular(id){
@@ -3215,7 +3226,7 @@ async function facCargoAnular(id){
   if(cg && cg.facturaId){ facCMsg('Este cargo está facturado: anulá la factura primero.'); return; }
   const motivo=(document.getElementById('fac-c-anmotivo')?.value||'').trim();
   if(!motivo){ facCMsg('El motivo de anulación es requerido.'); return; }
-  try{ await db.collection('cargos').doc(id).set({ estado:'anulado', motivoAnulacion:motivo, anuladoEn:FV(), anuladoPor:S.user.uid },{merge:true}); S.fac.cedit=null; render(); }
+  try{ await db.collection('cargos').doc(id).set({ estado:'anulado', motivoAnulacion:motivo, anuladoEn:FV(), anuladoPor:S.user.uid },{merge:true}); audit('cargo_anulado','cargo',id,motivo); S.fac.cedit=null; render(); }
   catch(e){ facCMsg('No se pudo anular: '+(e.message||e)); }
 }
 
@@ -3288,6 +3299,7 @@ async function generarAbonos(){
       try{ await db.collection('abonos').add(abono); rep.generados++; }
       catch(e){ rep.errores++; console.warn('[generarAbonos] fallo',socioId,e); }
     }
+    audit('abonos_generados','abonos',periodo,rep.generados+' generados');
     S.fac.reportAb=`Período <b>${esc(periodo)}</b> — Generados: <b>${rep.generados}</b> · Sin plan: ${rep.sinPlan} · Ya tenían: ${rep.yaTenian} · Plan inválido: ${rep.planInvalido}${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar los abonos: '+(e.message||e)); }
@@ -3328,7 +3340,7 @@ async function facAbonoGuardar(id){
   const manual=Math.abs(precioFinal-base)>0.005;
   if(manual && !motivoAjuste){ facAbMsg('Cambiaste el precio final a mano: el motivo de ajuste es obligatorio.'); return; }
   const data={ precioFinal, motivoAjuste:(manual?motivoAjuste:(motivoAjuste||null)), actualizadoEn:FV() };
-  try{ await db.collection('abonos').doc(id).set(data,{merge:true}); S.fac.aedit=null; render(); }
+  try{ await db.collection('abonos').doc(id).set(data,{merge:true}); audit('abono_ajustado','abono',id,'$'+precioFinal); S.fac.aedit=null; render(); }
   catch(e){ facAbMsg('No se pudo guardar: '+(e.message||e)); }
 }
 async function facAbonoAnular(id){
@@ -3338,7 +3350,7 @@ async function facAbonoAnular(id){
   if(ab && ab.facturaId){ facAbMsg('Este abono está facturado: anulá la factura primero.'); return; }
   const motivo=(document.getElementById('fac-ab-anmotivo')?.value||'').trim();
   if(!motivo){ facAbMsg('El motivo de anulación es requerido.'); return; }
-  try{ await db.collection('abonos').doc(id).set({ estado:'anulado', motivoAnulacion:motivo, anuladoEn:FV(), anuladoPor:S.user.uid },{merge:true}); S.fac.aedit=null; render(); }
+  try{ await db.collection('abonos').doc(id).set({ estado:'anulado', motivoAnulacion:motivo, anuladoEn:FV(), anuladoPor:S.user.uid },{merge:true}); audit('abono_anulado','abono',id,motivo); S.fac.aedit=null; render(); }
   catch(e){ facAbMsg('No se pudo anular: '+(e.message||e)); }
 }
 
@@ -3409,6 +3421,7 @@ async function generarFacturas(){
       }catch(e){ rep.errores++; console.warn('[generarFacturas] fallo persona',pid,e); }
     }
     rep.sinPend = Math.max(0, scopePersonas.size - pids.length); // personas con historial en scope pero nada pendiente
+    audit('facturas_generadas','facturas',periodo,rep.facturas+' facturas');
     S.fac.reportF=`Período <b>${esc(periodo)}</b> — Facturas emitidas: <b>${rep.facturas}</b> · Items facturados: ${rep.items} · Personas sin pendientes: ${rep.sinPend}${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar las facturas: '+(e.message||e)); }
@@ -3446,7 +3459,7 @@ async function facFacturaPagar(id){
   facFcMsg('');
   const f=(S.fac.facturas||[]).find(x=>x.id===id); if(!f) return;
   if(f.estado!=='emitida'){ facFcMsg('Solo se puede marcar pagada una factura emitida.'); return; }
-  try{ await db.collection('facturas').doc(id).set({ estado:'pagada', pagadaEn:FV(), pagadaPor:S.user.uid },{merge:true}); render(); }
+  try{ await db.collection('facturas').doc(id).set({ estado:'pagada', pagadaEn:FV(), pagadaPor:S.user.uid },{merge:true}); audit('factura_pagada','factura',id,''); render(); }
   catch(e){ facFcMsg('No se pudo marcar pagada: '+(e.message||e)); }
 }
 async function facFacturaAnular(id){
@@ -3464,6 +3477,7 @@ async function facFacturaAnular(id){
       catch(e){ console.warn('[facFacturaAnular] no se pudo liberar',it.tipo,it.refId,e); }
     }
     await db.collection('facturas').doc(id).set({ estado:'anulada', motivoAnulacion:motivo, anuladaEn:FV(), anuladaPor:S.user.uid },{merge:true});
+    audit('factura_anulada','factura',id,motivo);
     render();
   }catch(e){ facFcMsg('No se pudo anular: '+(e.message||e)); }
 }
@@ -3591,10 +3605,11 @@ async function afGuardarNuevo(){
     const sref=await db.collection('socios').add({ personaId, tipoAfiliado, numeroAfiliado:numero, planId:planId||null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV() });
     // Conversión de lead (callback): al guardar OK en modo conversión, marca el lead convertido + vínculo.
     if(S.convLeadId){
-      try{ await db.collection('leads').doc(S.convLeadId).set({ estado:'convertido', personaId, socioId:sref.id, actualizadoEn:FV() },{merge:true}); }
+      try{ await db.collection('leads').doc(S.convLeadId).set({ estado:'convertido', personaId, socioId:sref.id, actualizadoEn:FV() },{merge:true}); audit('lead_convertido','lead',S.convLeadId,'socio '+sref.id); }
       catch(e2){ console.warn('[conversión] socio creado OK, pero no se pudo marcar el lead:',e2); }
       S.convLeadId=null; S.convPrefill=null;
     }
+    audit('socio_alta','socio',personaId,'N° '+numero);
     S.af.edit=null; S.af.lk=null; render();
   }catch(e){ afErr('No se pudo guardar: '+(e.message||e)); }
 }
@@ -3637,7 +3652,7 @@ async function afGuardarEdit(id){
 async function afBaja(id,reactivar){
   if(!puedeAfil()) return;
   afErr('');
-  try{ await db.collection('socios').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
+  try{ await db.collection('socios').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); audit(reactivar?'socio_reactivado':'socio_baja','socio',id,''); }
   catch(e){ afErr('No se pudo actualizar: '+(e.message||e)); }
 }
 
@@ -3797,7 +3812,7 @@ async function mktGuardar(id){
   if(!telefono && !email){ mktErr('Cargá al menos un teléfono o un email.'); return; }
   const data={ nombre, telefono, email, origen, campanaId:campanaId||null, notas, actualizadoEn:FV() };
   try{
-    if(id==='new'){ data.estado='nuevo'; data.motivoDescarte=null; data.personaId=null; data.socioId=null; data.creadoEn=FV(); data.creadoPor=S.user.uid; await db.collection('leads').add(data); }
+    if(id==='new'){ data.estado='nuevo'; data.motivoDescarte=null; data.personaId=null; data.socioId=null; data.creadoEn=FV(); data.creadoPor=S.user.uid; await db.collection('leads').add(data); audit('lead_creado','lead','',nombre); }
     else{ await db.collection('leads').doc(id).set(data,{merge:true}); }
     S.mkt.edit=null; render();
   }catch(e){ mktErr('No se pudo guardar: '+(e.message||e)); }
@@ -3811,7 +3826,7 @@ async function mktDescartar(id){
   if(!puedeAfil()) return; mktErr('');
   const motivo=(document.getElementById('mkt-l-desc')?.value||'').trim();
   if(!motivo){ mktErr('El motivo de descarte es requerido.'); return; }
-  try{ await db.collection('leads').doc(id).set({ estado:'descartado', motivoDescarte:motivo, actualizadoEn:FV() },{merge:true}); S.mkt.edit=null; render(); }
+  try{ await db.collection('leads').doc(id).set({ estado:'descartado', motivoDescarte:motivo, actualizadoEn:FV() },{merge:true}); audit('lead_descartado','lead',id,motivo); S.mkt.edit=null; render(); }
   catch(e){ mktErr('No se pudo descartar: '+(e.message||e)); }
 }
 async function mktReactivar(id){
@@ -3826,6 +3841,10 @@ function mktConvertir(id){
   const l=((S.mkt&&S.mkt.leads)||[]).find(x=>x.id===id); if(!l) return;
   if(l.estado==='convertido'){ mktErr('Este lead ya está convertido.'); return; }
   S.convLeadId=id; S.convPrefill={ nombre:l.nombre||'', telefono:l.telefono||'' }; S.convOpenAlta=true;
+  // Robustez: si YA estás en la sección Afiliados, abrí el alta directo (la navegación sería no-op y el
+  // flag no se consumiría). Section-aware: superadmin navega por S.superSec, admin por S.tab.
+  const enAfil = (S.user && S.user.rol==='superadmin') ? (S.superSec==='afiliados') : (S.tab==='afiliados');
+  if(enAfil && S.af){ S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.convOpenAlta=false; render(); return; }
   if(S.user && S.user.rol==='superadmin'){ superNav('afiliados'); }
   else { S.tab='afiliados'; render(); }
 }
@@ -3877,7 +3896,7 @@ async function mktCampGuardar(id){
   const costo=Number(document.getElementById('mkt-c-costo')?.value||0)||0;
   const data={ nombre, canal, costo, fechaDesde:(document.getElementById('mkt-c-desde')?.value||'')||null, fechaHasta:(document.getElementById('mkt-c-hasta')?.value||'')||null, notas:(document.getElementById('mkt-c-notas')?.value||'').trim() };
   try{
-    if(id==='new'){ data.activo=true; data.creadoEn=FV(); data.creadoPor=S.user.uid; await db.collection('campanas').add(data); }
+    if(id==='new'){ data.activo=true; data.creadoEn=FV(); data.creadoPor=S.user.uid; await db.collection('campanas').add(data); audit('campana_creada','campana','',nombre); }
     else{ data.activo=(document.getElementById('mkt-c-activo')?.value||'si')==='si'; data.actualizadoEn=FV(); await db.collection('campanas').doc(id).set(data,{merge:true}); }
     S.mkt.cedit=null; render();
   }catch(e){ mktErr('No se pudo guardar: '+(e.message||e)); }
@@ -3941,6 +3960,33 @@ function mktMetricasView(){
   const facNote= m.facturasOk ? `<div style="font-size:.66rem;color:var(--ink3);margin-top:.3rem">CPL = costo/lead · CPC = costo por captación (costo/convertidos) · Facturado = facturas emitida/pagada de los socios convertidos.</div>` : `<div style="font-size:.66rem;color:var(--o,#E0A23B);margin-top:.3rem">Facturado "—" (requiere permiso de facturación). El resto del panel es válido.</div>`;
   const campCard=`<div class="card"><div class="ch">Por campaña</div>${campRows}${facNote}</div>`;
   return head+funnelCard+origenCard+campCard;
+}
+
+/* ===================== AUDITORÍA — registro transversal INMUTABLE (solo lectura) =====================
+   Colección auditoria/{id}: {accion, entidad, refId, detalle, uid, email, en}. Se escribe por audit()
+   fire-and-forget desde los puntos de mutación. Reglas: create esInterno(); read admin/configurar_sistema;
+   sin update ni delete (inmutable). UI reverse-cronológica, últimas 100, filtro por texto. */
+function audAttach(){
+  if(S.audUnsub) return;
+  S.audUnsub=[
+    db.collection('auditoria').orderBy('en','desc').limit(100).onSnapshot(s=>{ if(!S.aud) return; S.aud.items=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, e=>{ if(S.aud){ S.aud.err=(e.message||String(e)); render(); } })
+  ];
+}
+function audDetach(){ if(S.audUnsub){ S.audUnsub.forEach(u=>{ try{u();}catch(_){} }); S.audUnsub=null; } }
+function audFiltro(v){ if(S.aud){ S.aud.q=v||''; render(); } }
+function audPuede(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('configurar_sistema'))); }
+function audFmt(t){ const ms=tms(t); if(ms==null) return '—'; const d=new Date(ms); return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+function audPanel(){
+  if(!audPuede()) return `<div class="card"><div class="ch">Auditoría</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para ver la auditoría.</div></div>`;
+  if(!S.aud){ S.aud={items:null,q:'',err:''}; audAttach(); }
+  if(S.aud.err) return `<div class="card">No se pudo cargar la auditoría: ${esc(S.aud.err)}</div>`;
+  if(S.aud.items===null) return `<div class="card">Cargando auditoría…</div>`;
+  const q=(S.aud.q||'').toLowerCase();
+  const list=q ? S.aud.items.filter(a=>[a.accion,a.entidad,a.detalle,a.email,a.refId].join(' ').toLowerCase().indexOf(q)!==-1) : S.aud.items;
+  const rows=list.length ? list.map(a=>`<div class="lr" style="flex-wrap:wrap"><div class="lrb" style="flex:1 1 100%"><div class="lrn" style="font-size:.82rem">${esc(a.accion||'—')} · ${esc(a.entidad||'')}</div><div class="lrs">${audFmt(a.en)} · ${esc(a.email||a.uid||'—')}${a.detalle?(' · '+esc(a.detalle)):''}</div></div></div>`).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin registros${q?' para el filtro':''}</div>`;
+  return `<div style="font-weight:700;margin:.1rem 0 .6rem">Auditoría <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo · últimas 100 · inmutable</span></div>
+    <div class="field" style="margin-bottom:.6rem"><input id="aud-q" placeholder="Filtrar por texto…" value="${esc(S.aud.q||'')}" oninput="audFiltro(this.value)"></div>
+    <div class="card">${rows}</div>`;
 }
 
 /* ===================== PERMISOS por persona (lo configura el superadmin en la ficha) ===================== */
