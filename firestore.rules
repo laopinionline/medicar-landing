@@ -226,11 +226,12 @@ service cloud.firestore {
             && request.resource.data.ofrecido == false
             && tocadas().hasOnly(['medicoId','medicoNombre','ofrecido','handoff'])
           )
-          // GEO (Etapa 22): operativos (o el chofer dueno) escriben SOLO los 3 campos geo — whitelist cerrada.
-          // El barrio lo resuelve el fire-and-forget del despacho / el batch; no toca ningun otro campo.
+          // GEO (Etapa 22 + coords en Etapa 25): operativos (o el chofer dueno) escriben SOLO los campos geo
+          // — whitelist cerrada. El barrio + coords (geoLat/geoLng) los resuelve el fire-and-forget del
+          // despacho / el batch; no toca ningun otro campo.
           || (
             (esDespachante() || esMedico() || request.auth.uid == resource.data.choferId)
-            && tocadas().hasOnly(['barrio','geoPrecision','geoResueltoEn'])
+            && tocadas().hasOnly(['barrio','geoPrecision','geoResueltoEn','geoLat','geoLng'])
           )
         )
       );

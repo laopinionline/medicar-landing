@@ -208,7 +208,11 @@ const ATENC=[
 ];
 
 let S={user:null,tab:'home',sub:'directos',step:0};
-const set=p=>{Object.assign(S,p);render()};
+const set=p=>{
+  // Detach de la escucha de la bandeja al navegar a otra pestaña (deja de estar visible → una sola escucha viva).
+  if(p && p.tab!==undefined && p.tab!=='bandeja' && p.tab!=='episodios' && typeof banDetach==='function'){ banDetach(); S.bandeja=null; }
+  Object.assign(S,p); render();
+};
 
 /* Estado de sesion limpio definido en UN solo lugar. resetSession() REASIGNA S a un
    baseline fresco: descarta TODO lo derivado del usuario (bandeja, ep, epView, dsp,
@@ -222,6 +226,8 @@ function resetSession(keepErr){
   if(typeof movDetach==='function') movDetach(); // ídem sección móviles
   if(typeof cronoDetach==='function') cronoDetach(); // ídem cronograma de guardias
   if(typeof monDetach==='function') monDetach(); // ídem monitoreo (cuestionarios/respuestas)
+  if(typeof banDetach==='function') banDetach(); // ídem escucha en vivo de la bandeja (despachante/médico)
+  if(S.mapaVivo){ try{S.mapaVivo.remove();}catch(_){} S.mapaVivo=null; } // mapa vivo Leaflet
   S=cleanSession();
   if(err) S.loginErr=err; // preserva el mensaje de login (ej. "cuenta sin rol")
 }
@@ -348,7 +354,6 @@ function shell(){
     </div>
   </div>
   <div class="content page">${pg()}</div>
-  <a href="tel:443044" class="fab" style="${S.tab==='home'&&S.user.rol==='afiliado'?'display:none':''}">${IC.phone}<span class="fab-lbl">443044</span></a>
   <nav class="bnav">
     ${tabs.map(t=>`<button class="nb ${S.tab===t.id?'on':''}" onclick="set({tab:'${t.id}'})">${IC[t.icon]}<span>${t.lbl}</span></button>`).join('')}
   </nav>
@@ -1451,37 +1456,38 @@ function añoDe(t){ return (t&&t.toDate)?t.toDate().getFullYear():new Date().get
 /* ---- BANDEJA ---- */
 function bandeja(){
   if(S.epView) return dEpDetalle();
+  // Carga EN VIVO (Etapa 25): al entrar sin datos, (re)suscribe una escucha fresca (initial snapshot
+  // inmediato). El detach al salir de la sección (en set()) y en logout garantiza una sola escucha viva.
+  if(!S.bandeja){ banDetach(); S.bandeja={loading:true}; banAttach(); return banSkeleton(); }
   const b=S.bandeja;
-  if(!b){ banLoad(); return banSkeleton(); }
   if(b.loading) return banSkeleton();
   if(b.err) return `<div class="card">No se pudo cargar la bandeja: ${esc(b.err)}<br><button class="btn-o" onclick="banReload()" style="margin-top:.6rem">Reintentar</button></div>`;
   return banView(b.items);
 }
 function banSkeleton(){ return `<div class="card">Cargando episodios…</div>`; }
-function banReload(){ S.bandeja=null; render(); }
+function banReload(){ S.bandeja=null; render(); } // fuerza re-suscripción fresca vía bandeja()
 
-async function banLoad(){
-  S.bandeja={loading:true};
-  try{
-    let items;
-    if(S.user.rol==='medico'){
-      // Firestore no hace OR -> 2 queries (los suyos + los ofrecidos) y merge dedup por id.
-      const [mine,off]=await Promise.all([
-        db.collection('episodios').where('medicoId','==',S.user.uid).get(),
-        db.collection('episodios').where('ofrecido','==',true).get()
-      ]);
-      const map={};
-      mine.docs.forEach(x=>{ map[x.id]={id:x.id,...x.data()}; });
-      off.docs.forEach(x=>{ map[x.id]={id:x.id,...x.data()}; });
-      items=Object.values(map);
-    }else{
-      const snap=await db.collection('episodios').get();
-      items=snap.docs.map(d=>({id:d.id,...d.data()}));
-    }
-    S.bandeja={loading:false,items};
-  }catch(e){ S.bandeja={loading:false,err:(e.message||String(e))}; }
-  render();
+/* Escucha en vivo de la bandeja (reemplaza el .get() one-shot). MISMA data que ya mostraba la bandeja;
+   el mapa vivo del despachante cuelga de esta escucha (sin suscripción aparte). Despachante = 1 escucha
+   (todos los episodios); médico = 2 (los suyos + los ofrecidos, merge dedup — Firestore no hace OR),
+   igual que las 2 queries que hacía el .get(). Detach prolijo al salir de la vista y en logout. */
+function banRender(){ if(!S.epView) render(); } // no re-renderiza si hay un detalle abierto (no lo pisa)
+function banAttach(){
+  if(S.banUnsub) return;
+  S.banUnsub=[];
+  if(S.user.rol==='medico'){
+    const merge=()=>{ if(!S.bandeja) return; const map={}; (S.banMine||[]).forEach(e=>{ map[e.id]=e; }); (S.banOff||[]).forEach(e=>{ map[e.id]=e; }); S.bandeja={loading:false,items:Object.values(map)}; banRender(); };
+    S.banUnsub.push(
+      db.collection('episodios').where('medicoId','==',S.user.uid).onSnapshot(s=>{ if(!S.bandeja) return; S.banMine=s.docs.map(d=>({id:d.id,...d.data()})); merge(); }, e=>{ if(S.bandeja){ S.bandeja={loading:false,err:(e.message||String(e))}; render(); } }),
+      db.collection('episodios').where('ofrecido','==',true).onSnapshot(s=>{ if(!S.bandeja) return; S.banOff=s.docs.map(d=>({id:d.id,...d.data()})); merge(); }, ()=>{})
+    );
+  }else{
+    S.banUnsub.push(
+      db.collection('episodios').onSnapshot(s=>{ if(!S.bandeja) return; S.bandeja={loading:false,items:s.docs.map(d=>({id:d.id,...d.data()}))}; banRender(); }, e=>{ if(S.bandeja){ S.bandeja={loading:false,err:(e.message||String(e))}; render(); } })
+    );
+  }
 }
+function banDetach(){ if(S.banUnsub){ S.banUnsub.forEach(u=>{ try{u();}catch(_){} }); S.banUnsub=null; } S.banMine=null; S.banOff=null; }
 
 function banView(items){
   const esMedico=S.user.rol==='medico';
@@ -1506,6 +1512,7 @@ function banView(items){
   const nuevo=(S.user.rol==='despachante')?`<button class="btn-r" onclick="verBandejaNuevo()" style="margin-bottom:.8rem">+ Nuevo despacho</button>`:''; // crear: solo despachante
   const disp=esMedico?`<div class="card">${sec('🤝 Disponibles para tomar',disponibles,'No hay casos ofrecidos')}</div>`:'';
   return `${top}${nuevo}
+  ${S.user.rol==='despachante'?mapaVivoBloque(items):''}
   <div class="card">${sec('🟢 Activos',activos,'Sin episodios activos')}</div>
   ${disp}
   <div class="card">
@@ -2499,7 +2506,7 @@ function superView(){
 // Cambiar de sección: cortar listeners + estado de la sección que dejo.
 function superNav(sec){
   if(S.superSec==='personal'){ spDetach(); S.sp=null; }
-  if(S.superSec==='dashboard'){ dashDetach(); S.dash=null; }
+  if(S.superSec==='dashboard'){ dashDetach(); S.dash=null; if(S.mapaVivo){ try{S.mapaVivo.remove();}catch(_){} S.mapaVivo=null; } }
   if(S.superSec==='moviles'){ movDetach(); S.mov=null; }
   if(S.superSec==='cronograma'){ cronoDetach(); S.crono=null; }
   if(S.superSec==='catalogo'){ catDetach(); S.cat=null; }
@@ -2564,6 +2571,7 @@ function dashSuper(){
   const fTot =fLoad?'…':fl.length;
   return `
   <div style="font-weight:700;margin:.1rem 0 .6rem">Dashboard <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
+  ${mapaVivoBloque(d.eps||[])}
   <div class="srow">${card(hoy,'Atenciones del día')}${card(activos,'Episodios activos')}</div>
   <div class="card"><div class="ch">Activos por estado</div>
     <div class="ir"><span class="il">Despacho</span><span class="iv">${cDesp}</span></div>
@@ -4204,11 +4212,18 @@ function estPanel(){
     ${demRows}
     ${ir('<b>Sin ubicar</b>',`${d.sinUbicar} (${d.op.total?Math.round(d.sinUbicar/d.op.total*100):0}%)`)}
     <div style="font-size:.64rem;color:var(--ink3);margin:.4rem 0 .2rem">Precisión (EXACTO/APROX): ${precBadges}</div>
-    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem">
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem;align-items:center">
+      <span style="font-size:.62rem;color:var(--ink3)">Período:</span>
+      <button class="btn-o" style="width:auto;margin:0;padding:.3rem .6rem" onclick="estPreset('hoy')">Hoy</button>
+      <button class="btn-o" style="width:auto;margin:0;padding:.3rem .6rem" onclick="estPreset('7')">7 días</button>
+      <button class="btn-o" style="width:auto;margin:0;padding:.3rem .6rem" onclick="estPreset('30')">30 días</button>
+    </div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem;align-items:center">
       <button class="btn-r" style="width:auto;margin:0;padding:.4rem .8rem" onclick="geocodificarPendientes()">${S.est.geoBusy?'Geocodificando…':'Geocodificar pendientes'}</button>
       <button class="btn-o" style="width:auto;margin:0;padding:.4rem .8rem" onclick="geoDibujarMapa()">Dibujar mapa</button>
+      <label style="display:flex;align-items:center;gap:.35rem;font-size:.72rem;color:var(--ink2);cursor:pointer;margin-left:.2rem"><input type="checkbox" onchange="estTogglePuntos(this.checked)" ${S.est.geoPuntos?'checked':''}>Ver puntos</label>
     </div>
-    <div style="font-size:.62rem;color:var(--ink3);margin-top:.3rem">El batch respeta 1 req/seg contra Nominatim; idempotente (no re-geocodifica los que ya tienen barrio).</div>
+    <div style="font-size:.62rem;color:var(--ink3);margin-top:.3rem">El batch respeta 1 req/seg contra Nominatim; idempotente (salta los que ya tienen barrio + coords; retro-completa coords faltantes). "Ver puntos" superpone los episodios del rango (los sin coords quedan en "Sin ubicar").</div>
     ${S.est.geoReport?`<div style="font-size:.7rem;color:var(--ink2);margin-top:.4rem">${esc(S.est.geoReport)}</div>`:''}
     <div id="geo-mapa" style="height:360px;margin-top:.6rem;border-radius:10px;overflow:hidden;background:var(--bg2)"></div>
   </div>`;
@@ -4443,55 +4458,64 @@ async function geoNominatim(calle,altura){
   const a=await r.json(); if(!a.length) return null;
   const hit=a[0]; return { lat:parseFloat(hit.lat), lon:parseFloat(hit.lon), exact: !!(altura && hit.address && hit.address.house_number) };
 }
-/* Prioridad: 1) arribo GPS (Fase A) 2) domicilio->Nominatim 3) sin_ubicar. Devuelve {barrio, geoPrecision}. */
+/* Prioridad: 1) arribo GPS (Fase A) 2) domicilio->Nominatim 3) sin_ubicar. Devuelve {barrio, geoPrecision,
+   geoLat, geoLng} — las coords son las del PUNTO usado para resolver el barrio (Etapa 25: se persisten
+   para pintar el mapa; antes solo se guardaba el barrio). */
 async function geoResolverEpisodio(ep){
   const aLat=ep.arribo&&ep.arribo.lat, aLon=ep.arribo&&ep.arribo.long;
-  if(aLat!=null && aLon!=null){ const b=await geoBarrioDeCoord(aLon,aLat); if(b) return { barrio:b, geoPrecision:'gps_arribo' }; }
+  if(aLat!=null && aLon!=null){ const b=await geoBarrioDeCoord(aLon,aLat); if(b) return { barrio:b, geoPrecision:'gps_arribo', geoLat:aLat, geoLng:aLon }; }
   const nd=normalizarDireccion(ep.domicilio||'');
   if(nd.calle){
     try{
       const hit=await geoNominatim(nd.calle,nd.altura);
       if(hit){
         const dist=geoDistKm(GEO_CENTRO[0],GEO_CENTRO[1],hit.lon,hit.lat);
-        if(dist<=5){ const b=await geoBarrioDeCoord(hit.lon,hit.lat); if(b) return { barrio:b, geoPrecision: hit.exact?'geo_exacto':'geo_aprox' }; }
+        if(dist<=5){ const b=await geoBarrioDeCoord(hit.lon,hit.lat); if(b) return { barrio:b, geoPrecision: hit.exact?'geo_exacto':'geo_aprox', geoLat:hit.lat, geoLng:hit.lon }; }
       }
     }catch(_){}
   }
-  return { barrio:null, geoPrecision:'sin_ubicar' };
+  return { barrio:null, geoPrecision:'sin_ubicar', geoLat:null, geoLng:null };
 }
 // Fire-and-forget: NUNCA en el camino crítico del despacho. Si falla (permiso/red/geocode), barrio queda null → lo levanta el batch.
 function geoResolverYGuardar(epId, ep){
-  (async()=>{ try{ const res=await geoResolverEpisodio(ep); await db.collection('episodios').doc(epId).set({ barrio:res.barrio, geoPrecision:res.geoPrecision, geoResueltoEn:FV() },{merge:true}); }catch(_){} })();
+  (async()=>{ try{ const res=await geoResolverEpisodio(ep); await db.collection('episodios').doc(epId).set({ barrio:res.barrio, geoPrecision:res.geoPrecision, geoLat:res.geoLat, geoLng:res.geoLng, geoResueltoEn:FV() },{merge:true}); }catch(_){} })();
 }
-/* Batch: barre episodios sin barrio (idempotente), resuelve con prioridad arribo, 1 req/seg contra Nominatim. */
+/* Batch: barre episodios pendientes, resuelve con prioridad arribo, 1 req/seg contra Nominatim.
+   Idempotente: salta los que YA tienen barrio + coords. RETRO-COMPLETA (Etapa 25) los que tienen barrio
+   pero les faltan geoLat/geoLng (resueltos por la E22, que no guardaba coords): re-resuelve para persistir
+   el punto (arribo = gratis; geocodificados = re-consulta a 1 req/s). */
 async function geocodificarPendientes(){
   if(!puedeConfig() || !S.est) return;
   S.est.geoBusy=true; S.est.geoReport=''; render();
-  const rep={ gps_arribo:0, geo_exacto:0, geo_aprox:0, sin_ubicar:0, saltados:0, errores:0 };
+  const rep={ gps_arribo:0, geo_exacto:0, geo_aprox:0, sin_ubicar:0, retro:0, saltados:0, errores:0 };
   try{
     const snap=await db.collection('episodios').get();
     for(const doc of snap.docs){
       const ep={id:doc.id,...doc.data()};
-      if(ep.barrio){ rep.saltados++; continue; } // idempotente: ya resuelto
+      const tieneCoords = ep.geoLat!=null && ep.geoLng!=null;
+      if(ep.barrio && tieneCoords){ rep.saltados++; continue; } // ya resuelto por completo (barrio + coords)
       const hasArribo=ep.arribo&&ep.arribo.lat!=null&&ep.arribo.long!=null;
-      if(!hasArribo && !(ep.domicilio||'').trim()){ rep.saltados++; continue; }
+      if(!hasArribo && !(ep.domicilio||'').trim()){ rep.saltados++; continue; } // sin dato para resolver
+      const esRetro = !!ep.barrio && !tieneCoords; // tiene barrio (E22) pero le faltan coords → retro-completar
       try{
         if(!hasArribo) await new Promise(r=>setTimeout(r,1100)); // rate-limit Nominatim: 1 req/seg
         const res=await geoResolverEpisodio(ep);
-        await db.collection('episodios').doc(ep.id).set({ barrio:res.barrio, geoPrecision:res.geoPrecision, geoResueltoEn:FV() },{merge:true});
-        rep[res.geoPrecision]=(rep[res.geoPrecision]||0)+1;
+        await db.collection('episodios').doc(ep.id).set({ barrio:res.barrio, geoPrecision:res.geoPrecision, geoLat:res.geoLat, geoLng:res.geoLng, geoResueltoEn:FV() },{merge:true});
+        if(esRetro) rep.retro++; else rep[res.geoPrecision]=(rep[res.geoPrecision]||0)+1;
       }catch(e){ rep.errores++; }
     }
-    S.est.geoReport='Resueltos — GPS arribo: '+rep.gps_arribo+' · exacto: '+rep.geo_exacto+' · aprox: '+rep.geo_aprox+' · sin ubicar: '+rep.sin_ubicar+' · saltados (ya resueltos/sin dato): '+rep.saltados+(rep.errores?(' · errores: '+rep.errores):'');
+    S.est.geoReport='Resueltos — GPS arribo: '+rep.gps_arribo+' · exacto: '+rep.geo_exacto+' · aprox: '+rep.geo_aprox+' · sin ubicar: '+rep.sin_ubicar+' · retro-completados (coords): '+rep.retro+' · saltados (ya con barrio+coords/sin dato): '+rep.saltados+(rep.errores?(' · errores: '+rep.errores):'');
     S.est.geoBusy=false; render();
   }catch(e){ S.est.geoBusy=false; S.est.geoReport='No se pudo geocodificar: '+(e.message||e); render(); }
 }
 /* Mapa Leaflet choropleth (on-demand, lazy). Pinta los 58 polígonos por cantidad de llamadas del período. */
 async function geoDibujarMapa(){
-  const cont=document.getElementById('geo-mapa'); if(!cont) return;
-  cont.innerHTML='<div style="padding:1rem;font-size:.8rem;color:var(--ink3)">Cargando mapa…</div>';
+  const cont=document.getElementById('geo-mapa'); if(!cont || !S.est) return;
+  S.est.mapaOn=true; // una vez dibujado, bind() lo redibuja tras cada render (presets/toggle)
+  if(!S.geoMap) cont.innerHTML='<div style="padding:1rem;font-size:.8rem;color:var(--ink3)">Cargando mapa…</div>';
   try{
     const L=await geoEnsureLeaflet(); const g=await geoBarrios();
+    if(!document.body.contains(cont)) return; // el DOM cambió mientras cargaba
     const demanda=(S.est.data&&S.est.data.demanda)||{};
     if(S.geoMap){ try{S.geoMap.remove();}catch(_){} S.geoMap=null; }
     cont.innerHTML='';
@@ -4501,6 +4525,80 @@ async function geoDibujarMapa(){
     const color=n=>{ if(!n) return '#e8e4dc'; const t=max?n/max:0; return t>0.66?'#DC1400':t>0.33?'#F07800':'#F5C542'; };
     L.geoJSON(g,{ style:f=>({color:'#888',weight:1,fillColor:color(demanda[f.properties.nombre]||0),fillOpacity:.6}),
       onEachFeature:(f,layer)=>{ layer.bindTooltip(f.properties.nombre+': '+(demanda[f.properties.nombre]||0),{sticky:true}); } }).addTo(map);
+    // Etapa 25 — VER PUNTOS: superpone los episodios del rango como circleMarkers chicos por código.
+    if(S.est.geoPuntos){
+      (S.est.data&&S.est.data.eps||[]).filter(e=>e.geoLat!=null&&e.geoLng!=null).forEach(e=>{
+        L.circleMarker([e.geoLat,e.geoLng],{ radius:4, color:'#333', weight:1, fillColor:mapaCodColor(e.codigoPresuntivo), fillOpacity:.9 })
+          .bindTooltip(`${mapaIncLbl(e)} · ${estDia(e)} · ${esc(e.barrio||'sin ubicar')}`,{sticky:true}).addTo(map);
+      });
+    }
+    mapaAgregarBase(L, map); // base de ambulancias (marcador fijo, siempre visible)
+    setTimeout(()=>{ try{map.invalidateSize();}catch(_){}} ,120);
+  }catch(e){ cont.innerHTML='<div style="padding:1rem;font-size:.8rem;color:var(--r)">No se pudo dibujar el mapa: '+esc(e.message||e)+'</div>'; }
+}
+/* Presets de rango (recomputan) + toggle de puntos (redibuja vía bind si el mapa está activo). */
+function estPreset(tipo){ if(!S.est) return; S.est.desde = (tipo==='hoy')?estHoyStr():estHaceStr(tipo==='7'?7:30); S.est.hasta=estHoyStr(); estActualizar(); }
+function estTogglePuntos(on){ if(S.est){ S.est.geoPuntos=!!on; } render(); }
+
+/* ===================== MAPA EN VIVO (Etapa 25) — episodios activos como puntos por código =====================
+   Se dibuja en la bandeja del despachante y en el dashboard del superadmin, colgado de la MISMA data que ya
+   alimenta cada vista (S.bandeja.items / S.dash.eps) — NO crea una segunda suscripción. bind() lo redibuja
+   tras cada render (el dashboard re-renderiza en cada snapshot). Pan/zoom persistidos en S.mapaVivoView. */
+const MAPA_CODCOLOR={ rojo:'#d33', amarillo:'#e6b800', verde:'#2e8b57', traslado:'#2a6fd6' };
+function mapaCodColor(c){ return MAPA_CODCOLOR[c]||'#888'; }
+// Base de ambulancias (v1 hardcodeada: una sola base, cambia rara vez). Coords verificadas (Nominatim,
+// precisión house + point-in-polygon barrio Centro). Pasar a config editable = futuro (ver diseño).
+const BASE_MEDICAR={ nombre:'Base MEDICAR', direccion:'Alsina 62', lat:-33.8916209, lng:-60.5649257 };
+// Marcador FIJO distintivo (rombo oscuro con cruz) — se diferencia de los puntos de episodios. En los 2 mapas.
+function mapaAgregarBase(L, map){
+  try{
+    const ic=L.divIcon({ className:'', iconSize:[26,26], iconAnchor:[13,13],
+      html:'<div style="width:22px;height:22px;background:#111;border:2px solid #fff;border-radius:5px;box-shadow:0 1px 4px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:15px;line-height:1">✚</div>' });
+    L.marker([BASE_MEDICAR.lat,BASE_MEDICAR.lng],{ icon:ic, zIndexOffset:1000, keyboard:false })
+      .bindTooltip(BASE_MEDICAR.nombre+' · '+BASE_MEDICAR.direccion,{sticky:true}).addTo(map);
+  }catch(_){}
+}
+function mapaIncLbl(ep){ const y=new Date(tms(ep.creadoEn)||Date.now()).getFullYear(); return (ep.nroIncidente!=null)?fmtIncidente(ep.nroIncidente,y):'INC-—'; }
+function mapaVivoActivos(eps){ return (eps||[]).filter(e=>FLUJO.includes(e.estado) && e.geoLat!=null && e.geoLng!=null); }
+function mapaVivoNSin(eps){ return (eps||[]).filter(e=>FLUJO.includes(e.estado) && (e.geoLat==null||e.geoLng==null)).length; }
+
+function mapaVivoBloque(eps){
+  S._mapaVivoEps = eps||[]; // lo consume bind() para dibujar tras el render (sin suscripción nueva)
+  const open = S.mapaVivoOpen!==false; // default: abierto
+  const nAct = mapaVivoActivos(eps).length, nSin = mapaVivoNSin(eps);
+  return `<div class="card" style="padding:.7rem .8rem;margin-bottom:.7rem">
+    <div onclick="mapaVivoToggle()" style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+      <span style="font-weight:700">${open?'▾':'▸'} Mapa en vivo</span>
+      <span style="font-size:.66rem;color:var(--ink3)">${nAct} en el mapa${nSin?(' · '+nSin+' sin ubicación'):''}</span>
+      <span style="margin-left:auto;font-size:.62rem;color:var(--ink3)">● activos</span>
+    </div>
+    ${open?`<div id="mapa-vivo" style="height:340px;margin-top:.6rem;border-radius:10px;overflow:hidden;background:var(--bg2)"></div>
+      ${nSin?`<div style="font-size:.64rem;color:var(--ink3);margin-top:.3rem">${nSin} episodio${nSin===1?'':'s'} activo${nSin===1?'':'s'} sin ubicación (en la lista de abajo).</div>`:''}`:''}
+  </div>`;
+}
+function mapaVivoToggle(){
+  S.mapaVivoOpen = !(S.mapaVivoOpen!==false);
+  if(!S.mapaVivoOpen && S.mapaVivo){ try{S.mapaVivo.remove();}catch(_){} S.mapaVivo=null; }
+  render();
+}
+async function mapaVivoDibujar(eps){
+  const cont=document.getElementById('mapa-vivo'); if(!cont) return;
+  try{
+    const L=await geoEnsureLeaflet(); const g=await geoBarrios();
+    if(!document.body.contains(cont)) return; // el DOM cambió mientras cargaba Leaflet
+    if(S.mapaVivo){ try{ S.mapaVivo.remove(); }catch(_){} S.mapaVivo=null; }
+    cont.innerHTML='';
+    const v=S.mapaVivoView||{lat:GEO_CENTRO[1],lng:GEO_CENTRO[0],zoom:13};
+    const map=L.map(cont).setView([v.lat,v.lng],v.zoom); S.mapaVivo=map;
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{attribution:'© OpenStreetMap © CARTO',maxZoom:19}).addTo(map);
+    L.geoJSON(g,{ style:()=>({color:'#bbb',weight:1,fill:false}) }).addTo(map); // barrios de contexto (trazo suave, sin choropleth)
+    mapaVivoActivos(eps).forEach(e=>{
+      L.circleMarker([e.geoLat,e.geoLng],{ radius:9, color:'#fff', weight:2, fillColor:mapaCodColor(e.codigoPresuntivo), fillOpacity:.95 })
+        .bindTooltip(`${mapaIncLbl(e)} · ${esc((e.pac&&e.pac.nombre)||'—')} · ${ESTADO_LBL[e.estado]||e.estado} · ${esc(e.codigoPresuntivo||'—')}`,{sticky:true})
+        .addTo(map);
+    });
+    mapaAgregarBase(L, map); // base de ambulancias (marcador fijo)
+    map.on('moveend zoomend',()=>{ const c=map.getCenter(); S.mapaVivoView={lat:c.lat,lng:c.lng,zoom:map.getZoom()}; }); // persiste pan/zoom entre redibujos
     setTimeout(()=>{ try{map.invalidateSize();}catch(_){}} ,120);
   }catch(e){ cont.innerHTML='<div style="padding:1rem;font-size:.8rem;color:var(--r)">No se pudo dibujar el mapa: '+esc(e.message||e)+'</div>'; }
 }
@@ -4860,6 +4958,9 @@ function bind(){
   const pw=document.getElementById('pw');
   if(em)em.addEventListener('keydown',e=>{if(e.key==='Enter')pw?pw.focus():doLogin()});
   if(pw)pw.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+  // Mapas Leaflet: se redibujan tras el render (el contenedor se recrea en cada innerHTML). Fire-and-forget.
+  if(document.getElementById('mapa-vivo')){ mapaVivoDibujar(S._mapaVivoEps||[]); }              // mapa vivo (bandeja/dashboard)
+  if(document.getElementById('geo-mapa') && S.est && S.est.mapaOn){ geoDibujarMapa(); }          // mapa histórico (Estadísticas), si ya se dibujó
 }
 
 /* Arranque: pinta login y deja que Auth decida (sesion persiste al recargar). */
