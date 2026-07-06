@@ -1393,6 +1393,7 @@ async function dspCrear(){
     });
 
     audit('despacho_creado','episodio',epRef.id,'INC '+nro);
+    geoResolverYGuardar(epRef.id, { domicilio:domicilio, arribo:null }); // FIRE-AND-FORGET: resuelve barrio POST-create, jamás en el camino crítico
     S.dsp={ stage:'creado', creado:{ nro, fmt:fmtIncidente(nro,year) } };
     render();
   }catch(e){
@@ -4052,7 +4053,10 @@ function estComputar(eps,socios,personas,planes,facBySocio,facOk,desdeMs,hastaMs
   const quienLlama=Object.keys(bySocio).map(sid=>{ const socio=socioById[sid]; const nombre=socio?nomPersona(socio.personaId):''; return { nombre:nombre||('socio '+sid), episodios:bySocio[sid], facturado:facBySocio?(facBySocio[sid]||0):null }; }).sort((a,b)=>b.episodios-a.episodios).slice(0,10);
   const byDom={}; eps.forEach(e=>{ const d=(e.domicilio||'').trim().toLowerCase(); if(!d) return; byDom[d]=(byDom[d]||0)+1; });
   const domicilios=Object.keys(byDom).map(d=>({dom:d,n:byDom[d]})).sort((a,b)=>b.n-a.n).slice(0,10);
-  return { op, durs, durByCod, durByMovil, sinTiempo, medRank, afil:{activos:activos.length,altas,porPlan}, quienLlama, domicilios, facOk, eps };
+  // Demanda por barrio (v2 geo) + desglose por precisión (transparencia del dato).
+  const demanda={}, porPrec={}; let sinUbicar=0;
+  eps.forEach(e=>{ if(e.barrio){ demanda[e.barrio]=(demanda[e.barrio]||0)+1; } else { sinUbicar++; } const p=e.geoPrecision||'(sin resolver)'; porPrec[p]=(porPrec[p]||0)+1; });
+  return { op, durs, durByCod, durByMovil, sinTiempo, medRank, afil:{activos:activos.length,altas,porPlan}, quienLlama, domicilios, demanda, porPrec, sinUbicar, facOk, eps };
 }
 function estGenerarInforme(){
   if(!S.est||!S.est.data) return;
@@ -4129,7 +4133,129 @@ function estPanel(){
     ${S.est.informe?`<button class="btn-r" style="width:auto;margin:.5rem 0 0 .4rem;padding:.4rem .8rem" onclick="estExportarCSV()">Exportar CSV</button>`:''}
     ${infRows?`<div style="margin-top:.6rem">${infRows}</div>`:''}
   </div>`;
-  return head+op+tiempos+medicos+afil+quien+armador;
+  // 7 DEMANDA POR BARRIO (v2 geo)
+  const dem=d.demanda||{};
+  const demRows=Object.keys(dem).sort((a,b)=>dem[b]-dem[a]).map(b=>ir(esc(b),`${dem[b]} (${d.op.total?Math.round(dem[b]/d.op.total*100):0}%)`)).join('')||`<div style="font-size:.78rem;color:var(--ink3)">Sin barrios resueltos aún</div>`;
+  const precBadges=Object.keys(d.porPrec||{}).map(p=>`${esc(p)}: ${d.porPrec[p]}`).join(' · ')||'—';
+  const geo=`<div class="card"><div class="ch">Demanda por barrio</div>
+    ${demRows}
+    ${ir('<b>Sin ubicar</b>',`${d.sinUbicar} (${d.op.total?Math.round(d.sinUbicar/d.op.total*100):0}%)`)}
+    <div style="font-size:.64rem;color:var(--ink3);margin:.4rem 0 .2rem">Precisión (EXACTO/APROX): ${precBadges}</div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem">
+      <button class="btn-r" style="width:auto;margin:0;padding:.4rem .8rem" onclick="geocodificarPendientes()">${S.est.geoBusy?'Geocodificando…':'Geocodificar pendientes'}</button>
+      <button class="btn-o" style="width:auto;margin:0;padding:.4rem .8rem" onclick="geoDibujarMapa()">Dibujar mapa</button>
+    </div>
+    <div style="font-size:.62rem;color:var(--ink3);margin-top:.3rem">El batch respeta 1 req/seg contra Nominatim; idempotente (no re-geocodifica los que ya tienen barrio).</div>
+    ${S.est.geoReport?`<div style="font-size:.7rem;color:var(--ink2);margin-top:.4rem">${esc(S.est.geoReport)}</div>`:''}
+    <div id="geo-mapa" style="height:360px;margin-top:.6rem;border-radius:10px;overflow:hidden;background:var(--bg2)"></div>
+  </div>`;
+  return head+op+tiempos+medicos+afil+quien+geo+armador;
+}
+
+/* ===================== GEO — demanda por barrio (v2 de Estadísticas) =====================
+   normalizarDireccion(): portado READ-ONLY de geocode-padron.js (proyecto Maiztegui/TUGO) — SOLO la
+   lógica de normalización (prefijos, abreviaturas, sufijos, parse calle+altura). Cero datos copiados.
+   GeoJSON de 58 barrios (cartografía municipal, Ord. 8850/18) en app/barrios-pergamino.geojson.
+   Point-in-polygon con Turf.js (CDN), geocoding con Nominatim público (1 req/seg en el batch), mapa
+   Leaflet+CartoDB (CDN). Todo lazy-load. La resolución del episodio es fire-and-forget (nunca bloquea). */
+function geoStripAccents(s){ return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+function geoNormStreet(raw){
+  let s=geoStripAccents(raw).toUpperCase().trim();
+  s=s.replace(/N\xc2\xba/gi,'').replace(/\xc2\xba/gi,'').replace(/N°/g,'').replace(/Nº/g,'');
+  s=s.replace(/^(AVDA\.?|AVENIDA|AV\.?|CALLE|C\.?\s|BV\.?|BVAR\.?|BOULEVARD|DR\.?|GRAL\.?|PJE\.?|PASAJE|DIAG\.?|INT\.?|PRES\.?|CNEL\.?|CAP\.?|SGT\.?|TTE\.?|MONSEOR|MONSENOR)\s*/i,'');
+  s=s.replace(/^STA\.\s?/i,'SANTA ').replace(/^STO\.\s?/i,'SANTO ').replace(/^M\.\s/i,'MARIANO ').replace(/^BME\.\s?/i,'BARTOLOME ').replace(/^J\s?J\s/i,'JUAN JOSE ').replace(/^J\s?A\s/i,'JOSE A ');
+  return s.replace(/\s+/g,' ').trim();
+}
+function normalizarDireccion(dom){
+  if(!dom) return { calle:null, altura:null, isRural:true };
+  let d=geoStripAccents(dom).trim().toUpperCase();
+  if(/^RUTA\b/.test(d)||/ZONA RURAL/i.test(d)||/^ESTANCIA\b/.test(d)||/^CHACRA\b/.test(d)) return { calle:null, altura:null, isRural:true };
+  d=d.replace(/\s+B[°OºA]\.?\s*\S+.*$/i,'').replace(/\s+DPTO.*$/i,'').replace(/\s+UF\s.*$/i,'').replace(/\s+S\/N.*$/i,'').replace(/\s+-T\d+.*$/i,'').replace(/\s+TIRA\s.*$/i,'');
+  let m=d.match(/^(.+?)\s+(\d{1,5})\s*[-/]?\s*$/);
+  if(m){ const calle=geoNormStreet(m[1]), altura=parseInt(m[2],10); if(calle&&altura>0&&altura<20000) return {calle,altura,isRural:false}; }
+  m=d.match(/^(.+?)\s+(\d{1,5})\b/);
+  if(m){ const calle=geoNormStreet(m[1]), altura=parseInt(m[2],10); if(calle&&altura>0&&altura<20000) return {calle,altura,isRural:false}; }
+  const calle=geoNormStreet(d);
+  return { calle:calle||null, altura:null, isRural:!calle };
+}
+/* ---- Lazy-load de librerías (CDN) + assets ---- */
+function geoLoadScript(src){ return new Promise((res,rej)=>{ if(document.querySelector('script[data-geo="'+src+'"]')){ res(); return; } const s=document.createElement('script'); s.src=src; s.setAttribute('data-geo',src); s.onload=()=>res(); s.onerror=()=>rej(new Error('no cargó '+src)); document.head.appendChild(s); }); }
+function geoLoadCss(href){ if(document.querySelector('link[data-geo="'+href+'"]')) return; const l=document.createElement('link'); l.rel='stylesheet'; l.href=href; l.setAttribute('data-geo',href); document.head.appendChild(l); }
+async function geoEnsureTurf(){ if(!window.turf) await geoLoadScript('https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js'); return window.turf; }
+async function geoEnsureLeaflet(){ geoLoadCss('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'); if(!window.L) await geoLoadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'); return window.L; }
+async function geoBarrios(){ if(S.geoBarrios) return S.geoBarrios; const r=await fetch('barrios-pergamino.geojson'); if(!r.ok) throw new Error('no se pudo cargar el GeoJSON de barrios'); S.geoBarrios=await r.json(); return S.geoBarrios; }
+/* ---- Resolución de coordenada -> barrio (point-in-polygon) y dirección -> coordenada (Nominatim) ---- */
+const GEO_CENTRO=[-60.5736,-33.8894]; // lon,lat aprox del centro de Pergamino
+function geoDistKm(lon1,lat1,lon2,lat2){ const R=6371,toR=x=>x*Math.PI/180; const dLat=toR(lat2-lat1),dLon=toR(lon2-lon1); const a=Math.sin(dLat/2)**2+Math.cos(toR(lat1))*Math.cos(toR(lat2))*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(a)); }
+async function geoBarrioDeCoord(lon,lat){ const turf=await geoEnsureTurf(); const g=await geoBarrios(); const pt=turf.point([lon,lat]); for(const f of g.features){ try{ if(turf.booleanPointInPolygon(pt,f)) return f.properties.nombre; }catch(_){} } return null; }
+async function geoNominatim(calle,altura){
+  const street=encodeURIComponent((altura?altura+' ':'')+calle);
+  const url='https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&country=Argentina&city=Pergamino&street='+street;
+  const r=await fetch(url,{headers:{'Accept':'application/json'}}); // UA no seteable en browser; Referer/Origin identifica
+  if(!r.ok) throw new Error('nominatim '+r.status);
+  const a=await r.json(); if(!a.length) return null;
+  const hit=a[0]; return { lat:parseFloat(hit.lat), lon:parseFloat(hit.lon), exact: !!(altura && hit.address && hit.address.house_number) };
+}
+/* Prioridad: 1) arribo GPS (Fase A) 2) domicilio->Nominatim 3) sin_ubicar. Devuelve {barrio, geoPrecision}. */
+async function geoResolverEpisodio(ep){
+  const aLat=ep.arribo&&ep.arribo.lat, aLon=ep.arribo&&ep.arribo.long;
+  if(aLat!=null && aLon!=null){ const b=await geoBarrioDeCoord(aLon,aLat); if(b) return { barrio:b, geoPrecision:'gps_arribo' }; }
+  const nd=normalizarDireccion(ep.domicilio||'');
+  if(nd.calle){
+    try{
+      const hit=await geoNominatim(nd.calle,nd.altura);
+      if(hit){
+        const dist=geoDistKm(GEO_CENTRO[0],GEO_CENTRO[1],hit.lon,hit.lat);
+        if(dist<=5){ const b=await geoBarrioDeCoord(hit.lon,hit.lat); if(b) return { barrio:b, geoPrecision: hit.exact?'geo_exacto':'geo_aprox' }; }
+      }
+    }catch(_){}
+  }
+  return { barrio:null, geoPrecision:'sin_ubicar' };
+}
+// Fire-and-forget: NUNCA en el camino crítico del despacho. Si falla (permiso/red/geocode), barrio queda null → lo levanta el batch.
+function geoResolverYGuardar(epId, ep){
+  (async()=>{ try{ const res=await geoResolverEpisodio(ep); await db.collection('episodios').doc(epId).set({ barrio:res.barrio, geoPrecision:res.geoPrecision, geoResueltoEn:FV() },{merge:true}); }catch(_){} })();
+}
+/* Batch: barre episodios sin barrio (idempotente), resuelve con prioridad arribo, 1 req/seg contra Nominatim. */
+async function geocodificarPendientes(){
+  if(!puedeConfig() || !S.est) return;
+  S.est.geoBusy=true; S.est.geoReport=''; render();
+  const rep={ gps_arribo:0, geo_exacto:0, geo_aprox:0, sin_ubicar:0, saltados:0, errores:0 };
+  try{
+    const snap=await db.collection('episodios').get();
+    for(const doc of snap.docs){
+      const ep={id:doc.id,...doc.data()};
+      if(ep.barrio){ rep.saltados++; continue; } // idempotente: ya resuelto
+      const hasArribo=ep.arribo&&ep.arribo.lat!=null&&ep.arribo.long!=null;
+      if(!hasArribo && !(ep.domicilio||'').trim()){ rep.saltados++; continue; }
+      try{
+        if(!hasArribo) await new Promise(r=>setTimeout(r,1100)); // rate-limit Nominatim: 1 req/seg
+        const res=await geoResolverEpisodio(ep);
+        await db.collection('episodios').doc(ep.id).set({ barrio:res.barrio, geoPrecision:res.geoPrecision, geoResueltoEn:FV() },{merge:true});
+        rep[res.geoPrecision]=(rep[res.geoPrecision]||0)+1;
+      }catch(e){ rep.errores++; }
+    }
+    S.est.geoReport='Resueltos — GPS arribo: '+rep.gps_arribo+' · exacto: '+rep.geo_exacto+' · aprox: '+rep.geo_aprox+' · sin ubicar: '+rep.sin_ubicar+' · saltados (ya resueltos/sin dato): '+rep.saltados+(rep.errores?(' · errores: '+rep.errores):'');
+    S.est.geoBusy=false; render();
+  }catch(e){ S.est.geoBusy=false; S.est.geoReport='No se pudo geocodificar: '+(e.message||e); render(); }
+}
+/* Mapa Leaflet choropleth (on-demand, lazy). Pinta los 58 polígonos por cantidad de llamadas del período. */
+async function geoDibujarMapa(){
+  const cont=document.getElementById('geo-mapa'); if(!cont) return;
+  cont.innerHTML='<div style="padding:1rem;font-size:.8rem;color:var(--ink3)">Cargando mapa…</div>';
+  try{
+    const L=await geoEnsureLeaflet(); const g=await geoBarrios();
+    const demanda=(S.est.data&&S.est.data.demanda)||{};
+    if(S.geoMap){ try{S.geoMap.remove();}catch(_){} S.geoMap=null; }
+    cont.innerHTML='';
+    const map=L.map(cont).setView([GEO_CENTRO[1],GEO_CENTRO[0]],13); S.geoMap=map;
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{attribution:'© OpenStreetMap © CARTO',maxZoom:19}).addTo(map);
+    const vals=Object.keys(demanda).map(k=>demanda[k]); const max=vals.length?Math.max.apply(null,vals):0;
+    const color=n=>{ if(!n) return '#e8e4dc'; const t=max?n/max:0; return t>0.66?'#DC1400':t>0.33?'#F07800':'#F5C542'; };
+    L.geoJSON(g,{ style:f=>({color:'#888',weight:1,fillColor:color(demanda[f.properties.nombre]||0),fillOpacity:.6}),
+      onEachFeature:(f,layer)=>{ layer.bindTooltip(f.properties.nombre+': '+(demanda[f.properties.nombre]||0),{sticky:true}); } }).addTo(map);
+    setTimeout(()=>{ try{map.invalidateSize();}catch(_){}} ,120);
+  }catch(e){ cont.innerHTML='<div style="padding:1rem;font-size:.8rem;color:var(--r)">No se pudo dibujar el mapa: '+esc(e.message||e)+'</div>'; }
 }
 
 /* ===================== PERMISOS por persona (lo configura el superadmin en la ficha) ===================== */
