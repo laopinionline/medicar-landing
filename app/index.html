@@ -380,13 +380,14 @@ function getTabs(rol){
   const factTab = puedeConfig() ? [{id:'facturacion',icon:'chart',lbl:'Facturación'}] : [];
   const mktTab = puedeAfil() ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : [];
   const audTab = puedeConfig() ? [{id:'auditoria',icon:'history',lbl:'Auditoría'}] : [];
+  const estTab = puedeConfig() ? [{id:'estadisticas',icon:'chart',lbl:'Estadísticas'}] : [];
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...catTab,...factTab,...mktTab,...audTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...catTab,...factTab,...mktTab,...audTab,...estTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
@@ -395,7 +396,7 @@ function pg(){
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
@@ -2401,7 +2402,7 @@ function perfilSuper(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['marketing','Marketing',true],['auditoria','Auditoría',true]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['marketing','Marketing',true],['estadisticas','Estadísticas',true],['auditoria','Auditoría',true]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -2427,6 +2428,7 @@ function superView(){
   else if(sec==='facturacion') body=facPanel();
   else if(sec==='marketing') body=mktPanel();
   else if(sec==='auditoria') body=audPanel();
+  else if(sec==='estadisticas') body=estPanel();
   else body=`<div class="card"><div class="ch">${(SUPER_SECS.find(s=>s[0]===sec)||[,sec])[1]}</div><div style="font-size:.8rem;color:var(--ink3)">Próximamente. Módulo no disponible todavía.</div></div>`;
   return superMenu(sec)+body;
 }
@@ -2442,6 +2444,7 @@ function superNav(sec){
   if(S.superSec==='facturacion'){ facDetach(); S.fac=null; }
   if(S.superSec==='marketing'){ mktDetach(); S.mkt=null; }
   if(S.superSec==='auditoria'){ audDetach(); S.aud=null; }
+  if(S.superSec==='estadisticas'){ S.est=null; } // on-demand, sin listeners
   S.superSec=sec;
   render();
 }
@@ -3987,6 +3990,146 @@ function audPanel(){
   return `<div style="font-weight:700;margin:.1rem 0 .6rem">Auditoría <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo · últimas 100 · inmutable</span></div>
     <div class="field" style="margin-bottom:.6rem"><input id="aud-q" placeholder="Filtrar por texto…" value="${esc(S.aud.q||'')}" oninput="audFiltro(this.value)"></div>
     <div class="card">${rows}</div>`;
+}
+
+/* ===================== ESTADÍSTICAS — tablero operativo del negocio (v1, 100% READ-ONLY) =====================
+   Cálculo on-demand (botón Actualizar) + rango de fechas (filtra por creadoEn del episodio). NO escribe nada.
+   Shapes verificados: transiciones.{despacho,en_camino,arribo,atencion,cerrado} (Timestamps), codigoPresuntivo,
+   desenlace.codigoReal, movilNombre/medicoNombre, atribucion.socioId, domicilio, estado; socios.vigenteDesde,
+   facturas.{estado,socioId,total}, personas.{apellido,nombre}, planes.nombre. El mapa geo por barrio es v2
+   (ver Disenio-Estadisticas). Gateo: puedeConfig() (admin/superadmin/configurar_sistema, igual que Auditoría). */
+function estHoyStr(){ const d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+function estHaceStr(dias){ const d=new Date(Date.now()-dias*86400000); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+function estRangeMs(str,end){ if(!/^\d{4}-\d{2}-\d{2}$/.test(str||'')) return end?8.64e15:0; const d=new Date(str+'T00:00:00'); if(end) d.setHours(23,59,59,999); return d.getTime(); }
+function estTts(ep,k){ return (ep.transiciones && ep.transiciones[k]!=null) ? tms(ep.transiciones[k]) : null; }
+function estCod(ep){ return ep.codigoPresuntivo || (ep.desenlace&&ep.desenlace.codigoReal) || '—'; }
+function estDia(ep){ const ms=tms(ep.creadoEn); if(ms==null) return '—'; const d=new Date(ms); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+function estProm(a){ return a.length? a.reduce((s,x)=>s+x,0)/a.length : null; }
+function estMediana(a){ if(!a.length) return null; const b=a.slice().sort((x,y)=>x-y); const m=Math.floor(b.length/2); return b.length%2? b[m] : (b[m-1]+b[m])/2; }
+function estMMSS(ms){ if(ms==null||!isFinite(ms)||ms<0) return '—'; const s=Math.round(ms/1000); return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2); }
+function estSetD(k,v){ if(S.est){ S.est[k]=v; } }
+
+async function estActualizar(){
+  if(!puedeConfig() || !S.est) return;
+  S.est.loading=true; S.est.err=''; render();
+  try{
+    const desdeMs=estRangeMs(S.est.desde,false), hastaMs=estRangeMs(S.est.hasta,true);
+    const [epSnap,socSnap,planSnap,perSnap]=await Promise.all([
+      db.collection('episodios').get(), db.collection('socios').get(), db.collection('planes').get(), db.collection('personas').get()
+    ]);
+    let facBySocio=null, facOk=true;
+    try{ const fSnap=await db.collection('facturas').get(); facBySocio={}; fSnap.docs.forEach(d=>{ const f=d.data(); if((f.estado==='emitida'||f.estado==='pagada')&&f.socioId) facBySocio[f.socioId]=(facBySocio[f.socioId]||0)+(Number(f.total)||0); }); }
+    catch(e){ facOk=false; facBySocio=null; }
+    const eps=epSnap.docs.map(d=>({id:d.id,...d.data()})).filter(e=>{ const ms=tms(e.creadoEn); return ms!=null && ms>=desdeMs && ms<=hastaMs; });
+    const socios=socSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const personas={}; perSnap.docs.forEach(d=>personas[d.id]=d.data());
+    const planes={}; planSnap.docs.forEach(d=>planes[d.id]=d.data());
+    S.est.data=estComputar(eps,socios,personas,planes,facBySocio,facOk,desdeMs,hastaMs);
+    S.est.loading=false; render();
+  }catch(e){ S.est.loading=false; S.est.err=(e.message||String(e)); render(); }
+}
+function estComputar(eps,socios,personas,planes,facBySocio,facOk,desdeMs,hastaMs){
+  const socioById={}; socios.forEach(s=>socioById[s.id]=s);
+  const nomPersona=pid=>{ const p=personas[pid]; if(!p) return ''; return ((p.apellido||'')+', '+(p.nombre||'')).replace(/^, /,'').replace(/, $/,''); };
+  const CODS=['rojo','amarillo','verde','traslado'];
+  const op={ total:eps.length, byCod:{}, byEstado:{}, serie:{} }; CODS.forEach(c=>op.byCod[c]=0);
+  eps.forEach(e=>{ const c=estCod(e); op.byCod[c]=(op.byCod[c]||0)+1; op.byEstado[e.estado||'—']=(op.byEstado[e.estado||'—']||0)+1; const dia=estDia(e); op.serie[dia]=(op.serie[dia]||0)+1; });
+  const durs={salida:[],viaje:[],respuesta:[],atencion:[]}, durByCod={}, durByMovil={}; let sinTiempo=0;
+  eps.forEach(e=>{
+    const tD=estTts(e,'despacho'),tE=estTts(e,'en_camino'),tA=estTts(e,'arribo'),tAt=estTts(e,'atencion'),tC=estTts(e,'cerrado');
+    if(tD!=null&&tE!=null) durs.salida.push(tE-tD);
+    if(tE!=null&&tA!=null) durs.viaje.push(tA-tE);
+    if(tAt!=null&&tC!=null) durs.atencion.push(tC-tAt);
+    if(tD!=null&&tA!=null){ const r=tA-tD; durs.respuesta.push(r); const c=estCod(e); (durByCod[c]=durByCod[c]||[]).push(r); const m=e.movilNombre||e.movilId||'—'; (durByMovil[m]=durByMovil[m]||[]).push(r); }
+    else sinTiempo++;
+  });
+  const med={}; eps.forEach(e=>{ if(!e.medicoId) return; const m=med[e.medicoId]||(med[e.medicoId]={nombre:e.medicoNombre||e.medicoId,count:0,atenc:[]}); m.count++; const tAt=estTts(e,'atencion'),tC=estTts(e,'cerrado'); if(tAt!=null&&tC!=null) m.atenc.push(tC-tAt); });
+  const medRank=Object.keys(med).map(k=>({nombre:med[k].nombre,count:med[k].count,promAt:estProm(med[k].atenc)})).sort((a,b)=>b.count-a.count);
+  const activos=socios.filter(s=>s.activo!==false);
+  const altas=socios.filter(s=>{ const ms=tms(s.vigenteDesde); return ms!=null&&ms>=desdeMs&&ms<=hastaMs; }).length;
+  const porPlan={}; activos.forEach(s=>{ const pn=s.planId?((planes[s.planId]&&planes[s.planId].nombre)||s.planId):'sin plan'; porPlan[pn]=(porPlan[pn]||0)+1; });
+  const bySocio={}; eps.forEach(e=>{ const sid=e.atribucion&&e.atribucion.socioId; if(!sid) return; bySocio[sid]=(bySocio[sid]||0)+1; });
+  const quienLlama=Object.keys(bySocio).map(sid=>{ const socio=socioById[sid]; const nombre=socio?nomPersona(socio.personaId):''; return { nombre:nombre||('socio '+sid), episodios:bySocio[sid], facturado:facBySocio?(facBySocio[sid]||0):null }; }).sort((a,b)=>b.episodios-a.episodios).slice(0,10);
+  const byDom={}; eps.forEach(e=>{ const d=(e.domicilio||'').trim().toLowerCase(); if(!d) return; byDom[d]=(byDom[d]||0)+1; });
+  const domicilios=Object.keys(byDom).map(d=>({dom:d,n:byDom[d]})).sort((a,b)=>b.n-a.n).slice(0,10);
+  return { op, durs, durByCod, durByMovil, sinTiempo, medRank, afil:{activos:activos.length,altas,porPlan}, quienLlama, domicilios, facOk, eps };
+}
+function estGenerarInforme(){
+  if(!S.est||!S.est.data) return;
+  const dim=document.getElementById('est-dim')?.value||'codigo';
+  const met=document.getElementById('est-met')?.value||'cantidad';
+  const groups={};
+  S.est.data.eps.forEach(e=>{
+    let key = dim==='codigo'?estCod(e) : dim==='movil'?(e.movilNombre||e.movilId||'—') : dim==='medico'?(e.medicoNombre||e.medicoId||'—') : dim==='estado'?(e.estado||'—') : estDia(e);
+    const g=groups[key]||(groups[key]={count:0,resp:[]}); g.count++;
+    const tD=estTts(e,'despacho'),tA=estTts(e,'arribo'); if(tD!=null&&tA!=null) g.resp.push(tA-tD);
+  });
+  const rows=Object.keys(groups).map(k=>({ dim:k, valor: met==='cantidad'? String(groups[k].count) : estMMSS(estProm(groups[k].resp)) }))
+    .sort((a,b)=> met==='cantidad'? (Number(b.valor)-Number(a.valor)) : String(a.dim).localeCompare(String(b.dim)) );
+  S.est.informe={dim,met,rows}; render();
+}
+function estExportarCSV(){
+  if(!S.est||!S.est.informe||!S.est.informe.rows) return;
+  const dimLbl={codigo:'Código',movil:'Móvil',medico:'Médico',estado:'Estado',dia:'Día'}[S.est.informe.dim]||S.est.informe.dim;
+  const metLbl=S.est.informe.met==='cantidad'?'Cantidad':'Tiempo prom. respuesta';
+  const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const csv=[q(dimLbl)+','+q(metLbl)].concat(S.est.informe.rows.map(r=>q(r.dim)+','+q(r.valor))).join('\n');
+  const hoy=new Date(); const fn='medicar-informe-'+hoy.getFullYear()+'-'+('0'+(hoy.getMonth()+1)).slice(-2)+'-'+('0'+hoy.getDate()).slice(-2)+'.csv';
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+function estPanel(){
+  if(!puedeConfig()) return `<div class="card"><div class="ch">Estadísticas</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para ver las estadísticas.</div></div>`;
+  if(!S.est){ S.est={desde:estHaceStr(30),hasta:estHoyStr(),data:null,loading:false,err:'',informe:null}; }
+  const ir=(l,v)=>`<div class="ir"><span class="il">${l}</span><span class="iv">${v}</span></div>`;
+  const head=`<div style="font-weight:700;margin:.1rem 0 .5rem">Estadísticas <span style="font-size:.62rem;color:var(--ink3);font-weight:400">tablero on-demand</span></div>
+    <div class="card"><div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:end">
+      <div class="field" style="flex:1;min-width:120px;margin:0"><label>Desde</label><input id="est-desde" type="date" value="${esc(S.est.desde)}" onchange="estSetD('desde',this.value)"></div>
+      <div class="field" style="flex:1;min-width:120px;margin:0"><label>Hasta</label><input id="est-hasta" type="date" value="${esc(S.est.hasta)}" onchange="estSetD('hasta',this.value)"></div>
+      <button class="btn-r" style="width:auto;margin:0;padding:.6rem 1rem" onclick="estActualizar()">${S.est.loading?'Calculando…':'Actualizar'}</button>
+    </div><div style="font-size:.66rem;color:var(--ink3);margin-top:.4rem">Filtra por fecha de creación del episodio. Solo lectura (no escribe nada).</div></div>`;
+  if(S.est.err) return head+`<div class="card">No se pudo calcular: ${esc(S.est.err)}</div>`;
+  if(S.est.loading) return head+`<div class="card">Calculando…</div>`;
+  const d=S.est.data;
+  if(!d) return head+`<div class="card"><div style="font-size:.8rem;color:var(--ink3)">Tocá "Actualizar" para calcular el período.</div></div>`;
+  const codLbl={rojo:'🔴 Rojo',amarillo:'🟡 Amarillo',verde:'🟢 Verde',traslado:'🔵 Traslado'};
+  // 1 OPERACIÓN
+  const opBody=['rojo','amarillo','verde','traslado'].map(c=>ir(codLbl[c],d.op.byCod[c]||0)).join('')
+    + Object.keys(d.op.byEstado).map(e=>ir('Estado: '+esc(e),d.op.byEstado[e])).join('');
+  const serieRows=Object.keys(d.op.serie).sort().map(dia=>ir(dia,d.op.serie[dia])).join('')||`<div style="font-size:.78rem;color:var(--ink3)">Sin datos</div>`;
+  const op=`<div class="card"><div class="ch">Operación — salidas: ${d.op.total}</div>${opBody}<div style="font-size:.66rem;color:var(--ink3);margin:.5rem 0 .2rem;font-weight:700">Por día</div>${serieRows}</div>`;
+  // 2 TIEMPOS
+  const tRow=(l,a)=>ir(l,`prom ${estMMSS(estProm(a))} · med ${estMMSS(estMediana(a))} (${a.length})`);
+  const porCod=Object.keys(d.durByCod).map(c=>ir(esc(codLbl[c]||c),`${estMMSS(estProm(d.durByCod[c]))} (${d.durByCod[c].length})`)).join('');
+  const porMov=Object.keys(d.durByMovil).map(m=>ir(esc(m),`${estMMSS(estProm(d.durByMovil[m]))} (${d.durByMovil[m].length})`)).join('');
+  const tiempos=`<div class="card"><div class="ch">Tiempos de respuesta (mm:ss)</div>
+    ${tRow('Salida (despacho→en camino)',d.durs.salida)}${tRow('Viaje (en camino→arribo)',d.durs.viaje)}${tRow('RESPUESTA total (despacho→arribo)',d.durs.respuesta)}${tRow('Atención (atención→cerrado)',d.durs.atencion)}
+    <div style="font-size:.66rem;color:var(--o,#E0A23B);margin:.4rem 0 .2rem">${d.sinTiempo} sin datos de tiempo (transiciones incompletas)</div>
+    <div style="font-size:.66rem;color:var(--ink3);margin:.3rem 0 .2rem;font-weight:700">Respuesta por código</div>${porCod||'—'}
+    <div style="font-size:.66rem;color:var(--ink3);margin:.3rem 0 .2rem;font-weight:700">Respuesta por móvil</div>${porMov||'—'}</div>`;
+  // 3 MÉDICOS
+  const medRows=d.medRank.length? d.medRank.map(m=>ir(esc(m.nombre),`${m.count} atenc · prom ${estMMSS(m.promAt)}`)).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin datos</div>`;
+  const medicos=`<div class="card"><div class="ch">Ranking de médicos</div>${medRows}</div>`;
+  // 4 AFILIADOS
+  const planRows=Object.keys(d.afil.porPlan).map(p=>ir(esc(p),d.afil.porPlan[p])).join('')||'—';
+  const afil=`<div class="card"><div class="ch">Afiliados</div>${ir('Activos hoy',d.afil.activos)}${ir('Altas del período',d.afil.altas)}<div style="font-size:.66rem;color:var(--ink3);margin:.4rem 0 .2rem;font-weight:700">Por plan (activos)</div>${planRows}</div>`;
+  // 5 QUIÉN LLAMA
+  const qlRows=d.quienLlama.length? d.quienLlama.map(x=>ir(esc(x.nombre),`${x.episodios} ep · fact ${x.facturado==null?'—':facMoney(x.facturado)}`)).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin datos</div>`;
+  const domRows=d.domicilios.length? d.domicilios.map(x=>ir(esc(x.dom),x.n)).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin datos</div>`;
+  const facNote=d.facOk?'':`<div style="font-size:.66rem;color:var(--o,#E0A23B);margin-top:.2rem">Facturado "—" (requiere permiso de facturación).</div>`;
+  const quien=`<div class="card"><div class="ch">Quién llama — top 10 socios</div>${qlRows}${facNote}<div style="font-size:.66rem;color:var(--ink3);margin:.5rem 0 .2rem;font-weight:700">Top 10 domicilios recurrentes</div>${domRows}</div>`;
+  // 6 ARMADOR DE INFORMES
+  const infRows = (S.est.informe&&S.est.informe.rows) ? (S.est.informe.rows.length? S.est.informe.rows.map(r=>ir(esc(r.dim),esc(r.valor))).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin filas</div>`) : '';
+  const armador=`<div class="card"><div class="ch">Armador de informes</div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <div class="field" style="flex:1;min-width:110px;margin:0"><label>Dimensión</label><select id="est-dim"><option value="codigo">Código</option><option value="movil">Móvil</option><option value="medico">Médico</option><option value="estado">Estado</option><option value="dia">Día</option></select></div>
+      <div class="field" style="flex:1;min-width:110px;margin:0"><label>Métrica</label><select id="est-met"><option value="cantidad">Cantidad</option><option value="tiempo">Tiempo prom. respuesta</option></select></div>
+    </div>
+    <button class="btn-o" style="width:auto;margin:.5rem 0 0;padding:.4rem .8rem" onclick="estGenerarInforme()">Generar</button>
+    ${S.est.informe?`<button class="btn-r" style="width:auto;margin:.5rem 0 0 .4rem;padding:.4rem .8rem" onclick="estExportarCSV()">Exportar CSV</button>`:''}
+    ${infRows?`<div style="margin-top:.6rem">${infRows}</div>`:''}
+  </div>`;
+  return head+op+tiempos+medicos+afil+quien+armador;
 }
 
 /* ===================== PERMISOS por persona (lo configura el superadmin en la ficha) ===================== */
