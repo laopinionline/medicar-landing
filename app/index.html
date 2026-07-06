@@ -221,6 +221,7 @@ function resetSession(keepErr){
   if(typeof dashDetach==='function') dashDetach(); // ídem dashboard del superadmin
   if(typeof movDetach==='function') movDetach(); // ídem sección móviles
   if(typeof cronoDetach==='function') cronoDetach(); // ídem cronograma de guardias
+  if(typeof monDetach==='function') monDetach(); // ídem monitoreo (cuestionarios/respuestas)
   S=cleanSession();
   if(err) S.loginErr=err; // preserva el mensaje de login (ej. "cuenta sin rol")
 }
@@ -381,13 +382,14 @@ function getTabs(rol){
   const mktTab = puedeAfil() ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : [];
   const audTab = puedeConfig() ? [{id:'auditoria',icon:'history',lbl:'Auditoría'}] : [];
   const estTab = puedeConfig() ? [{id:'estadisticas',icon:'chart',lbl:'Estadísticas'}] : [];
+  const monTab = puedeConfig() ? [{id:'monitoreo',icon:'register',lbl:'Monitoreo'}] : [];
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...catTab,...factTab,...mktTab,...audTab,...estTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...catTab,...factTab,...mktTab,...audTab,...estTab,...monTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
@@ -396,7 +398,7 @@ function pg(){
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='perfil')return miPerfil();}
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
@@ -2462,7 +2464,7 @@ function perfilSuper(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['marketing','Marketing',true],['estadisticas','Estadísticas',true],['auditoria','Auditoría',true]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['marketing','Marketing',true],['estadisticas','Estadísticas',true],['auditoria','Auditoría',true],['monitoreo','Monitoreo',true]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -2489,6 +2491,7 @@ function superView(){
   else if(sec==='marketing') body=mktPanel();
   else if(sec==='auditoria') body=audPanel();
   else if(sec==='estadisticas') body=estPanel();
+  else if(sec==='monitoreo') body=monPanel();
   else body=`<div class="card"><div class="ch">${(SUPER_SECS.find(s=>s[0]===sec)||[,sec])[1]}</div><div style="font-size:.8rem;color:var(--ink3)">Próximamente. Módulo no disponible todavía.</div></div>`;
   return superMenu(sec)+body;
 }
@@ -2505,6 +2508,7 @@ function superNav(sec){
   if(S.superSec==='marketing'){ mktDetach(); S.mkt=null; }
   if(S.superSec==='auditoria'){ audDetach(); S.aud=null; }
   if(S.superSec==='estadisticas'){ S.est=null; } // on-demand, sin listeners
+  if(S.superSec==='monitoreo'){ monDetach(); S.mon=null; }
   S.superSec=sec;
   render();
 }
@@ -4209,6 +4213,190 @@ function estPanel(){
     <div id="geo-mapa" style="height:360px;margin-top:.6rem;border-radius:10px;overflow:hidden;background:var(--bg2)"></div>
   </div>`;
   return head+op+tiempos+medicos+afil+quien+geo+armador;
+}
+
+/* ===================== MONITOREO — Nivel 1: cuestionario semanal (eje transversal) =====================
+   Casa de la escalera de monitoreo: N1 ahora (cuestionario semanal configurable); N2 (auto-chequeo +
+   motor de alertas) y N3 (wearables) vienen después. Gateo: puedeConfig() (admin/superadmin/
+   configurar_sistema, igual que Auditoría/Estadísticas). Dos sub-secciones: Cuestionarios (ABM de
+   plantillas) y Respuestas (lista read-only, INMUTABLE). Modelo:
+     cuestionarios/{id}: { nombre, activo, frecuencia:'semanal', preguntas:[{id,texto,tipo}], creadoEn/Por }
+     respuestas_cuestionario/{id}: { cuestionarioId, cuestionarioNombre, personaId, personaNombre,
+                                     respuestas:[{preguntaId,texto,valor}], creadoEn }  (denorm para no joinear)
+   REGLA OPERATIVA v1: el cuestionario ACTIVO aplica a TODOS los afiliados con app; si hay varios activos,
+   gana el más RECIENTE (creadoEn). Asignación por-socio = futuro (anotado en el diseño). */
+const PREG_TIPOS=[['si_no','Sí / No'],['escala','Escala 1–5'],['texto','Texto corto']];
+function pregTipoLbl(t){ return (PREG_TIPOS.find(x=>x[0]===t)||[,t])[1]; }
+function monErr(t){ const e=document.getElementById('mon-head-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function monCErr(t){ const e=document.getElementById('mon-c-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function monFormOpen(){ return !!(S.mon && S.mon.cedit!=null); }
+function monAttach(){
+  if(S.monUnsub) return;
+  const upd=()=>{ if(!monFormOpen()) render(); }; // no re-renderiza con el editor abierto (perdería lo tipeado)
+  S.monUnsub=[
+    db.collection('cuestionarios').onSnapshot(s=>{ if(!S.mon) return; S.mon.cuest=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.mon){ S.mon.err=(e.message||String(e)); render(); } }),
+    db.collection('respuestas_cuestionario').orderBy('creadoEn','desc').limit(200).onSnapshot(s=>{ if(!S.mon) return; S.mon.resp=s.docs.map(d=>({id:d.id,...d.data()})); if(!monFormOpen()) render(); }, e=>{ if(S.mon){ S.mon.respErr=(e.message||String(e)); render(); } })
+  ];
+}
+function monDetach(){ if(S.monUnsub){ S.monUnsub.forEach(u=>{ try{u();}catch(_){} }); S.monUnsub=null; } }
+
+function monPanel(){
+  if(!puedeConfig()) return `<div class="card"><div class="ch">Monitoreo</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para ver el monitoreo.</div></div>`;
+  if(!S.mon){ S.mon={sub:'cuestionarios',cuest:null,resp:null,cedit:null,draft:null,err:'',respErr:'',showInact:false,rDesde:estHaceStr(30),rHasta:estHoyStr(),rExp:{}}; monAttach(); }
+  if(S.mon.err) return `<div class="card">No se pudo cargar Monitoreo: ${esc(S.mon.err)}</div>`;
+  const sub=S.mon.sub||'cuestionarios';
+  const tab=(id,lbl)=>`<button onclick="monSub('${id}')" style="flex:1;padding:.5rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.78rem;font-weight:600;letter-spacing:.04em;cursor:pointer">${lbl}</button>`;
+  const head=`
+  <div style="font-weight:700;margin:.1rem 0 .2rem">Monitoreo <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● Nivel 1 · cuestionario semanal</span></div>
+  <div style="font-size:.66rem;color:var(--ink3);margin-bottom:.6rem">Casa de la escalera de monitoreo. Nivel 2 (auto-chequeo + alertas) y Nivel 3 (wearables) vienen después.</div>
+  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('cuestionarios','Cuestionarios')}${tab('respuestas','Respuestas')}</div>
+  <div id="mon-head-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
+  return head + (sub==='respuestas' ? monRespView() : monCuestView());
+}
+function monSub(id){ if(!S.mon) return; S.mon.sub=id; S.mon.cedit=null; S.mon.draft=null; render(); }
+function monShowInact(on){ if(S.mon){ S.mon.showInact=!!on; render(); } }
+
+/* ---- Cuestionarios (ABM de plantillas) ---- */
+function monActivoVigente(){
+  // El cuestionario que se aplica: el activo; si hay varios, el más reciente por creadoEn.
+  const act=(S.mon.cuest||[]).filter(c=>c.activo!==false);
+  if(!act.length) return null;
+  return act.slice().sort((a,b)=>(tms(b.creadoEn)||0)-(tms(a.creadoEn)||0))[0];
+}
+function monCuestView(){
+  if(S.mon.cuest===null) return `<div class="card">Cargando cuestionarios…</div>`;
+  if(S.mon.cedit!=null) return monCuestForm();
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+  const showInact=!!S.mon.showInact;
+  const nInact=(S.mon.cuest||[]).filter(c=>c.activo===false).length;
+  const nAct=(S.mon.cuest||[]).filter(c=>c.activo!==false).length;
+  const vig=monActivoVigente();
+  const list=(S.mon.cuest||[]).filter(c=> showInact || c.activo!==false);
+  const rows = list.length ? list.map(c=>{
+    const inact=c.activo===false;
+    const esVig=vig&&vig.id===c.id;
+    const nP=(c.preguntas||[]).length;
+    const estadoTxt=inact?'inactivo':(esVig?'▶ vigente':'activo (no vigente)');
+    const meta=[nP+' pregunta'+(nP===1?'':'s'),'· semanal','· '+estadoTxt].join(' ');
+    const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="monCuestEditar('${c.id}')">Editar</button><button class="${btn}" onclick="monCuestBaja('${c.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(c.nombre||'—')}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin cuestionarios${showInact?'':' activos'}</div>`;
+  const nVigInfo = (nAct>1)
+    ? `<div style="font-size:.68rem;color:var(--o);margin:-.2rem 0 .6rem">Hay más de un cuestionario activo: aplica el más reciente (▶ vigente). La asignación por-socio es futura.</div>` : '';
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="monShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
+  return `<button class="btn-r" onclick="monCuestNuevo()" style="margin-bottom:.7rem">+ Nuevo cuestionario</button>${nVigInfo}${toggle}<div class="card">${rows}</div>`;
+}
+function monPregNewId(){ return 'p_'+Date.now().toString(36)+'_'+Math.floor(Math.random()*46656).toString(36); }
+function monDraftSync(){
+  if(!S.mon||!S.mon.draft) return;
+  const d=S.mon.draft;
+  const nm=document.getElementById('mon-c-nombre'); if(nm) d.nombre=nm.value;
+  (d.preguntas||[]).forEach((q,i)=>{
+    const t=document.getElementById('mon-q-texto-'+i); if(t) q.texto=t.value.slice(0,200);
+    const tp=document.getElementById('mon-q-tipo-'+i); if(tp) q.tipo=tp.value;
+  });
+}
+function monCuestForm(){
+  const d=S.mon.draft||{nombre:'',preguntas:[]};
+  const isNew=S.mon.cedit==='new';
+  const tipoSel=(i,tipo)=>`<select id="mon-q-tipo-${i}" style="padding:.35rem .5rem;border:1.5px solid var(--border2);border-radius:8px;font-size:.8rem">`+PREG_TIPOS.map(([v,l])=>`<option value="${v}" ${tipo===v?'selected':''}>${l}</option>`).join('')+`</select>`;
+  const qrows=(d.preguntas||[]).map((q,i)=>{
+    return `<div class="card" style="background:var(--bg);padding:.6rem .7rem;margin-bottom:.5rem">
+      <div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.4rem">
+        <span style="font-size:.7rem;color:var(--ink3);font-weight:700">#${i+1}</span>
+        <div style="margin-left:auto;display:flex;gap:.3rem">
+          <button class="btn-o" style="width:auto;padding:.2rem .5rem;margin:0" onclick="monPregMove(${i},-1)" ${i===0?'disabled':''}>↑</button>
+          <button class="btn-o" style="width:auto;padding:.2rem .5rem;margin:0" onclick="monPregMove(${i},1)" ${i===d.preguntas.length-1?'disabled':''}>↓</button>
+          <button class="btn-o" style="width:auto;padding:.2rem .5rem;margin:0;color:var(--r);border-color:var(--r)" onclick="monPregDel(${i})">✕</button>
+        </div>
+      </div>
+      <input id="mon-q-texto-${i}" value="${esc(q.texto||'')}" maxlength="200" placeholder="Texto de la pregunta (máx. 200)" style="width:100%;padding:.5rem .6rem;border:1.5px solid var(--border2);border-radius:8px;font-size:.9rem;margin-bottom:.4rem">
+      <div style="display:flex;align-items:center;gap:.5rem"><span style="font-size:.72rem;color:var(--ink3)">Tipo</span>${tipoSel(i,q.tipo||'si_no')}</div>
+    </div>`;
+  }).join('') || `<div style="font-size:.78rem;color:var(--ink3);margin-bottom:.5rem">Sin preguntas todavía. Agregá al menos una.</div>`;
+  return `<div class="card"><div class="ch">${isNew?'Nuevo cuestionario':'Editar cuestionario'}</div>
+    <div class="field"><label>Nombre</label><input id="mon-c-nombre" value="${esc(d.nombre||'')}" placeholder="Ej. Chequeo semanal"></div>
+    <div class="field"><label>Frecuencia</label><div style="font-size:.78rem;color:var(--ink3)">Semanal — única opción en Nivel 1.</div></div>
+    ${isNew?'':`<div class="field"><label>Estado de alta</label><select id="mon-c-activo"><option value="si" ${d.activo!==false?'selected':''}>Activo</option><option value="no" ${d.activo===false?'selected':''}>Baja lógica</option></select></div>`}
+    <div class="field"><label>Preguntas</label>${qrows}</div>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.7rem">
+      <button class="btn-o" style="width:auto;padding:.35rem .65rem;margin:0" onclick="monPregAdd('si_no')">+ Sí/No</button>
+      <button class="btn-o" style="width:auto;padding:.35rem .65rem;margin:0" onclick="monPregAdd('escala')">+ Escala 1–5</button>
+      <button class="btn-o" style="width:auto;padding:.35rem .65rem;margin:0" onclick="monPregAdd('texto')">+ Texto</button>
+    </div>
+    <div id="mon-c-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <button class="btn-r" onclick="monCuestGuardar()">Guardar</button>
+    <button class="btn-o" onclick="monCuestCancelar()">Cancelar</button>
+  </div>`;
+}
+function monPregAdd(tipo){ if(!S.mon||!S.mon.draft)return; monDraftSync(); S.mon.draft.preguntas.push({id:monPregNewId(),texto:'',tipo:(['si_no','escala','texto'].includes(tipo)?tipo:'si_no')}); render(); }
+function monPregDel(i){ if(!S.mon||!S.mon.draft)return; monDraftSync(); S.mon.draft.preguntas.splice(i,1); render(); }
+function monPregMove(i,dir){ if(!S.mon||!S.mon.draft)return; monDraftSync(); const a=S.mon.draft.preguntas,j=i+dir; if(j<0||j>=a.length)return; const t=a[i];a[i]=a[j];a[j]=t; render(); }
+function monCuestNuevo(){ if(!puedeConfig())return; S.mon.cedit='new'; S.mon.draft={nombre:'',activo:true,preguntas:[]}; render(); }
+function monCuestEditar(id){ if(!puedeConfig())return; const c=(S.mon.cuest||[]).find(x=>x.id===id); if(!c)return; S.mon.cedit=id; S.mon.draft={nombre:c.nombre||'',activo:c.activo!==false,preguntas:(c.preguntas||[]).map(q=>({id:q.id||monPregNewId(),texto:q.texto||'',tipo:(['si_no','escala','texto'].includes(q.tipo)?q.tipo:'si_no')}))}; render(); }
+function monCuestCancelar(){ if(S.mon){ S.mon.cedit=null; S.mon.draft=null; } render(); }
+async function monCuestGuardar(){
+  if(!puedeConfig()) return; // la regla es la defensa real
+  monCErr('');
+  monDraftSync();
+  const d=S.mon.draft; if(!d) return;
+  const nombre=(d.nombre||'').trim();
+  if(!nombre){ monCErr('El nombre es requerido.'); return; }
+  const preguntas=(d.preguntas||[])
+    .map(q=>({ id:q.id||monPregNewId(), texto:(q.texto||'').trim().slice(0,200), tipo:(['si_no','escala','texto'].includes(q.tipo)?q.tipo:'si_no') }))
+    .filter(q=>q.texto);
+  if(!preguntas.length){ monCErr('Agregá al menos una pregunta con texto.'); return; }
+  const isNew=S.mon.cedit==='new';
+  try{
+    if(isNew){
+      const ref=await db.collection('cuestionarios').add({ nombre, activo:true, frecuencia:'semanal', preguntas, creadoEn:FV(), creadoPor:S.user.uid });
+      audit('cuestionario_creado','cuestionario',ref.id,nombre);
+    }else{
+      const activo=(document.getElementById('mon-c-activo')?.value||'si')==='si';
+      await db.collection('cuestionarios').doc(S.mon.cedit).set({ nombre, activo, frecuencia:'semanal', preguntas, actualizadoEn:FV() },{merge:true});
+      audit('cuestionario_editado','cuestionario',S.mon.cedit,nombre);
+    }
+    S.mon.cedit=null; S.mon.draft=null; render();
+  }catch(e){ monCErr('No se pudo guardar: '+(e.message||e)); }
+}
+async function monCuestBaja(id,reactivar){
+  if(!puedeConfig())return;
+  monErr('');
+  try{ await db.collection('cuestionarios').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); audit(reactivar?'cuestionario_alta':'cuestionario_baja','cuestionario',id,''); }
+  catch(e){ monErr('No se pudo actualizar: '+(e.message||e)); }
+}
+
+/* ---- Respuestas (lista read-only, INMUTABLE) ---- */
+function monRespSetD(k,v){ if(S.mon){ S.mon[k]=v; render(); } }
+function monRespToggle(id){ if(!S.mon)return; if(!S.mon.rExp)S.mon.rExp={}; S.mon.rExp[id]=!S.mon.rExp[id]; render(); }
+function monRespFmt(t){ const ms=tms(t); if(ms==null) return '—'; const d=new Date(ms); return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+function monValorLbl(a){
+  const v=a&&a.valor;
+  if(v===true||v==='si') return 'Sí';
+  if(v===false||v==='no') return 'No';
+  if(v==null||v==='') return '—';
+  if(a.tipo==='escala'||/^\d+$/.test(String(v))) return String(v)+(a.tipo==='escala'?' / 5':'');
+  return String(v);
+}
+function monRespView(){
+  if(S.mon.respErr) return `<div class="card">No se pudieron cargar las respuestas: ${esc(S.mon.respErr)}</div>`;
+  if(S.mon.resp===null) return `<div class="card">Cargando respuestas…</div>`;
+  const desdeMs=estRangeMs(S.mon.rDesde,false), hastaMs=estRangeMs(S.mon.rHasta,true);
+  const list=(S.mon.resp||[]).filter(r=>{ const ms=tms(r.creadoEn); return ms!=null && ms>=desdeMs && ms<=hastaMs; });
+  const rows=list.length? list.map(r=>{
+    const exp=!!(S.mon.rExp&&S.mon.rExp[r.id]);
+    const det=exp? `<div style="width:100%;margin-top:.5rem;border-top:1px solid var(--border);padding-top:.4rem">`+
+      ((r.respuestas||[]).length? (r.respuestas||[]).map(a=>`<div style="display:flex;justify-content:space-between;gap:1rem;padding:.28rem 0"><span style="font-size:.78rem;color:var(--ink2)">${esc(a.texto||a.preguntaId||'—')}</span><span style="font-size:.82rem;font-weight:700;text-align:right;white-space:nowrap">${esc(monValorLbl(a))}</span></div>`).join('') : `<div style="font-size:.76rem;color:var(--ink3)">Sin respuestas cargadas.</div>`)
+      +`</div>` : '';
+    const nP=(r.respuestas||[]).length;
+    return `<div class="lr" style="flex-wrap:wrap;cursor:pointer" onclick="monRespToggle('${r.id}')"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(r.personaNombre||'—')}</div><div class="lrs">${monRespFmt(r.creadoEn)} · ${esc(r.cuestionarioNombre||'—')} · ${nP} resp. · ${exp?'▲ ocultar':'▼ detalle'}</div></div>${det}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin respuestas en el rango.</div>`;
+  return `<div style="display:flex;gap:.5rem;margin-bottom:.6rem">
+      <div class="field" style="flex:1;margin:0"><label>Desde</label><input type="date" value="${esc(S.mon.rDesde||'')}" onchange="monRespSetD('rDesde',this.value)"></div>
+      <div class="field" style="flex:1;margin:0"><label>Hasta</label><input type="date" value="${esc(S.mon.rHasta||'')}" onchange="monRespSetD('rHasta',this.value)"></div>
+    </div>
+    <div style="font-size:.66rem;color:var(--ink3);margin-bottom:.5rem">Respuestas inmutables · últimas 200 · tocá una fila para ver el detalle.</div>
+    <div class="card">${rows}</div>`;
 }
 
 /* ===================== GEO — demanda por barrio (v2 de Estadísticas) =====================

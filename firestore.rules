@@ -82,13 +82,18 @@ service cloud.firestore {
     // usuarios/{uid}: cada quien lee su doc; admin lee toda la coleccion.
     // Escritura: alta/baja/cambios de rol -> solo superadmin (via panel / Admin SDK).
     // Mi perfil: cada usuario puede actualizar SOLO su propio nombre/fotoURL (nada mas).
+    // Preferencia de recordatorio (app del socio, Etapa 24): el afiliado (cualquier dueno del doc)
+    // actualiza SOLO su prefRecordatorio (dia de aviso del chequeo semanal) — rama aparte, hasOnly cerrado.
     match /usuarios/{uid} {
       allow read:           if esSuperadmin() || (isSignedIn() && (request.auth.uid == uid || isAdmin()));
       allow create, delete: if esSuperadmin();
       allow update: if esSuperadmin()
                        || ( isSignedIn()
                             && request.auth.uid == uid
-                            && tocadas().hasOnly(['nombre','fotoURL']) );
+                            && tocadas().hasOnly(['nombre','fotoURL']) )
+                       || ( isSignedIn()
+                            && request.auth.uid == uid
+                            && tocadas().hasOnly(['prefRecordatorio']) );
     }
 
     // pacientes/{id}: identidad + antecedentes (nucleo de la historia).
@@ -419,6 +424,27 @@ service cloud.firestore {
     match /auditoria/{id} {
       allow create: if esInterno();
       allow read:   if isAdmin() || tienePermiso('configurar_sistema');
+    }
+
+    // cuestionarios/{id}: plantillas del Nivel 1 de Monitoreo (cuestionario semanal). Eje transversal (Etapa 24).
+    //  - Lectura: cualquier AUTENTICADO — el afiliado necesita leer el cuestionario activo para responderlo.
+    //  - Escritura (alta/edicion; baja LOGICA via 'activo'): admin/superadmin o configurar_sistema. Sin delete.
+    match /cuestionarios/{id} {
+      allow read:           if isSignedIn();
+      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+    }
+
+    // respuestas_cuestionario/{id}: respuestas del socio al cuestionario semanal (Etapa 24). INMUTABLES.
+    //  - create: el AFILIADO crea SOLO sobre SI MISMO (personaId == su personaId) y con la FORMA exacta
+    //    (keys cerradas); tambien esInterno (carga asistida futura por el personal). Cuelga de personaId.
+    //  - read: rol INTERNO (para el panel de Monitoreo) o el propio afiliado (sus respuestas).
+    //  - SIN update, SIN delete: inmutables, como /auditoria.
+    match /respuestas_cuestionario/{id} {
+      allow create: if esInterno()
+                       || ( isSignedIn()
+                            && request.resource.data.personaId == miPersonaId()
+                            && request.resource.data.keys().hasOnly(['cuestionarioId','cuestionarioNombre','personaId','personaNombre','respuestas','creadoEn']) );
+      allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId());
     }
 
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).

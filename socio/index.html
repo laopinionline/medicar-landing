@@ -134,7 +134,7 @@ const TEL_EMERG = '443044';
 const ICON = 'icon.svg';
 
 // Estado mínimo de la vista.
-const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null };
+const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null, chk:null };
 const el = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -148,6 +148,29 @@ function nombreDe(per, u){
 }
 function fmtDni(d){ const s=String(d||'').replace(/\D/g,''); if(!s) return '—'; return s.replace(/\B(?=(\d{3})+(?!\d))/g,'.'); }
 function tipoLbl(t){ return t==='corporativo'?'Corporativo':(t==='directo'?'Directo':(t||'—')); }
+
+/* ---------- Monitoreo N1: fechas y estado del chequeo semanal ---------- */
+function tsMs(t){ if(!t) return null; if(t.toMillis) return t.toMillis(); if(t.seconds!=null) return t.seconds*1000; if(typeof t==='number') return t; return null; }
+const DIAS=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+function startOfDay(ms){ const d=new Date(ms); d.setHours(0,0,0,0); return d.getTime(); }
+function prefDateThisWeekMs(prefDay){
+  const now=new Date();
+  const weekStart=startOfDay(now.getTime()) - now.getDay()*86400000; // domingo 00:00 de esta semana
+  return weekStart + (prefDay||0)*86400000;
+}
+// c = credencial ok. Regla: hay cuestionario activo Y no respondió en los últimos 7 días Y hoy >= su día
+// preferido de esta semana -> pendiente. nextMs = próxima fecha de chequeo.
+function chequeoEstado(c){
+  if(!c || !c.cuestionario) return { activo:false, pending:false };
+  const now=Date.now();
+  const dueMs=prefDateThisWeekMs(c.prefDay||0);
+  const answered7 = c.lastRespMs!=null && (now - c.lastRespMs) < 7*86400000;
+  const llegoElDia = now >= dueMs;
+  const pending = !answered7 && llegoElDia;
+  const nextMs = (now>=dueMs) ? dueMs + 7*86400000 : dueMs;
+  return { activo:true, pending, answered7, dueMs, nextMs };
+}
+function fmtFecha(ms){ if(ms==null) return '—'; const d=new Date(ms); return DIAS[d.getDay()]+' '+('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2); }
 
 /* ---------- Carga de datos del socio ---------- */
 async function cargarCredencial(uid){
@@ -178,7 +201,24 @@ async function cargarCredencial(uid){
     try{ const pl = await db.collection('planes').doc(socio.planId).get(); if(pl.exists) planNombre = pl.data().nombre || ''; }catch(_){}
   }
 
-  return { estado:'ok', u, per, socio, planNombre, personaId };
+  // Monitoreo N1: cuestionario ACTIVO (si hay varios, el más reciente) + última respuesta de esta persona.
+  let cuestionario = null;
+  try{
+    const cs = await db.collection('cuestionarios').where('activo','==',true).get();
+    if(!cs.empty){
+      const arr = cs.docs.map(d=>({id:d.id, ...d.data()}));
+      arr.sort((a,b)=> (tsMs(b.creadoEn)||0) - (tsMs(a.creadoEn)||0));
+      cuestionario = arr[0];
+    }
+  }catch(_){}
+  let lastRespMs = null;
+  try{
+    const rs = await db.collection('respuestas_cuestionario').where('personaId','==',personaId).get();
+    rs.docs.forEach(d=>{ const ms=tsMs(d.data().creadoEn); if(ms!=null && (lastRespMs==null || ms>lastRespMs)) lastRespMs=ms; });
+  }catch(_){}
+  const prefDay = (typeof u.prefRecordatorio==='number' && u.prefRecordatorio>=0 && u.prefRecordatorio<=6) ? u.prefRecordatorio : 0;
+
+  return { estado:'ok', u, per, socio, planNombre, personaId, cuestionario, lastRespMs, prefDay };
 }
 
 /* ---------- Auth flow ---------- */
@@ -341,6 +381,8 @@ function homeView(){
     </div>
     ${sinAfilNota}
 
+    ${homeChequeoBlock(c)}
+
     <div class="sec">
       <div class="sec-h">Mis datos de contacto</div>
       <div class="card">${contacto}</div>
@@ -356,6 +398,110 @@ function homeView(){
   </div>`;
 }
 
+/* ---------- Chequeo semanal (Monitoreo N1) ---------- */
+function homeChequeoBlock(c){
+  const st=chequeoEstado(c);
+  if(!st.activo) return ''; // sin cuestionario activo → no se muestra nada
+  const prefSel=`<select onchange="guardarPref(this.value)" style="padding:.4rem .5rem;border:1.5px solid var(--line);border-radius:8px;font-size:.85rem;background:#fff">`+
+    DIAS.map((d,i)=>`<option value="${i}" ${((c.prefDay||0)===i)?'selected':''}>${d}</option>`).join('')+`</select>`;
+  let body;
+  if(st.pending){
+    body=`<div style="background:linear-gradient(135deg,#DC1400,#B01000);color:#fff;border-radius:16px;padding:1.1rem 1.15rem">
+      <div style="font-weight:800;font-size:1.05rem">Tenés tu chequeo semanal 📝</div>
+      <div style="font-size:.82rem;opacity:.92;margin-top:.25rem;line-height:1.4">Contanos cómo pasaste la semana. Son unas pocas preguntas.</div>
+      <button onclick="abrirChequeo()" style="margin-top:.85rem;width:100%;background:#fff;color:var(--r);font-weight:800;font-size:.95rem;padding:.75rem;border-radius:10px;border:none;cursor:pointer">Responder ahora</button>
+    </div>`;
+  }else if(st.answered7){
+    body=`<div class="card" style="padding:1rem"><div style="font-weight:700;color:var(--g)">✓ Ya respondiste esta semana</div>
+      <div style="font-size:.8rem;color:var(--ink2);margin-top:.3rem">Gracias. Tu próximo chequeo: <b>${fmtFecha(st.nextMs)}</b>.</div></div>`;
+  }else{
+    body=`<div class="card" style="padding:1rem"><div style="font-weight:700">Tu próximo chequeo</div>
+      <div style="font-size:.8rem;color:var(--ink2);margin-top:.3rem"><b>${fmtFecha(st.dueMs)}</b>. Te avisamos acá.</div></div>`;
+  }
+  return `<div class="sec">
+    <div class="sec-h">Chequeo semanal</div>
+    ${body}
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.6rem;padding:0 .2rem">
+      <span style="font-size:.76rem;color:var(--ink2)">Día de recordatorio</span>${prefSel}
+    </div>
+  </div>`;
+}
+async function guardarPref(v){
+  const day=parseInt(v,10); if(isNaN(day)||day<0||day>6) return;
+  const uid=auth.currentUser&&auth.currentUser.uid; if(!uid) return;
+  if(S.cred) S.cred.prefDay=day; // optimista
+  render();
+  try{ await db.collection('usuarios').doc(uid).set({ prefRecordatorio:day },{merge:true}); }
+  catch(e){ console.warn('[pref] no se pudo guardar', e); }
+}
+function abrirChequeo(){
+  const c=S.cred; if(!c||!c.cuestionario) return;
+  S.chk={ open:true, answers:{}, err:'', busy:false };
+  S.view='chequeo'; render();
+}
+function cerrarChequeo(){ S.chk=null; S.view='home'; render(); }
+function chkSyncText(){
+  const c=S.cred||{}; const q=c.cuestionario; if(!q||!S.chk) return;
+  (q.preguntas||[]).forEach(p=>{ if(p.tipo==='texto'){ const e=el('chk-txt-'+p.id); if(e) S.chk.answers[p.id]=e.value.slice(0,200); } });
+}
+function chkSet(pid,val){ if(!S.chk) return; chkSyncText(); S.chk.answers[pid]=val; render(); }
+function chequeoFormView(){
+  const c=S.cred||{}; const q=c.cuestionario;
+  if(!q){ S.view='home'; return homeView(); }
+  const A=(S.chk&&S.chk.answers)||{};
+  const preg=(q.preguntas||[]).map((p,i)=>{
+    let ctrl='';
+    if(p.tipo==='si_no'){
+      const mk=(val,lbl)=>{ const sel=A[p.id]===val; return `<button type="button" onclick="chkSet('${p.id}',${val})" style="flex:1;padding:.65rem;border-radius:10px;border:1.5px solid ${sel?'var(--r)':'var(--line)'};background:${sel?'var(--r)':'#fff'};color:${sel?'#fff':'var(--ink)'};font-weight:700;font-size:.9rem;cursor:pointer">${lbl}</button>`; };
+      ctrl=`<div style="display:flex;gap:.5rem">${mk(true,'Sí')}${mk(false,'No')}</div>`;
+    }else if(p.tipo==='escala'){
+      ctrl=`<div style="display:flex;gap:.4rem">`+[1,2,3,4,5].map(n=>{ const sel=A[p.id]===n; return `<button type="button" onclick="chkSet('${p.id}',${n})" style="flex:1;padding:.6rem 0;border-radius:10px;border:1.5px solid ${sel?'var(--r)':'var(--line)'};background:${sel?'var(--r)':'#fff'};color:${sel?'#fff':'var(--ink)'};font-weight:700;cursor:pointer">${n}</button>`; }).join('')+`</div><div style="display:flex;justify-content:space-between;font-size:.62rem;color:var(--ink3);margin-top:.2rem"><span>Mal</span><span>Excelente</span></div>`;
+    }else{
+      ctrl=`<input id="chk-txt-${p.id}" maxlength="200" value="${esc(A[p.id]||'')}" placeholder="Escribí acá (opcional)" style="width:100%;padding:.65rem .75rem;border:1.5px solid var(--line);border-radius:10px;font-size:.95rem">`;
+    }
+    return `<div class="sec" style="margin-top:1rem"><div style="font-weight:700;font-size:.92rem;margin-bottom:.5rem">${i+1}. ${esc(p.texto||'')}</div>${ctrl}</div>`;
+  }).join('');
+  return `<div class="home">
+    <div class="topbar">
+      <img src="${ICON}" alt="">
+      <div class="tb-t">Chequeo semanal</div>
+      <div class="tb-sp"></div>
+      <button class="mini" onclick="cerrarChequeo()">Cerrar</button>
+    </div>
+    <div style="font-size:.85rem;color:var(--ink2);line-height:1.45">Contanos cómo pasaste la semana. Tus respuestas ayudan al equipo médico de MEDICAR.</div>
+    ${preg}
+    <div class="err ${S.chk&&S.chk.err?'on':''}" style="margin-top:1rem">${esc(S.chk&&S.chk.err||'')}</div>
+    <button class="btn-r" style="margin-top:.8rem" onclick="enviarChequeo()">${S.chk&&S.chk.busy?'Enviando…':'Enviar'}</button>
+    <button class="btn-o" style="margin-top:.6rem" onclick="cerrarChequeo()">Cancelar</button>
+    <div class="footer"><div class="foot-note">Se registra una sola vez por semana.</div></div>
+  </div>`;
+}
+async function enviarChequeo(){
+  const c=S.cred||{}; const q=c.cuestionario; if(!q||!S.chk||S.chk.busy) return;
+  chkSyncText();
+  const A=S.chk.answers||{};
+  // si_no y escala obligatorias; texto opcional.
+  const faltan=(q.preguntas||[]).filter(p=> (p.tipo==='si_no'||p.tipo==='escala') && (A[p.id]===undefined||A[p.id]===null));
+  if(faltan.length){ S.chk.err='Respondé todas las preguntas (el texto es opcional).'; render(); return; }
+  const respuestas=(q.preguntas||[]).map(p=>({ preguntaId:p.id, texto:p.texto||'', valor:(A[p.id]!==undefined?A[p.id]:'') }));
+  S.chk.busy=true; S.chk.err=''; render();
+  try{
+    await db.collection('respuestas_cuestionario').add({
+      cuestionarioId:q.id, cuestionarioNombre:q.nombre||'',
+      personaId:c.personaId, personaNombre:nombreDe(c.per,c.u),
+      respuestas, creadoEn: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    if(S.cred) S.cred.lastRespMs=Date.now(); // el home pasa a "ya respondiste esta semana"
+    S.chk=null; S.view='home'; render();
+  }catch(e){
+    S.chk.busy=false;
+    S.chk.err=(e&&e.code==='permission-denied')
+      ? 'No se pudo enviar (permisos). Se habilita al publicar las reglas.'
+      : ((e&&e.message)||'No se pudo enviar. Revisá tu conexión.');
+    render();
+  }
+}
+
 function render(){
   const root=el('app'); if(!root) return;
   let html='';
@@ -365,6 +511,7 @@ function render(){
     case 'sin-vinculo': html=sinVinculoView(); break;
     case 'error-carga': html=errorCargaView(); break;
     case 'home': html=homeView(); break;
+    case 'chequeo': html=chequeoFormView(); break;
     default: html=bootView();
   }
   root.innerHTML=html;
