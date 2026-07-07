@@ -578,6 +578,7 @@ async function enviarChequeo(){
   const payload={
     cuestionarioId:q.id, cuestionarioNombre:q.nombre||'',
     personaId:c.personaId, personaNombre:nombreDe(c.per,c.u),
+    personaTelefono: (c.per && c.per.telefono) || '', // denorm (Etapa 31): el médico llama sin leer /personas
     respuestas,
     pedidoContacto: !!S.chk.pedido,
     motivoContacto: (S.chk.pedido && (S.chk.motivo||'').trim()) ? (S.chk.motivo||'').trim().slice(0,200) : null,
@@ -672,6 +673,7 @@ async function enviarReporte(){
   try{
     await db.collection('reportes_sintomas').add({
       personaId:c.personaId, personaNombre:nombreDe(c.per,c.u),
+      personaTelefono: (c.per && c.per.telefono) || '', // denorm (Etapa 31): el médico llama sin leer /personas
       sintomas, texto, tieneBanderaRoja,
       creadoEn: firebase.firestore.FieldValue.serverTimestamp()
     });

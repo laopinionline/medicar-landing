@@ -448,13 +448,16 @@ service cloud.firestore {
     //    (keys cerradas); tambien esInterno (carga asistida futura por el personal). Cuelga de personaId.
     //  - read: rol INTERNO (para el panel de Monitoreo) o el propio afiliado (sus respuestas).
     //  - SIN update, SIN delete: inmutables, como /auditoria.
+    // ACCESO POR NECESIDAD (Etapa 31): el MÉDICO DE GUARDIA lee esta colección por la rama esInterno() (ya la
+    // tenía) para ver las alertas — NO se agrega ninguna rama nueva. 'personaTelefono' (denorm) permite que el
+    // médico LLAME sin leer /personas (lectura amplia que NO se le amplió aquí).
     match /respuestas_cuestionario/{id} {
       // hasOnly permite SUBCONJUNTOS: los cuestionarios sin WHO-5 / sin contacto validan igual (Etapa 26
-      // suma who5, pedidoContacto, motivoContacto a la whitelist).
+      // suma who5/pedidoContacto/motivoContacto; Etapa 31 suma personaTelefono a la whitelist).
       allow create: if esInterno()
                        || ( isSignedIn()
                             && request.resource.data.personaId == miPersonaId()
-                            && request.resource.data.keys().hasOnly(['cuestionarioId','cuestionarioNombre','personaId','personaNombre','respuestas','who5','pedidoContacto','motivoContacto','creadoEn']) );
+                            && request.resource.data.keys().hasOnly(['cuestionarioId','cuestionarioNombre','personaId','personaNombre','personaTelefono','respuestas','who5','pedidoContacto','motivoContacto','creadoEn']) );
       allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId());
     }
 
@@ -479,12 +482,14 @@ service cloud.firestore {
     // cuelga de personaId. Dispara alertas por el QUÉ (banderaRoja denorm). La atención vive en
     // gestiones_contacto/{reporteId} (mismo mecanismo que las respuestas).
     //  - create: el AFILIADO SOLO sobre SI MISMO (personaId == su personaId) con forma cerrada; o esInterno.
-    //  - read: rol INTERNO (panel) o el propio afiliado. SIN update, SIN delete (inmutable).
+    //    (Etapa 31: 'personaTelefono' denorm sumado a la whitelist — el médico llama sin leer /personas.)
+    //  - read: rol INTERNO (panel + MÉDICO de guardia, por esInterno — sin rama nueva) o el propio afiliado.
+    //    SIN update, SIN delete (inmutable).
     match /reportes_sintomas/{id} {
       allow create: if esInterno()
                        || ( isSignedIn()
                             && request.resource.data.personaId == miPersonaId()
-                            && request.resource.data.keys().hasOnly(['personaId','personaNombre','sintomas','texto','tieneBanderaRoja','creadoEn']) );
+                            && request.resource.data.keys().hasOnly(['personaId','personaNombre','personaTelefono','sintomas','texto','tieneBanderaRoja','creadoEn']) );
       allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId());
     }
 
