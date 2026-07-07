@@ -2522,13 +2522,15 @@ function dashAttach(){
     db.collection('moviles').where('activo','==',true).onSnapshot(s=>{ if(!S.dash) return; S.dash.flota=s.docs.map(d=>d.data()); if(dashIdle()) render(); }, ()=>{ if(S.dash){ S.dash.flota=[]; if(dashIdle()) render(); } }),
     // Alertas clínicas (Etapa 27): respuestas + gestiones para computarAlertas al vuelo (read-only).
     db.collection('respuestas_cuestionario').orderBy('creadoEn','desc').limit(300).onSnapshot(s=>{ if(!S.dash) return; S.dash.resp=s.docs.map(d=>({id:d.id,...d.data()})); if(dashIdle()) render(); }, ()=>{ if(S.dash){ S.dash.resp=[]; if(dashIdle()) render(); } }),
-    db.collection('gestiones_contacto').onSnapshot(s=>{ if(!S.dash) return; const o={}; s.docs.forEach(d=>{ o[d.id]=d.data(); }); S.dash.gest=o; if(dashIdle()) render(); }, ()=>{ if(S.dash){ S.dash.gest={}; if(dashIdle()) render(); } })
+    db.collection('gestiones_contacto').onSnapshot(s=>{ if(!S.dash) return; const o={}; s.docs.forEach(d=>{ o[d.id]=d.data(); }); S.dash.gest=o; if(dashIdle()) render(); }, ()=>{ if(S.dash){ S.dash.gest={}; if(dashIdle()) render(); } }),
+    // Reportes de síntomas (Etapa 30, N2): 2a fuente de alertas.
+    db.collection('reportes_sintomas').orderBy('creadoEn','desc').limit(300).onSnapshot(s=>{ if(!S.dash) return; S.dash.reportes=s.docs.map(d=>({id:d.id,...d.data()})); if(dashIdle()) render(); }, ()=>{ if(S.dash){ S.dash.reportes=[]; if(dashIdle()) render(); } })
   ];
 }
 function dashDetach(){ if(S.dashUnsub){ S.dashUnsub.forEach(u=>{ try{u();}catch(_){} }); S.dashUnsub=null; } }
 
 function dashSuper(){
-  if(!S.dash){ S.dash={eps:null,staffN:null,afilN:null,flota:null,resp:null,gest:null}; dashAttach(); }
+  if(!S.dash){ S.dash={eps:null,staffN:null,afilN:null,flota:null,resp:null,gest:null,reportes:null}; dashAttach(); }
   const d=S.dash;
   const card=(n,l)=>`<div class="stat"><div class="sn">${n}</div><div class="sl">${l}</div></div>`;
   let hoy='…', activos='…', cDesp=0,cEnC=0,cArr=0,cAt=0, tResp='…', tAt='…';
@@ -2561,7 +2563,7 @@ function dashSuper(){
   const fTot =fLoad?'…':fl.length;
   return `
   <div style="font-weight:700;margin:.1rem 0 .6rem">Dashboard <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
-  ${alertasBloqueDash(d.resp, d.gest)}
+  ${alertasBloqueDash(d.resp, d.gest, d.reportes)}
   ${mapaVivoBloque(d.eps||[])}
   <div class="srow">${card(hoy,'Atenciones del día')}${card(activos,'Episodios activos')}</div>
   <div class="card"><div class="ch">Activos por estado</div>
@@ -4242,7 +4244,10 @@ function monAttach(){
   S.monUnsub=[
     db.collection('cuestionarios').onSnapshot(s=>{ if(!S.mon) return; S.mon.cuest=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.mon){ S.mon.err=(e.message||String(e)); render(); } }),
     db.collection('respuestas_cuestionario').orderBy('creadoEn','desc').limit(200).onSnapshot(s=>{ if(!S.mon) return; S.mon.resp=s.docs.map(d=>({id:d.id,...d.data()})); if(!monFormOpen()) render(); }, e=>{ if(S.mon){ S.mon.respErr=(e.message||String(e)); render(); } }),
-    db.collection('gestiones_contacto').onSnapshot(s=>{ if(!S.mon) return; const o={}; s.docs.forEach(d=>{ o[d.id]=d.data(); }); S.mon.gest=o; if(!monFormOpen()) render(); }, ()=>{ /* degrada limpio: sin gestiones cargadas */ })
+    db.collection('gestiones_contacto').onSnapshot(s=>{ if(!S.mon) return; const o={}; s.docs.forEach(d=>{ o[d.id]=d.data(); }); S.mon.gest=o; if(!monFormOpen()) render(); }, ()=>{ /* degrada limpio: sin gestiones cargadas */ }),
+    // Etapa 30 (N2): catálogo de síntomas (ABM) + reportes de síntomas (fuente de alertas).
+    db.collection('sintomas_catalogo').onSnapshot(s=>{ if(!S.mon) return; S.mon.sint=s.docs.map(d=>({id:d.id,...d.data()})); if(!monFormOpen()) render(); }, e=>{ if(S.mon){ S.mon.sintErr=(e.message||String(e)); render(); } }),
+    db.collection('reportes_sintomas').orderBy('creadoEn','desc').limit(300).onSnapshot(s=>{ if(!S.mon) return; S.mon.reportes=s.docs.map(d=>({id:d.id,...d.data()})); if(!monFormOpen()) render(); }, ()=>{ /* degrada limpio */ })
   ];
 }
 function monDetach(){ if(S.monUnsub){ S.monUnsub.forEach(u=>{ try{u();}catch(_){} }); S.monUnsub=null; } }
@@ -4256,9 +4261,9 @@ function monPanel(){
   const head=`
   <div style="font-weight:700;margin:.1rem 0 .2rem">Monitoreo <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● Nivel 1 · cuestionario semanal</span></div>
   <div style="font-size:.66rem;color:var(--ink3);margin-bottom:.6rem">Casa de la escalera de monitoreo. Nivel 2 (auto-chequeo + alertas) y Nivel 3 (wearables) vienen después.</div>
-  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('cuestionarios','Cuestionarios')}${tab('respuestas','Respuestas')}${tab('alertas','Alertas')}</div>
+  <div style="display:flex;gap:.4rem;margin-bottom:.8rem;flex-wrap:wrap">${tab('cuestionarios','Cuestionarios')}${tab('respuestas','Respuestas')}${tab('alertas','Alertas')}${tab('sintomas','Síntomas')}</div>
   <div id="mon-head-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
-  return head + (sub==='respuestas' ? monRespView() : sub==='alertas' ? monAlertasView() : monCuestView());
+  return head + (sub==='respuestas' ? monRespView() : sub==='alertas' ? monAlertasView() : sub==='sintomas' ? monSintView() : monCuestView());
 }
 function monSub(id){ if(!S.mon) return; S.mon.sub=id; S.mon.cedit=null; S.mon.draft=null; render(); }
 function monShowInact(on){ if(S.mon){ S.mon.showInact=!!on; render(); } }
@@ -4459,17 +4464,28 @@ function fiebreEn(r){ return (r.respuestas||[]).some(a=> /fiebre/i.test(a.texto|
 function alertaNivel(n){ return n==='roja'?{ico:'🔴',c:'#E5484D',lbl:'ROJA'}:n==='amarilla'?{ico:'🟡',c:'#E0A23B',lbl:'AMARILLA'}:{ico:'⚪',c:'#888',lbl:'SEGUIMIENTO'}; }
 function alertaHace(t){ const ms=tms(t); if(ms==null) return '—'; const d=Math.floor((Date.now()-ms)/86400000); if(d<=0) return 'hoy'; if(d===1) return '1 día'; if(d<7) return d+' días'; const w=Math.floor(d/7); return w+(w===1?' semana':' semanas'); }
 
-/* FUNCIÓN PURA. respuestas: [{id,personaId,personaNombre,who5,pedidoContacto,motivoContacto,respuestas,creadoEn}];
-   gestiones: { respuestaId: {...} }. Devuelve [{nivel,personaId,personaNombre,motivo,motivos,respuestaId,fecha}].
-   Una persona = UNA tarjeta con su nivel MÁS ALTO (motivos acumulados). Persona cuya ÚLTIMA respuesta (30d)
-   tiene gestión = ATENDIDA → no dispara. */
-function computarAlertas(respuestas, gestiones){
-  const G = gestiones||{}, now = Date.now();
-  const recientes = (respuestas||[]).filter(r=>{ const ms=tms(r.creadoEn); return ms!=null && (now-ms) <= 30*86400000; });
+/* FUNCIÓN PURA. FUENTES: respuestas_cuestionario (N1) + reportes_sintomas (N2, Etapa 30). gestiones
+   (gestiones_contacto) atiende AMBAS (doc id = respuestaId o reporteId). Una persona = UNA tarjeta con su
+   nivel MÁS ALTO (motivos acumulados de todas sus fuentes). Fuente CON gestión = atendida → no dispara.
+   Devuelve [{nivel,personaId,personaNombre,motivo,motivos,fuentes:[ids],respuestaId,primaria:{tipo,id},fecha}]. */
+const RANK_ALERTA={ roja:3, amarilla:2, seguimiento:1 };
+function computarAlertas(respuestas, gestiones, reportes){
+  const G = gestiones||{}, now = Date.now(), V30 = 30*86400000;
+  const acc = {}; // pid -> tarjeta acumulada
+  function bump(pid, nombre, nivel, motivos, fuentes, fecha, primaria){
+    const a = acc[pid] || (acc[pid]={ personaId:pid, personaNombre:nombre||'—', nivel:null, motivos:[], fuentes:[], fecha:null, primaria:null });
+    if(nombre && (a.personaNombre==='—')) a.personaNombre=nombre;
+    if(nivel && (!a.nivel || RANK_ALERTA[nivel]>RANK_ALERTA[a.nivel])){ a.nivel=nivel; if(primaria) a.primaria=primaria; }
+    if(!a.primaria && primaria) a.primaria=primaria;
+    (motivos||[]).forEach(m=>a.motivos.push(m));
+    (fuentes||[]).forEach(f=>{ if(f && a.fuentes.indexOf(f)===-1) a.fuentes.push(f); });
+    const ms=tms(fecha); if(ms!=null && (a.fecha==null || ms>(tms(a.fecha)||0))) a.fecha=fecha;
+  }
+
+  // ── N1: respuestas_cuestionario (WHO-5 / contacto / fiebre / regularidad / caída) ──
   const byPer = {};
-  recientes.forEach(r=>{ const pid=r.personaId||('resp:'+r.id); (byPer[pid]=byPer[pid]||[]).push(r); });
-  const RANK={ roja:3, amarilla:2, seguimiento:1 };
-  const out=[];
+  (respuestas||[]).filter(r=>{ const ms=tms(r.creadoEn); return ms!=null && (now-ms)<=V30; })
+    .forEach(r=>{ const pid=r.personaId||('resp:'+r.id); (byPer[pid]=byPer[pid]||[]).push(r); });
   Object.keys(byPer).forEach(pid=>{
     const arr = byPer[pid].slice().sort((a,b)=>(tms(b.creadoEn)||0)-(tms(a.creadoEn)||0));
     const latest = arr[0];
@@ -4479,7 +4495,6 @@ function computarAlertas(respuestas, gestiones){
     const fiebre = fiebreEn(latest);
     const pedido = latest.pedidoContacto===true;
     const motivos=[]; let nivel=null;
-    // --- ROJA / AMARILLA (agudo, sobre la última respuesta) ---
     const rojo    = (score!=null && score<=WHO5_ROJO) || (pedido && ((score!=null && score<WHO5_ROJO) || fiebre));
     const amarillo= (score!=null && score<WHO5_AMARILLO) || pedido || fiebre;
     if(rojo) nivel='roja'; else if(amarillo) nivel='amarilla';
@@ -4487,18 +4502,44 @@ function computarAlertas(respuestas, gestiones){
     else if(score!=null && score<WHO5_AMARILLO) motivos.push('WHO-5 '+score+' — bienestar bajo (OMS)');
     if(pedido) motivos.push('Pidió que lo contacten');
     if(fiebre) motivos.push('Reportó fiebre en el último chequeo');
-    // --- SEGUIMIENTO (patrón por persona; se acumula, no baja el nivel) ---
     const scores = arr.map(r=>(r.who5 && typeof r.who5.score==='number')?r.who5.score:null).filter(v=>v!=null);
     const enVentana = arr.filter(r=>{ const ms=tms(r.creadoEn); return ms!=null && (now-ms) <= SEMANAS_REGULARIDAD*7*86400000; }).length;
-    if(arr.length>=1 && enVentana<=2) motivos.push('Regularidad baja ('+enVentana+' en '+SEMANAS_REGULARIDAD+' semanas)') , (nivel=nivel||'seguimiento');
+    if(arr.length>=1 && enVentana<=2){ motivos.push('Regularidad baja ('+enVentana+' en '+SEMANAS_REGULARIDAD+' semanas)'); nivel=nivel||'seguimiento'; }
     if(scores.length>=3){
       const prom = scores.reduce((a,b)=>a+b,0)/scores.length;
       const ult = (score!=null)?score:scores[0];
       if((prom-ult) >= CAIDA_TENDENCIA){ motivos.push('Caída de bienestar (WHO-5 '+ult+' vs. promedio '+Math.round(prom)+')'); nivel=nivel||'seguimiento'; }
     }
-    if(nivel) out.push({ nivel, personaId:pid, personaNombre:nombre, motivo:motivos.join(' · '), motivos, respuestaId:latest.id, fecha:latest.creadoEn });
+    if(nivel) bump(pid, nombre, nivel, motivos, [latest.id], latest.creadoEn, {tipo:'respuesta', id:latest.id});
   });
-  out.sort((a,b)=> (RANK[b.nivel]-RANK[a.nivel]) || ((tms(b.fecha)||0)-(tms(a.fecha)||0)) );
+
+  // ── N2: reportes_sintomas (Etapa 30) — declarativo, dispara por el QUÉ ──
+  const repByPer = {};
+  (reportes||[]).filter(r=>{ const ms=tms(r.creadoEn); return ms!=null && (now-ms)<=V30; })
+    .forEach(r=>{ const pid=r.personaId||('rep:'+r.id); (repByPer[pid]=repByPer[pid]||[]).push(r); });
+  Object.keys(repByPer).forEach(pid=>{
+    const arr = repByPer[pid].slice().sort((a,b)=>(tms(b.creadoEn)||0)-(tms(a.creadoEn)||0));
+    const sinGestion = arr.filter(r=>!G[r.id]);
+    if(!sinGestion.length) return; // todos los reportes atendidos → no dispara
+    const conBandera = sinGestion.filter(r=>r.tieneBanderaRoja===true);
+    const nombre = arr[0].personaNombre || '—';
+    let nivel, motivos=[], primaria;
+    if(conBandera.length){
+      nivel='roja';
+      const rb=conBandera[0];
+      const nombres=(rb.sintomas||[]).filter(s=>s.banderaRoja).map(s=>s.nombre).filter(Boolean);
+      motivos.push('Reportó: '+(nombres.join(', ')||'síntoma de bandera roja'));
+      primaria={tipo:'reporte', id:rb.id};
+    }else{
+      nivel='amarilla';
+      motivos.push('Reportó síntomas');
+      primaria={tipo:'reporte', id:sinGestion[0].id};
+    }
+    bump(pid, nombre, nivel, motivos, sinGestion.map(r=>r.id), arr[0].creadoEn, primaria);
+  });
+
+  const out = Object.keys(acc).map(pid=>{ const a=acc[pid]; a.motivo=a.motivos.join(' · '); a.respuestaId=(a.primaria&&a.primaria.id)||a.fuentes[0]||''; return a; });
+  out.sort((a,b)=> (RANK_ALERTA[b.nivel]-RANK_ALERTA[a.nivel]) || ((tms(b.fecha)||0)-(tms(a.fecha)||0)) );
   return out;
 }
 
@@ -4518,13 +4559,27 @@ function monOrigenHtml(r, gest){
   return respHtml+who5D+contD;
 }
 
+// Detalle de un reporte de síntomas (N2) origen, para el expand de Alertas.
+function monReporteById(id){ return (S.mon.reportes||[]).find(r=>r.id===id); }
+function monReporteHtml(rep, gest){
+  const g=(gest||{})[rep.id];
+  const sint=(rep.sintomas||[]).length? (rep.sintomas||[]).map(s=>`<span style="display:inline-block;background:${s.banderaRoja?'#fdecec':'#eef2f6'};color:${s.banderaRoja?'#B01000':'var(--ink2)'};font-size:.72rem;font-weight:700;padding:.15rem .5rem;border-radius:6px;margin:.1rem .2rem .1rem 0">${s.banderaRoja?'🚩 ':''}${esc(s.nombre||'—')}</span>`).join('') : '<span style="font-size:.74rem;color:var(--ink3)">Sin síntomas del catálogo.</span>';
+  const txt=rep.texto?`<div style="font-size:.76rem;color:var(--ink2);margin-top:.4rem">“${esc(rep.texto)}”</div>`:'';
+  const gDiv = g
+    ? `<div style="margin-top:.5rem;background:#eef7f1;border:1px solid #cfe8db;border-radius:8px;padding:.5rem .6rem"><div style="font-size:.78rem;font-weight:700;color:var(--g,#1D9E75)">✓ Atendido</div><div style="font-size:.72rem;color:var(--ink2)">por ${esc(g.atendidoPorNombre||g.atendidoPor||'—')} · ${monRespFmt(g.atendidoEn)}</div></div>`
+    : `<div style="margin-top:.5rem"><button class="btn-r" style="width:auto;padding:.35rem .75rem" onclick="event.stopPropagation();monMarcarAtendido('${rep.id}')">Marcar atendido</button></div>`;
+  return `<div style="margin-top:.2rem"><div style="font-size:.72rem;color:var(--ink3);font-weight:700;margin-bottom:.3rem">Auto-reporte de síntomas${rep.tieneBanderaRoja?' · <span style="color:var(--r)">🚩 bandera roja</span>':''}</div>${sint}${txt}${gDiv}</div>`;
+}
+// Atiende TODAS las fuentes sin gestión de una tarjeta (crea una gestión por cada respuesta/reporte).
+function monAtenderAlerta(fuentesCsv){ String(fuentesCsv||'').split(',').filter(Boolean).forEach(id=>monMarcarAtendido(id)); }
+
 /* ---- MONITOREO → Alertas (sub-sección) ---- */
 function monAlertaFiltro(n){ if(S.mon){ S.mon.aFiltro=n; } render(); }
 function monRespById(id){ return (S.mon.resp||[]).find(r=>r.id===id); }
 function monAlertasView(){
   if(S.mon.respErr) return `<div class="card">No se pudieron cargar las respuestas: ${esc(S.mon.respErr)}</div>`;
   if(S.mon.resp===null) return `<div class="card">Cargando alertas…</div>`;
-  const al=computarAlertas(S.mon.resp, S.mon.gest||{});
+  const al=computarAlertas(S.mon.resp, S.mon.gest||{}, S.mon.reportes||[]);
   const nR=al.filter(a=>a.nivel==='roja').length, nA=al.filter(a=>a.nivel==='amarilla').length, nS=al.filter(a=>a.nivel==='seguimiento').length;
   const filtro=S.mon.aFiltro||'todas';
   const fb=(id,lbl)=>`<button class="btn-o" style="width:auto;padding:.3rem .6rem;${filtro===id?'border-color:var(--r);color:var(--r);font-weight:700':''}" onclick="monAlertaFiltro('${id}')">${lbl}</button>`;
@@ -4532,8 +4587,15 @@ function monAlertasView(){
   const rows=vis.length? vis.map(a=>{
     const m=alertaNivel(a.nivel);
     const exp=!!(S.mon.aExp&&S.mon.aExp[a.respuestaId]);
-    const r=monRespById(a.respuestaId);
-    const det=exp&&r?`<div style="width:100%;margin-top:.5rem;border-top:1px solid var(--border);padding-top:.4rem">${monOrigenHtml(r,S.mon.gest||{})}</div>`:'';
+    // detalle del origen según tipo de fuente primaria (respuesta N1 o reporte de síntomas N2)
+    let det='';
+    if(exp){
+      let inner='';
+      if(a.primaria && a.primaria.tipo==='reporte'){ const rep=monReporteById(a.primaria.id); if(rep) inner=monReporteHtml(rep,S.mon.gest||{}); }
+      else { const r=monRespById(a.respuestaId); if(r) inner=monOrigenHtml(r,S.mon.gest||{}); }
+      const atender=(a.fuentes&&a.fuentes.length>1)?`<div style="margin-top:.5rem"><button class="btn-r" style="width:auto;padding:.35rem .75rem" onclick="event.stopPropagation();monAtenderAlerta('${a.fuentes.join(',')}')">Marcar atendido (${a.fuentes.length} fuentes)</button></div>`:'';
+      det=`<div style="width:100%;margin-top:.5rem;border-top:1px solid var(--border);padding-top:.4rem">${inner}${atender}</div>`;
+    }
     return `<div class="lr" style="flex-wrap:wrap;cursor:pointer;border-left:4px solid ${m.c}" onclick="monAlertaToggle('${a.respuestaId}')"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${m.ico} ${esc(a.personaNombre)} <span style="font-size:.6rem;font-weight:800;color:${m.c}">${m.lbl}</span></div><div class="lrs">${esc(a.motivo)} · hace ${alertaHace(a.fecha)} · ${exp?'▲ ocultar':'▼ detalle'}</div></div>${det}</div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin alertas${filtro!=='todas'?' de ese nivel':''}.</div>`;
   const cont=`<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem"><span style="font-weight:700">Alertas clínicas</span><span style="margin-left:auto;font-size:.85rem;font-weight:700">🔴 ${nR} · 🟡 ${nA} · ⚪ ${nS}</span></div>`;
@@ -4545,17 +4607,104 @@ function monAlertasView(){
 function monAlertaToggle(id){ if(!S.mon)return; if(!S.mon.aExp)S.mon.aExp={}; S.mon.aExp[id]=!S.mon.aExp[id]; render(); }
 
 // Bloque de alertas para el Dashboard del superadmin (compacto, arriba del mapa).
-function alertasBloqueDash(resp, gest){
-  if(resp==null || gest==null) return `<div class="card" style="margin-bottom:.7rem"><div style="font-weight:800;margin-bottom:.3rem">Alertas clínicas</div><div style="font-size:.78rem;color:var(--ink3)">Cargando…</div></div>`;
-  const al=computarAlertas(resp, gest);
+function alertasBloqueDash(resp, gest, reportes){
+  if(resp==null || gest==null || reportes==null) return `<div class="card" style="margin-bottom:.7rem"><div style="font-weight:800;margin-bottom:.3rem">Alertas clínicas</div><div style="font-size:.78rem;color:var(--ink3)">Cargando…</div></div>`;
+  const al=computarAlertas(resp, gest, reportes);
   const nR=al.filter(a=>a.nivel==='roja').length, nA=al.filter(a=>a.nivel==='amarilla').length, nS=al.filter(a=>a.nivel==='seguimiento').length;
   const head=`<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem"><div style="font-weight:800">Alertas clínicas</div><span style="margin-left:auto;font-size:.82rem;font-weight:700">🔴 ${nR} · 🟡 ${nA} · ⚪ ${nS}</span></div>`;
   if(!al.length) return `<div class="card" style="margin-bottom:.7rem;border-left:4px solid #1D9E75">${head}<div style="font-size:.82rem;color:#1D9E75;font-weight:700">Sin alertas clínicas ✓</div></div>`;
   const rows=al.map(a=>{
     const m=alertaNivel(a.nivel);
-    return `<div class="lr" style="flex-wrap:wrap;border-left:4px solid ${m.c}"><div class="lrb" style="flex:1 1 65%"><div class="lrn">${m.ico} ${esc(a.personaNombre)}</div><div class="lrs">${esc(a.motivo)} · hace ${alertaHace(a.fecha)}</div></div><button class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:.3rem" onclick="monMarcarAtendido('${a.respuestaId}')">Marcar atendido</button></div>`;
+    return `<div class="lr" style="flex-wrap:wrap;border-left:4px solid ${m.c}"><div class="lrb" style="flex:1 1 65%"><div class="lrn">${m.ico} ${esc(a.personaNombre)}</div><div class="lrs">${esc(a.motivo)} · hace ${alertaHace(a.fecha)}</div></div><button class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:.3rem" onclick="monAtenderAlerta('${(a.fuentes||[]).join(',')}')">Marcar atendido</button></div>`;
   }).join('');
   return `<div class="card" style="margin-bottom:.7rem">${head}${rows}</div>`;
+}
+
+/* ===================== MONITOREO → Síntomas (catálogo del N2, Etapa 30) — ABM =====================
+   sintomas_catalogo/{id}: { nombre, banderaRoja, activo, orden, creadoEn }. Ningún síntoma nace bandera
+   roja: las define la dirección médica (aviso explícito en la UI). Gateo puedeConfig(). */
+function monSintSorted(){ return (S.mon.sint||[]).slice().sort((a,b)=>((a.orden||0)-(b.orden||0))||((tms(a.creadoEn)||0)-(tms(b.creadoEn)||0))); }
+function monSintVisible(){ const showInact=!!S.mon.showInactS; return monSintSorted().filter(s=>showInact||s.activo!==false); }
+function monShowInactS(on){ if(S.mon){ S.mon.showInactS=!!on; } render(); }
+function monSErr(t){ const e=document.getElementById('mon-s-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function monSintView(){
+  if(S.mon.sintErr) return `<div class="card">No se pudo cargar el catálogo: ${esc(S.mon.sintErr)}</div>`;
+  if(S.mon.sint==null) return `<div class="card">Cargando síntomas…</div>`;
+  if(S.mon.sedit!=null) return monSintForm();
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .55rem;margin-top:0";
+  const showInact=!!S.mon.showInactS;
+  const nInact=(S.mon.sint||[]).filter(s=>s.activo===false).length;
+  const list=monSintVisible();
+  const rows=list.length? list.map((s,i,arr)=>{
+    const inact=s.activo===false, bandera=s.banderaRoja===true;
+    const acts=`<div style="display:flex;gap:.35rem;flex-wrap:wrap">
+      <button class="${btn}" onclick="monSintBandera('${s.id}',${!bandera})" title="Bandera roja">${bandera?'🚩':'⚪'}</button>
+      <button class="${btn}" onclick="monSintMover('${s.id}',-1)" ${i===0?'disabled':''}>↑</button>
+      <button class="${btn}" onclick="monSintMover('${s.id}',1)" ${i===arr.length-1?'disabled':''}>↓</button>
+      <button class="${btn}" onclick="monSintEditar('${s.id}')">Editar</button>
+      <button class="${btn}" onclick="monSintBaja('${s.id}',${inact})">${inact?'Alta':'Baja'}</button>
+    </div>`;
+    const meta=[bandera?'🚩 bandera roja':'sin bandera', inact?'· inactivo':''].filter(Boolean).join(' ');
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(s.nombre||'—')}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin síntomas${showInact?'':' activos'}. Agregá el primero.</div>`;
+  const aviso=`<div style="background:#fff7ee;border:1px solid #f3d9b8;border-radius:10px;padding:.55rem .7rem;margin-bottom:.7rem;font-size:.72rem;color:#8a5a10;line-height:1.4">🚩 <b>Las banderas rojas las define la dirección médica de MEDICAR.</b> Un síntoma con bandera roja dispara alerta <b>roja</b> al reportarse; sin bandera, <b>amarilla</b>. Ningún síntoma nace con bandera.</div>`;
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="monShowInactS(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
+  return `${aviso}<button class="btn-r" onclick="monSintNuevo()" style="margin-bottom:.7rem">+ Nuevo síntoma</button>${toggle}<div class="card">${rows}</div>`;
+}
+function monSintForm(){
+  const isNew=S.mon.sedit==='new';
+  const d=S.mon.sdraft||{nombre:'',banderaRoja:false};
+  const s=isNew?d:((S.mon.sint||[]).find(x=>x.id===S.mon.sedit)||d);
+  return `<div class="card"><div class="ch">${isNew?'Nuevo síntoma':'Editar síntoma'}</div>
+    <div class="field"><label>Nombre</label><input id="mon-s-nombre" value="${esc(s.nombre||'')}" placeholder="Ej. Dolor de pecho" maxlength="80"></div>
+    <div class="field"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer"><input type="checkbox" id="mon-s-bandera" ${(s.banderaRoja===true)?'checked':''}> 🚩 Bandera roja (la define la dirección médica)</label></div>
+    ${isNew?'':`<div class="field"><label>Estado</label><select id="mon-s-activo"><option value="si" ${s.activo!==false?'selected':''}>Activo</option><option value="no" ${s.activo===false?'selected':''}>Baja lógica</option></select></div>`}
+    <div id="mon-s-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <button class="btn-r" onclick="monSintGuardar()">Guardar</button>
+    <button class="btn-o" onclick="monSintCancelar()">Cancelar</button>
+  </div>`;
+}
+function monSintNuevo(){ if(!puedeConfig())return; S.mon.sedit='new'; S.mon.sdraft={nombre:'',banderaRoja:false}; render(); }
+function monSintEditar(id){ if(!puedeConfig())return; S.mon.sedit=id; S.mon.sdraft=null; render(); }
+function monSintCancelar(){ if(S.mon){ S.mon.sedit=null; S.mon.sdraft=null; } render(); }
+async function monSintGuardar(){
+  if(!puedeConfig())return; monSErr('');
+  const nombre=(document.getElementById('mon-s-nombre')?.value||'').trim().slice(0,80);
+  const banderaRoja=!!(document.getElementById('mon-s-bandera')&&document.getElementById('mon-s-bandera').checked);
+  if(!nombre){ monSErr('El nombre es requerido.'); return; }
+  const isNew=S.mon.sedit==='new';
+  try{
+    if(isNew){
+      const orden=(monSintSorted().reduce((mx,s)=>Math.max(mx,s.orden||0),0))+1;
+      const ref=await db.collection('sintomas_catalogo').add({ nombre, banderaRoja, activo:true, orden, creadoEn:FV() });
+      audit('sintoma_creado','sintoma_catalogo',ref.id,nombre+(banderaRoja?' (🚩)':''));
+    }else{
+      const activo=(document.getElementById('mon-s-activo')?.value||'si')==='si';
+      await db.collection('sintomas_catalogo').doc(S.mon.sedit).set({ nombre, banderaRoja, activo, actualizadoEn:FV() },{merge:true});
+      audit('sintoma_editado','sintoma_catalogo',S.mon.sedit,nombre+(banderaRoja?' (🚩)':''));
+    }
+    S.mon.sedit=null; S.mon.sdraft=null; render();
+  }catch(e){ monSErr('No se pudo guardar: '+(e.message||e)); }
+}
+async function monSintBandera(id,val){
+  if(!puedeConfig())return; monErr('');
+  try{ await db.collection('sintomas_catalogo').doc(id).set({ banderaRoja:!!val, actualizadoEn:FV() },{merge:true}); audit(val?'sintoma_bandera_on':'sintoma_bandera_off','sintoma_catalogo',id,''); }
+  catch(e){ monErr('No se pudo actualizar: '+(e.message||e)); }
+}
+async function monSintBaja(id,reactivar){
+  if(!puedeConfig())return; monErr('');
+  try{ await db.collection('sintomas_catalogo').doc(id).set({ activo:!!reactivar, actualizadoEn:FV() },{merge:true}); }
+  catch(e){ monErr('No se pudo actualizar: '+(e.message||e)); }
+}
+async function monSintMover(id,dir){
+  if(!puedeConfig())return; monErr('');
+  const all=monSintVisible(); const i=all.findIndex(s=>s.id===id); const j=i+dir;
+  if(i<0||j<0||j>=all.length) return;
+  const a=all[i], b=all[j], oa=(a.orden!=null)?a.orden:i, ob=(b.orden!=null)?b.orden:j;
+  try{ await Promise.all([
+    db.collection('sintomas_catalogo').doc(a.id).set({orden:ob},{merge:true}),
+    db.collection('sintomas_catalogo').doc(b.id).set({orden:oa},{merge:true})
+  ]); }catch(e){ monErr('No se pudo reordenar: '+(e.message||e)); }
 }
 
 /* ===================== GEO — demanda por barrio (v2 de Estadísticas) =====================

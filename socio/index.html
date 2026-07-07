@@ -134,7 +134,7 @@ const TEL_EMERG = '443044';
 const ICON = 'icon.svg';
 
 // Estado mínimo de la vista.
-const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null, chk:null };
+const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null, chk:null, rpt:null };
 const el = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -257,7 +257,14 @@ async function cargarCredencial(uid){
   }catch(_){}
   const prefDay = (typeof u.prefRecordatorio==='number' && u.prefRecordatorio>=0 && u.prefRecordatorio<=6) ? u.prefRecordatorio : 0;
 
-  return { estado:'ok', u, per, socio, planNombre, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk };
+  // N2 (Etapa 30): catálogo de síntomas activo, para el auto-reporte (ordenado).
+  let sintomas = [];
+  try{
+    const sc = await db.collection('sintomas_catalogo').where('activo','==',true).get();
+    sintomas = sc.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>((a.orden||0)-(b.orden||0)));
+  }catch(_){}
+
+  return { estado:'ok', u, per, socio, planNombre, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
 }
 
 /* ---------- Auth flow ---------- */
@@ -419,6 +426,8 @@ function homeView(){
       </div>
     </div>
     ${sinAfilNota}
+
+    ${homeReporteBlock(c)}
 
     ${homeChequeoBlock(c)}
 
@@ -593,6 +602,86 @@ async function enviarChequeo(){
   }
 }
 
+/* ---------- Auto-reporte de síntomas (Monitoreo N2) ---------- */
+function homeReporteBlock(c){
+  return `<div class="sec">
+    <div class="sec-h">¿No te sentís bien?</div>
+    <button onclick="abrirReporte()" style="display:flex;align-items:center;gap:.7rem;width:100%;text-align:left;padding:.9rem 1rem;border-radius:14px;border:1.5px solid var(--line);background:#fff;cursor:pointer">
+      <span style="font-size:1.5rem;flex:none">🩹</span>
+      <span><span style="display:block;font-weight:800;font-size:.95rem;color:var(--ink)">No me siento bien / Reportar un síntoma</span><span style="display:block;font-size:.76rem;color:var(--ink2);margin-top:.1rem">Contanos qué te pasa ahora — un médico de MEDICAR lo revisa.</span></span>
+    </button>
+  </div>`;
+}
+function abrirReporte(){
+  if(!S.cred || !S.cred.personaId) return;
+  S.rpt={ sel:{}, texto:'', err:'', busy:false, done:null };
+  S.view='reporte'; render();
+}
+function cerrarReporte(){ S.rpt=null; S.view='home'; render(); }
+function rptSyncTexto(){ if(!S.rpt) return; const e=el('rpt-texto'); if(e) S.rpt.texto=e.value.slice(0,300); }
+function rptToggle(id){ if(!S.rpt) return; rptSyncTexto(); S.rpt.sel[id]=!S.rpt.sel[id]; render(); }
+function reporteFormView(){
+  const c=S.cred||{};
+  // Confirmación tras enviar (doble carril, sin "guardia", sin diagnóstico).
+  if(S.rpt&&S.rpt.done){
+    const roja=S.rpt.done.tieneBanderaRoja;
+    const box = roja
+      ? `<div style="background:linear-gradient(135deg,#DC1400,#B01000);color:#fff;border-radius:16px;padding:1.2rem 1.15rem">
+          <div style="font-weight:800;font-size:1.1rem">Recibimos tu reporte</div>
+          <div style="font-size:.9rem;opacity:.95;margin-top:.4rem;line-height:1.5">Un médico de MEDICAR va a contactarte. <b>Si es una emergencia, no esperes: llamá al ${TEL_EMERG}.</b></div>
+          <a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:.9rem;background:#fff;color:var(--r);font-weight:800;font-size:1.05rem;padding:.8rem;border-radius:12px;text-decoration:none">${IC.phone}<span>Llamar al ${TEL_EMERG}</span></a>
+        </div>`
+      : `<div class="card" style="padding:1.1rem"><div style="font-weight:800;font-size:1.02rem;color:var(--g)">Recibimos tu reporte ✓</div>
+          <div style="font-size:.85rem;color:var(--ink2);margin-top:.35rem;line-height:1.5">Si necesitás atención inmediata, llamá al <b>${TEL_EMERG}</b>.</div>
+          <a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:.8rem;background:var(--r);color:#fff;font-weight:800;padding:.75rem;border-radius:12px;text-decoration:none">${IC.phone}<span>Llamar al ${TEL_EMERG}</span></a>
+        </div>`;
+    return `<div class="home">
+      <div class="topbar"><img src="${ICON}" alt=""><div class="tb-t">Reporte enviado</div><div class="tb-sp"></div><button class="mini" onclick="cerrarReporte()">Volver</button></div>
+      ${box}
+      <div class="footer"><div class="foot-note">Tu reporte quedó registrado. Podés cerrar la app.</div></div>
+    </div>`;
+  }
+  const sel=(S.rpt&&S.rpt.sel)||{};
+  const cat=(c.sintomas||[]);
+  const sintHtml = cat.length
+    ? cat.map(s=>{ const on=!!sel[s.id]; return `<button type="button" onclick="rptToggle('${s.id}')" style="display:flex;align-items:center;gap:.6rem;width:100%;text-align:left;padding:.65rem .75rem;margin-bottom:.4rem;border-radius:10px;border:1.5px solid ${on?'var(--r)':'var(--line)'};background:${on?'#fff5f4':'#fff'};cursor:pointer">
+        <span style="width:20px;height:20px;flex:none;border-radius:5px;border:2px solid ${on?'var(--r)':'var(--ink3)'};background:${on?'var(--r)':'#fff'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900">${on?'✓':''}</span>
+        <span style="font-size:.9rem;font-weight:600;color:var(--ink)">${esc(s.nombre||'—')}</span></button>`; }).join('')
+    : `<div style="font-size:.8rem;color:var(--ink3)">No hay una lista de síntomas configurada. Contanos abajo qué te pasa.</div>`;
+  return `<div class="home">
+    <div class="topbar"><img src="${ICON}" alt=""><div class="tb-t">Reportar un síntoma</div><div class="tb-sp"></div><button class="mini" onclick="cerrarReporte()">Cerrar</button></div>
+    <div style="font-size:.85rem;color:var(--ink2);line-height:1.45">Marcá lo que sentís y contanos con tus palabras. Un médico de MEDICAR lo revisa.</div>
+    <div class="sec" style="margin-top:1rem"><div class="sec-h">¿Qué sentís?</div>${sintHtml}</div>
+    <div class="sec" style="margin-top:1rem"><div class="sec-h">Contanos qué te pasa</div>
+      <textarea id="rpt-texto" maxlength="300" rows="3" placeholder="Escribí acá (opcional, máx. 300)" style="width:100%;padding:.7rem .8rem;border:1.5px solid var(--line);border-radius:12px;font-size:.95rem;font-family:inherit;resize:vertical">${esc((S.rpt&&S.rpt.texto)||'')}</textarea></div>
+    <div class="err ${S.rpt&&S.rpt.err?'on':''}" style="margin-top:1rem">${esc(S.rpt&&S.rpt.err||'')}</div>
+    <button class="btn-r" style="margin-top:.8rem" onclick="enviarReporte()">${S.rpt&&S.rpt.busy?'Enviando…':'Enviar reporte'}</button>
+    <button class="btn-o" style="margin-top:.6rem" onclick="cerrarReporte()">Cancelar</button>
+    <div class="footer"><div class="foot-note">Ante una emergencia, llamá directo al ${TEL_EMERG}.</div></div>
+  </div>`;
+}
+async function enviarReporte(){
+  const c=S.cred||{}; if(!S.rpt||S.rpt.busy||!c.personaId) return;
+  rptSyncTexto();
+  const seleccionados=(c.sintomas||[]).filter(s=>S.rpt.sel[s.id]);
+  const texto=(S.rpt.texto||'').trim().slice(0,300);
+  if(!seleccionados.length && !texto){ S.rpt.err='Marcá al menos un síntoma o contanos qué te pasa.'; render(); return; }
+  const sintomas=seleccionados.map(s=>({ id:s.id, nombre:s.nombre||'', banderaRoja:s.banderaRoja===true }));
+  const tieneBanderaRoja=sintomas.some(s=>s.banderaRoja);
+  S.rpt.busy=true; S.rpt.err=''; render();
+  try{
+    await db.collection('reportes_sintomas').add({
+      personaId:c.personaId, personaNombre:nombreDe(c.per,c.u),
+      sintomas, texto, tieneBanderaRoja,
+      creadoEn: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    S.rpt.busy=false; S.rpt.done={ tieneBanderaRoja }; render();
+  }catch(e){
+    console.warn('[reporte] no se pudo enviar:', e);
+    S.rpt.busy=false; S.rpt.err='No pudimos enviar tu reporte. Probá de nuevo en un momento.'; render();
+  }
+}
+
 function render(){
   const root=el('app'); if(!root) return;
   let html='';
@@ -603,6 +692,7 @@ function render(){
     case 'error-carga': html=errorCargaView(); break;
     case 'home': html=homeView(); break;
     case 'chequeo': html=chequeoFormView(); break;
+    case 'reporte': html=reporteFormView(); break;
     default: html=bootView();
   }
   root.innerHTML=html;
