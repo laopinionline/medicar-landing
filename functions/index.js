@@ -1,55 +1,68 @@
 'use strict';
 /*
- * MEDICAR — Cloud Functions (1ra gen) para gestión de personal del SUPERADMIN.
+ * MEDICAR — Cloud Functions (2da gen) para gestión de personal del SUPERADMIN.
  * Estas operaciones tocan Firebase Auth (crear/borrar usuarios, setear contraseña
  * de otros), que NO se puede hacer desde el cliente -> Admin SDK en backend.
  * Región southamerica-east1 (igual que Firestore). El cliente debe llamar con esa región.
  *
- * ROBUSTEZ OBLIGATORIA: cada función valida el ID token del llamante (context.auth)
+ * ROBUSTEZ OBLIGATORIA: cada función valida el ID token del llamante (request.auth)
  * y exige rol 'superadmin' (leído de usuarios/{uid}). Sin eso, cualquiera con la URL
  * podría crear admins.
+ *
+ * Migración 1ra -> 2da gen (Etapa 28): Node 20 muere 2026-10-30 y Node 22 no existe en
+ * 1ra gen. CERO cambios de lógica de negocio: mismas validaciones, mismos permisos, mismos
+ * mensajes y códigos de error, mismos efectos. Solo cambia el chasis (v1 -> v2):
+ *   - (data, context)  -> (request): request.data / request.auth
+ *   - change.before/after.data() -> event.data.before/after.data(); context.params -> event.params
+ *   - functions.region(REGION) -> setGlobalOptions({ region: REGION })
  */
-const functions = require('firebase-functions/v1');
+const { setGlobalOptions } = require('firebase-functions/v2');
+const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
+const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const admin = require('firebase-admin');
 admin.initializeApp();
 const db = admin.firestore();
 
 const REGION = 'southamerica-east1';
+// CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
+// functions('southamerica-east1').httpsCallable — si cambia, se rompe el alta de usuarios.
+setGlobalOptions({ region: REGION });
+
 // 'chofer': rol NO-operativo (sin acceso a clínica). Se versiona aquí para habilitar el alta;
 // el DEPLOY de esta Function lo hace Lucas aparte (este commit no la deploya).
 const ROLES = ['superadmin', 'admin', 'despachante', 'medico', 'chofer', 'afiliado'];
-const fn = functions.region(REGION).https;
 
 // Exige llamante autenticado y con rol superadmin. Devuelve su uid.
-async function assertSuperadmin(context) {
-  if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
+async function assertSuperadmin(request) {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Login requerido.');
   }
-  const snap = await db.collection('usuarios').doc(context.auth.uid).get();
+  const snap = await db.collection('usuarios').doc(request.auth.uid).get();
   if (!snap.exists || snap.data().rol !== 'superadmin') {
-    throw new functions.https.HttpsError('permission-denied', 'Solo el superadmin puede gestionar personal.');
+    throw new HttpsError('permission-denied', 'Solo el superadmin puede gestionar personal.');
   }
-  return context.auth.uid;
+  return request.auth.uid;
 }
 
 // createUser: crea Auth + doc usuarios + staff_medico (si rol=medico).
-exports.createUser = fn.onCall(async (data, context) => {
-  await assertSuperadmin(context);
+exports.createUser = onCall(async (request) => {
+  await assertSuperadmin(request);
+  const data = request.data || {};
   const email = ((data && data.email) || '').trim();
   const nombre = ((data && data.nombre) || '').trim();
   const rol = ((data && data.rol) || '').trim();
   const password = (data && data.passwordInicial) || '';
-  if (!email || !nombre) throw new functions.https.HttpsError('invalid-argument', 'Email y nombre son requeridos.');
-  if (!ROLES.includes(rol)) throw new functions.https.HttpsError('invalid-argument', 'Rol inválido.');
-  if (('' + password).length < 6) throw new functions.https.HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
+  if (!email || !nombre) throw new HttpsError('invalid-argument', 'Email y nombre son requeridos.');
+  if (!ROLES.includes(rol)) throw new HttpsError('invalid-argument', 'Rol inválido.');
+  if (('' + password).length < 6) throw new HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
 
   let userRec;
   try {
     userRec = await admin.auth().createUser({ email, password, displayName: nombre, emailVerified: true });
   } catch (e) {
-    if (e.code === 'auth/email-already-exists') throw new functions.https.HttpsError('already-exists', 'Ya existe una cuenta con ese email.');
-    if (e.code === 'auth/invalid-email') throw new functions.https.HttpsError('invalid-argument', 'Email inválido.');
-    throw new functions.https.HttpsError('internal', e.message || 'No se pudo crear la cuenta.');
+    if (e.code === 'auth/email-already-exists') throw new HttpsError('already-exists', 'Ya existe una cuenta con ese email.');
+    if (e.code === 'auth/invalid-email') throw new HttpsError('invalid-argument', 'Email inválido.');
+    throw new HttpsError('internal', e.message || 'No se pudo crear la cuenta.');
   }
   const uid = userRec.uid;
   await db.collection('usuarios').doc(uid).set({
@@ -63,28 +76,30 @@ exports.createUser = fn.onCall(async (data, context) => {
 });
 
 // setPassword: resetea/asigna la contraseña de cualquier usuario.
-exports.setPassword = fn.onCall(async (data, context) => {
-  await assertSuperadmin(context);
+exports.setPassword = onCall(async (request) => {
+  await assertSuperadmin(request);
+  const data = request.data || {};
   const uid = ((data && data.uid) || '').trim();
   const nuevaPassword = (data && data.nuevaPassword) || '';
-  if (!uid) throw new functions.https.HttpsError('invalid-argument', 'uid requerido.');
-  if (('' + nuevaPassword).length < 6) throw new functions.https.HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
+  if (!uid) throw new HttpsError('invalid-argument', 'uid requerido.');
+  if (('' + nuevaPassword).length < 6) throw new HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
   try {
     await admin.auth().updateUser(uid, { password: nuevaPassword });
   } catch (e) {
-    if (e.code === 'auth/user-not-found') throw new functions.https.HttpsError('not-found', 'Usuario no encontrado.');
-    throw new functions.https.HttpsError('internal', e.message || 'No se pudo cambiar la contraseña.');
+    if (e.code === 'auth/user-not-found') throw new HttpsError('not-found', 'Usuario no encontrado.');
+    throw new HttpsError('internal', e.message || 'No se pudo cambiar la contraseña.');
   }
   return { ok: true };
 });
 
 // deleteUser: borra si NO tiene episodios; si TIENE -> baja lógica (preserva trazabilidad).
-exports.deleteUser = fn.onCall(async (data, context) => {
-  const callerUid = await assertSuperadmin(context);
+exports.deleteUser = onCall(async (request) => {
+  const callerUid = await assertSuperadmin(request);
+  const data = request.data || {};
   const uid = ((data && data.uid) || '').trim();
-  if (!uid) throw new functions.https.HttpsError('invalid-argument', 'uid requerido.');
+  if (!uid) throw new HttpsError('invalid-argument', 'uid requerido.');
   // Anti-lockout: el superadmin no puede borrarse a sí mismo.
-  if (uid === callerUid) throw new functions.https.HttpsError('failed-precondition', 'No podés borrarte a vos mismo.');
+  if (uid === callerUid) throw new HttpsError('failed-precondition', 'No podés borrarte a vos mismo.');
 
   // ¿Tiene episodios asociados? (como médico asignado o como despachador que lo creó)
   const [comoMedico, comoDespachador] = await Promise.all([
@@ -109,7 +124,7 @@ exports.deleteUser = fn.onCall(async (data, context) => {
   try {
     await admin.auth().deleteUser(uid);
   } catch (e) {
-    if (e.code !== 'auth/user-not-found') throw new functions.https.HttpsError('internal', e.message || 'No se pudo borrar la cuenta.');
+    if (e.code !== 'auth/user-not-found') throw new HttpsError('internal', e.message || 'No se pudo borrar la cuenta.');
   }
   await db.collection('usuarios').doc(uid).delete();
   const st = await db.collection('staff_medico').doc(uid).get();
@@ -122,37 +137,35 @@ exports.deleteUser = fn.onCall(async (data, context) => {
 // móvil (estado:'disponible', episodioActivoId:null). Idempotente: si el móvil ya no está ligado a
 // ESTE episodio (libre o reasignado a otro) o no existe -> no-op. NO toca el episodio. Corre con
 // privilegios de admin (no depende de las reglas de cliente).
-exports.liberarMovilAlCerrar = functions
-  .region(REGION)
-  .firestore.document('episodios/{id}')
-  .onUpdate(async (change, context) => {
-    const before = change.before.data() || {};
-    const after = change.after.data() || {};
-    const TERMINALES = ['cerrado', 'cancelado'];
-    const pasoATerminal = !TERMINALES.includes(before.estado) && TERMINALES.includes(after.estado);
-    if (!pasoATerminal) return null;
+exports.liberarMovilAlCerrar = onDocumentUpdated('episodios/{id}', async (event) => {
+  if (!event.data) return null; // guarda v2 (un onUpdate siempre trae before/after; defensivo)
+  const before = event.data.before.data() || {};
+  const after = event.data.after.data() || {};
+  const TERMINALES = ['cerrado', 'cancelado'];
+  const pasoATerminal = !TERMINALES.includes(before.estado) && TERMINALES.includes(after.estado);
+  if (!pasoATerminal) return null;
 
-    const movilId = after.movilId;
-    if (!movilId) return null; // sin móvil (o legacy null)
+  const movilId = after.movilId;
+  if (!movilId) return null; // sin móvil (o legacy null)
 
-    const ref = db.collection('moviles').doc(movilId);
-    const snap = await ref.get();
-    if (!snap.exists) return null; // móvil legacy/inexistente -> no-op
+  const ref = db.collection('moviles').doc(movilId);
+  const snap = await ref.get();
+  if (!snap.exists) return null; // móvil legacy/inexistente -> no-op
 
-    // Solo libero si el móvil SIGUE ligado a este episodio. Si ya está libre o lo tomó otro, no-op.
-    if (snap.data().episodioActivoId !== context.params.id) return null;
+  // Solo libero si el móvil SIGUE ligado a este episodio. Si ya está libre o lo tomó otro, no-op.
+  if (snap.data().episodioActivoId !== event.params.id) return null;
 
-    await ref.set({
-      estado: 'disponible',
-      episodioActivoId: null,
-      actualizadoEn: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
-    return null;
-  });
+  await ref.set({
+    estado: 'disponible',
+    episodioActivoId: null,
+    actualizadoEn: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+  return null;
+});
 
 /* ─────────────────────────────────────────────────────────────────────────
  * crearLeadWeb — PUERTA PÚBLICA (Estructura 2 Marketing, Bloque 2).
- * HTTP (onRequest, 1ra gen, southamerica-east1). El form público de la landing
+ * HTTP (onRequest, 2da gen, southamerica-east1). El form público de la landing
  * medicaronline.ar hace POST acá; escribimos leads/{auto} con Admin SDK, así las
  * REGLAS de Firestore quedan CERRADAS al público (nadie escribe leads directo).
  * Defensa v1: CORS lista blanca + honeypot + validación dura fail-closed.
@@ -170,7 +183,7 @@ function emailValido(e) {
   return e.length <= 100 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 }
 
-exports.crearLeadWeb = fn.onRequest(async (req, res) => {
+exports.crearLeadWeb = onRequest(async (req, res) => {
   const origin = req.get('origin') || '';
   // CORS: solo orígenes de la lista blanca. Fuera de lista -> 403 (también para preflight).
   if (CORS_WHITELIST.indexOf(origin) === -1) {
