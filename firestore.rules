@@ -84,21 +84,26 @@ service cloud.firestore {
     // Mi perfil: cada usuario puede actualizar SOLO su propio nombre/fotoURL (nada mas).
     // Preferencia de recordatorio (app del socio, Etapa 24): el afiliado (cualquier dueno del doc)
     // actualiza SOLO su prefRecordatorio (dia de aviso del chequeo semanal) — rama aparte, hasOnly cerrado.
+    // ANTI AUTO-EDICION (Etapa 29): NADIE (incluido superadmin) cambia 'rol' ni 'activo' de SU PROPIO doc
+    // (guarda final). Un segundo superadmin administrando a OTRO queda intacto (uid != su uid).
     match /usuarios/{uid} {
       allow read:           if esSuperadmin() || (isSignedIn() && (request.auth.uid == uid || isAdmin()));
       allow create, delete: if esSuperadmin();
-      allow update: if esSuperadmin()
-                       || ( isSignedIn()
-                            && request.auth.uid == uid
-                            && tocadas().hasOnly(['nombre','fotoURL']) )
-                       || ( isSignedIn()
-                            && request.auth.uid == uid
-                            && tocadas().hasOnly(['prefRecordatorio']) );
+      allow update: if ( esSuperadmin()
+                         || ( isSignedIn()
+                              && request.auth.uid == uid
+                              && tocadas().hasOnly(['nombre','fotoURL']) )
+                         || ( isSignedIn()
+                              && request.auth.uid == uid
+                              && tocadas().hasOnly(['prefRecordatorio']) ) )
+                       && !( request.auth.uid == uid && tocadas().hasAny(['rol','activo']) );
     }
 
     // pacientes/{id}: identidad + antecedentes (nucleo de la historia).
     // Alta y edicion: despachante o medico (ambos), o admin. Sin borrado desde cliente,
     // SALVO superadmin: lee, edita y borra sin restriccion.
+    // NOTA (Etapa 29): create/update SIN validacion de shape es INTENCIONAL — simplicidad de carga en el
+    // acto (el despacho no puede trabarse por forma). Revisar ante lanzamiento publico masivo (2026-07-07).
     match /pacientes/{id} {
       allow read:           if esOperativo();
       allow create, update: if esOperativo();
@@ -124,6 +129,9 @@ service cloud.firestore {
       allow delete: if esSuperadmin();
 
       // Update: superadmin y admin sin restriccion; el resto, segun la accion.
+      // NOTA (Etapa 29): el update de ADMIN SIN whitelist (isAdmin() a secas) es INTENCIONAL — la operacion
+      // necesita mano libre sobre el episodio (correcciones, reasignaciones). Revisar ante lanzamiento
+      // publico masivo (2026-07-07). Los roles operativos NO-admin siguen con whitelists cerradas abajo.
       allow update: if esSuperadmin() || isAdmin() || (
         isSignedIn() && (
           // Asignar / reasignar recursos: solo despachante. Toca movil/medico/chofer.
@@ -458,9 +466,17 @@ service cloud.firestore {
       allow read:   if esInterno();
     }
 
-    // Resto del datastore: cerrado para todos, salvo superadmin (poder total).
-    match /{document=**} {
-      allow read, write: if esSuperadmin();
+    // Resto del datastore: cerrado para todos, salvo superadmin. (Etapa 29 — INMUTABILIDAD REAL.)
+    // Las reglas de Firestore son PERMISIVAS-ONLY: un 'allow: if false' NO bloquea lo que otro match
+    // permite. El write total del catch-all contradecía la inmutabilidad de auditoria/respuestas/gestiones,
+    // así que se CONDICIONA (no se agregan denies decorativos). Path con variable de colección + resto=**
+    // = misma cobertura que /{document=**} sobre documentos (coleccion = colección TOP-level; las 3
+    // inmutables son top-level). El write del superadmin sobre esas 3 queda vedado PARA TODOS por esta vía;
+    // sus create/read legítimos ya viven en sus matches propios (create if esInterno, etc.).
+    match /{coleccion}/{resto=**} {
+      allow read:  if esSuperadmin();
+      allow write: if esSuperadmin()
+                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto']);
     }
   }
 }
