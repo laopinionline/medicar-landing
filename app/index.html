@@ -2532,13 +2532,16 @@ function dashAttach(){
     db.collection('episodios').onSnapshot(s=>{ if(!S.dash) return; S.dash.eps=s.docs.map(d=>d.data()); if(dashIdle()) render(); }, e=>{ if(S.dash){ S.dash.err=(e.message||String(e)); if(dashIdle()) render(); } }),
     db.collection('staff_medico').where('activo','==',true).onSnapshot(s=>{ if(!S.dash) return; S.dash.staffN=s.size; if(dashIdle()) render(); }, ()=>{}),
     db.collection('usuarios').where('rol','==','afiliado').onSnapshot(s=>{ if(!S.dash) return; S.dash.afilN=s.size; if(dashIdle()) render(); }, ()=>{}),
-    db.collection('moviles').where('activo','==',true).onSnapshot(s=>{ if(!S.dash) return; S.dash.flota=s.docs.map(d=>d.data()); if(dashIdle()) render(); }, ()=>{ if(S.dash){ S.dash.flota=[]; if(dashIdle()) render(); } })
+    db.collection('moviles').where('activo','==',true).onSnapshot(s=>{ if(!S.dash) return; S.dash.flota=s.docs.map(d=>d.data()); if(dashIdle()) render(); }, ()=>{ if(S.dash){ S.dash.flota=[]; if(dashIdle()) render(); } }),
+    // Alertas clínicas (Etapa 27): respuestas + gestiones para computarAlertas al vuelo (read-only).
+    db.collection('respuestas_cuestionario').orderBy('creadoEn','desc').limit(300).onSnapshot(s=>{ if(!S.dash) return; S.dash.resp=s.docs.map(d=>({id:d.id,...d.data()})); if(dashIdle()) render(); }, ()=>{ if(S.dash){ S.dash.resp=[]; if(dashIdle()) render(); } }),
+    db.collection('gestiones_contacto').onSnapshot(s=>{ if(!S.dash) return; const o={}; s.docs.forEach(d=>{ o[d.id]=d.data(); }); S.dash.gest=o; if(dashIdle()) render(); }, ()=>{ if(S.dash){ S.dash.gest={}; if(dashIdle()) render(); } })
   ];
 }
 function dashDetach(){ if(S.dashUnsub){ S.dashUnsub.forEach(u=>{ try{u();}catch(_){} }); S.dashUnsub=null; } }
 
 function dashSuper(){
-  if(!S.dash){ S.dash={eps:null,staffN:null,afilN:null,flota:null}; dashAttach(); }
+  if(!S.dash){ S.dash={eps:null,staffN:null,afilN:null,flota:null,resp:null,gest:null}; dashAttach(); }
   const d=S.dash;
   const card=(n,l)=>`<div class="stat"><div class="sn">${n}</div><div class="sl">${l}</div></div>`;
   let hoy='…', activos='…', cDesp=0,cEnC=0,cArr=0,cAt=0, tResp='…', tAt='…';
@@ -2571,6 +2574,7 @@ function dashSuper(){
   const fTot =fLoad?'…':fl.length;
   return `
   <div style="font-weight:700;margin:.1rem 0 .6rem">Dashboard <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
+  ${alertasBloqueDash(d.resp, d.gest)}
   ${mapaVivoBloque(d.eps||[])}
   <div class="srow">${card(hoy,'Atenciones del día')}${card(activos,'Episodios activos')}</div>
   <div class="card"><div class="ch">Activos por estado</div>
@@ -4265,9 +4269,9 @@ function monPanel(){
   const head=`
   <div style="font-weight:700;margin:.1rem 0 .2rem">Monitoreo <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● Nivel 1 · cuestionario semanal</span></div>
   <div style="font-size:.66rem;color:var(--ink3);margin-bottom:.6rem">Casa de la escalera de monitoreo. Nivel 2 (auto-chequeo + alertas) y Nivel 3 (wearables) vienen después.</div>
-  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('cuestionarios','Cuestionarios')}${tab('respuestas','Respuestas')}</div>
+  <div style="display:flex;gap:.5rem;margin-bottom:.8rem">${tab('cuestionarios','Cuestionarios')}${tab('respuestas','Respuestas')}${tab('alertas','Alertas')}</div>
   <div id="mon-head-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
-  return head + (sub==='respuestas' ? monRespView() : monCuestView());
+  return head + (sub==='respuestas' ? monRespView() : sub==='alertas' ? monAlertasView() : monCuestView());
 }
 function monSub(id){ if(!S.mon) return; S.mon.sub=id; S.mon.cedit=null; S.mon.draft=null; render(); }
 function monShowInact(on){ if(S.mon){ S.mon.showInact=!!on; render(); } }
@@ -4412,7 +4416,7 @@ async function monMarcarAtendido(respuestaId){
   if(!puedeConfig()) return; // la regla (esInterno) es la defensa real
   try{
     await db.collection('gestiones_contacto').doc(respuestaId).set({ atendidoPor:S.user.uid, atendidoPorNombre:S.user.nombre||'', atendidoEn:FV(), nota:'' });
-    audit('contacto_atendido','gestion_contacto',respuestaId,'');
+    audit('contacto_atendido','gestion',respuestaId,'');
   }catch(e){ monErr('No se pudo marcar atendido: '+(e.message||e)); }
 }
 function monRespView(){
@@ -4427,20 +4431,10 @@ function monRespView(){
   const rows=list.length? list.map(r=>{
     const exp=!!(S.mon.rExp&&S.mon.rExp[r.id]);
     const pedido=!!r.pedidoContacto, g=gest[r.id], alerta=pedido && !g;
-    // detalle expandible
+    // detalle expandible (reusa monOrigenHtml, compartido con Alertas)
     let det='';
     if(exp){
-      const respHtml=(r.respuestas||[]).length? (r.respuestas||[]).map(a=>`<div style="display:flex;justify-content:space-between;gap:1rem;padding:.26rem 0"><span style="font-size:.78rem;color:var(--ink2)">${esc(a.texto||a.preguntaId||'—')}</span><span style="font-size:.82rem;font-weight:700;text-align:right;white-space:nowrap">${esc(monValorLbl(a))}</span></div>`).join('') : `<div style="font-size:.76rem;color:var(--ink3)">Sin preguntas del armador.</div>`;
-      const who5D = (r.who5 && typeof r.who5.score==='number')
-        ? `<div style="margin-top:.4rem;font-size:.76rem"><b>WHO-5 (OMS):</b> score <b>${r.who5.score}</b>/100 · raw ${r.who5.raw}/25 · valores [${(r.who5.valores||[]).join(', ')}]${r.who5.score<WHO5_UMBRAL?' · <span style="color:var(--r);font-weight:700">bienestar bajo (OMS)</span>':''}</div>` : '';
-      let contD='';
-      if(pedido){
-        const motivo=r.motivoContacto?`<div style="font-size:.76rem;color:var(--ink2);margin-top:.25rem">Motivo: “${esc(r.motivoContacto)}”</div>`:'';
-        contD = g
-          ? `<div style="margin-top:.5rem;background:#eef7f1;border:1px solid #cfe8db;border-radius:8px;padding:.5rem .6rem"><div style="font-size:.78rem;font-weight:700;color:var(--g,#1D9E75)">✓ Contacto atendido</div><div style="font-size:.72rem;color:var(--ink2)">por ${esc(g.atendidoPorNombre||g.atendidoPor||'—')} · ${monRespFmt(g.atendidoEn)}</div>${motivo}</div>`
-          : `<div style="margin-top:.5rem;background:#fff0ee;border:1px solid #f3c9c4;border-radius:8px;padding:.5rem .6rem"><div style="font-size:.78rem;font-weight:700;color:var(--r)">📞 Pidió que lo contacten</div>${motivo}<button class="btn-r" style="width:auto;padding:.35rem .75rem;margin-top:.5rem" onclick="event.stopPropagation();monMarcarAtendido('${r.id}')">Marcar atendido</button></div>`;
-      }
-      det=`<div style="width:100%;margin-top:.5rem;border-top:1px solid var(--border);padding-top:.4rem">${respHtml}${who5D}${contD}</div>`;
+      det=`<div style="width:100%;margin-top:.5rem;border-top:1px solid var(--border);padding-top:.4rem">${monOrigenHtml(r,gest)}</div>`;
     }
     const nP=(r.respuestas||[]).length;
     const icoPedido = pedido ? (g?' · 📞 atendido':' · 📞 pide contacto') : '';
@@ -4458,6 +4452,123 @@ function monRespView(){
     ${contador}${filtro}
     <div style="font-size:.66rem;color:var(--ink3);margin:.4rem 0 .5rem">Respuestas inmutables · últimas 200 · tocá una fila para el detalle. WHO-5 &lt;52 = bienestar bajo (OMS); pedidos sin atender = alerta.</div>
     <div class="card">${rows}</div>`;
+}
+
+/* ===================== MOTOR DE ALERTAS CLÍNICAS v1 (Etapa 27) =====================
+   Read-only: computa al vuelo de respuestas_cuestionario + gestiones_contacto (últimos 30 días). SIN
+   colecciones nuevas, SIN reglas nuevas, CERO escrituras (salvo la gestión ya existente al Marcar atendido).
+   Doctrina + fuentes: [[Doctrina-Alertas-Clinicas]]. */
+
+/* ===== UMBRALES CLÍNICOS — firma dirección médica =====
+   Cambiar acá (un solo lugar) tras la firma. Estado/fuentes en la doctrina. */
+const WHO5_AMARILLO = 52;       // OMS: score < 52 = bienestar bajo (fuente OMS, adoptado)
+const WHO5_ROJO     = 28;       // PROPUESTA (literatura clínica) — PENDIENTE firma dirección médica; ajustable
+const CAIDA_TENDENCIA = 10;     // caída ≥10 pts de WHO-5 vs. promedio propio (criterio operativo propio)
+const SEMANAS_REGULARIDAD = 4;  // "regularidad baja" = ≤2 respuestas en las últimas 4 semanas
+
+// fiebre: pregunta del ARMADOR cuyo texto matchee /fiebre/i respondida true. LÍMITE CONOCIDO: si renombran
+// la pregunta y deja de matchear /fiebre/i, se pierde la detección (documentado en la doctrina).
+function fiebreEn(r){ return (r.respuestas||[]).some(a=> /fiebre/i.test(a.texto||'') && (a.valor===true || a.valor==='si')); }
+function alertaNivel(n){ return n==='roja'?{ico:'🔴',c:'#E5484D',lbl:'ROJA'}:n==='amarilla'?{ico:'🟡',c:'#E0A23B',lbl:'AMARILLA'}:{ico:'⚪',c:'#888',lbl:'SEGUIMIENTO'}; }
+function alertaHace(t){ const ms=tms(t); if(ms==null) return '—'; const d=Math.floor((Date.now()-ms)/86400000); if(d<=0) return 'hoy'; if(d===1) return '1 día'; if(d<7) return d+' días'; const w=Math.floor(d/7); return w+(w===1?' semana':' semanas'); }
+
+/* FUNCIÓN PURA. respuestas: [{id,personaId,personaNombre,who5,pedidoContacto,motivoContacto,respuestas,creadoEn}];
+   gestiones: { respuestaId: {...} }. Devuelve [{nivel,personaId,personaNombre,motivo,motivos,respuestaId,fecha}].
+   Una persona = UNA tarjeta con su nivel MÁS ALTO (motivos acumulados). Persona cuya ÚLTIMA respuesta (30d)
+   tiene gestión = ATENDIDA → no dispara. */
+function computarAlertas(respuestas, gestiones){
+  const G = gestiones||{}, now = Date.now();
+  const recientes = (respuestas||[]).filter(r=>{ const ms=tms(r.creadoEn); return ms!=null && (now-ms) <= 30*86400000; });
+  const byPer = {};
+  recientes.forEach(r=>{ const pid=r.personaId||('resp:'+r.id); (byPer[pid]=byPer[pid]||[]).push(r); });
+  const RANK={ roja:3, amarilla:2, seguimiento:1 };
+  const out=[];
+  Object.keys(byPer).forEach(pid=>{
+    const arr = byPer[pid].slice().sort((a,b)=>(tms(b.creadoEn)||0)-(tms(a.creadoEn)||0));
+    const latest = arr[0];
+    if(G[latest.id]) return; // última respuesta atendida → no dispara
+    const nombre = latest.personaNombre || '—';
+    const score = (latest.who5 && typeof latest.who5.score==='number') ? latest.who5.score : null;
+    const fiebre = fiebreEn(latest);
+    const pedido = latest.pedidoContacto===true;
+    const motivos=[]; let nivel=null;
+    // --- ROJA / AMARILLA (agudo, sobre la última respuesta) ---
+    const rojo    = (score!=null && score<=WHO5_ROJO) || (pedido && ((score!=null && score<WHO5_ROJO) || fiebre));
+    const amarillo= (score!=null && score<WHO5_AMARILLO) || pedido || fiebre;
+    if(rojo) nivel='roja'; else if(amarillo) nivel='amarilla';
+    if(score!=null && score<=WHO5_ROJO) motivos.push('WHO-5 '+score+' — bienestar muy bajo');
+    else if(score!=null && score<WHO5_AMARILLO) motivos.push('WHO-5 '+score+' — bienestar bajo (OMS)');
+    if(pedido) motivos.push('Pidió que lo contacten');
+    if(fiebre) motivos.push('Reportó fiebre en el último chequeo');
+    // --- SEGUIMIENTO (patrón por persona; se acumula, no baja el nivel) ---
+    const scores = arr.map(r=>(r.who5 && typeof r.who5.score==='number')?r.who5.score:null).filter(v=>v!=null);
+    const enVentana = arr.filter(r=>{ const ms=tms(r.creadoEn); return ms!=null && (now-ms) <= SEMANAS_REGULARIDAD*7*86400000; }).length;
+    if(arr.length>=1 && enVentana<=2) motivos.push('Regularidad baja ('+enVentana+' en '+SEMANAS_REGULARIDAD+' semanas)') , (nivel=nivel||'seguimiento');
+    if(scores.length>=3){
+      const prom = scores.reduce((a,b)=>a+b,0)/scores.length;
+      const ult = (score!=null)?score:scores[0];
+      if((prom-ult) >= CAIDA_TENDENCIA){ motivos.push('Caída de bienestar (WHO-5 '+ult+' vs. promedio '+Math.round(prom)+')'); nivel=nivel||'seguimiento'; }
+    }
+    if(nivel) out.push({ nivel, personaId:pid, personaNombre:nombre, motivo:motivos.join(' · '), motivos, respuestaId:latest.id, fecha:latest.creadoEn });
+  });
+  out.sort((a,b)=> (RANK[b.nivel]-RANK[a.nivel]) || ((tms(b.fecha)||0)-(tms(a.fecha)||0)) );
+  return out;
+}
+
+// Detalle de la respuesta origen (reusado por Respuestas y por Alertas): respuestas + WHO-5 + contacto/gestión.
+function monOrigenHtml(r, gest){
+  const g=(gest||{})[r.id];
+  const respHtml=(r.respuestas||[]).length? (r.respuestas||[]).map(a=>`<div style="display:flex;justify-content:space-between;gap:1rem;padding:.26rem 0"><span style="font-size:.78rem;color:var(--ink2)">${esc(a.texto||a.preguntaId||'—')}</span><span style="font-size:.82rem;font-weight:700;text-align:right;white-space:nowrap">${esc(monValorLbl(a))}</span></div>`).join('') : `<div style="font-size:.76rem;color:var(--ink3)">Sin preguntas del armador.</div>`;
+  const who5D = (r.who5 && typeof r.who5.score==='number')
+    ? `<div style="margin-top:.4rem;font-size:.76rem"><b>WHO-5 (OMS):</b> score <b>${r.who5.score}</b>/100 · raw ${r.who5.raw}/25 · valores [${(r.who5.valores||[]).join(', ')}]${r.who5.score<WHO5_UMBRAL?' · <span style="color:var(--r);font-weight:700">bienestar bajo (OMS)</span>':''}</div>` : '';
+  let contD='';
+  if(r.pedidoContacto){
+    const motivo=r.motivoContacto?`<div style="font-size:.76rem;color:var(--ink2);margin-top:.25rem">Motivo: “${esc(r.motivoContacto)}”</div>`:'';
+    contD = g
+      ? `<div style="margin-top:.5rem;background:#eef7f1;border:1px solid #cfe8db;border-radius:8px;padding:.5rem .6rem"><div style="font-size:.78rem;font-weight:700;color:var(--g,#1D9E75)">✓ Contacto atendido</div><div style="font-size:.72rem;color:var(--ink2)">por ${esc(g.atendidoPorNombre||g.atendidoPor||'—')} · ${monRespFmt(g.atendidoEn)}</div>${motivo}</div>`
+      : `<div style="margin-top:.5rem;background:#fff0ee;border:1px solid #f3c9c4;border-radius:8px;padding:.5rem .6rem"><div style="font-size:.78rem;font-weight:700;color:var(--r)">📞 Pidió que lo contacten</div>${motivo}<button class="btn-r" style="width:auto;padding:.35rem .75rem;margin-top:.5rem" onclick="event.stopPropagation();monMarcarAtendido('${r.id}')">Marcar atendido</button></div>`;
+  }
+  return respHtml+who5D+contD;
+}
+
+/* ---- MONITOREO → Alertas (sub-sección) ---- */
+function monAlertaFiltro(n){ if(S.mon){ S.mon.aFiltro=n; } render(); }
+function monRespById(id){ return (S.mon.resp||[]).find(r=>r.id===id); }
+function monAlertasView(){
+  if(S.mon.respErr) return `<div class="card">No se pudieron cargar las respuestas: ${esc(S.mon.respErr)}</div>`;
+  if(S.mon.resp===null) return `<div class="card">Cargando alertas…</div>`;
+  const al=computarAlertas(S.mon.resp, S.mon.gest||{});
+  const nR=al.filter(a=>a.nivel==='roja').length, nA=al.filter(a=>a.nivel==='amarilla').length, nS=al.filter(a=>a.nivel==='seguimiento').length;
+  const filtro=S.mon.aFiltro||'todas';
+  const fb=(id,lbl)=>`<button class="btn-o" style="width:auto;padding:.3rem .6rem;${filtro===id?'border-color:var(--r);color:var(--r);font-weight:700':''}" onclick="monAlertaFiltro('${id}')">${lbl}</button>`;
+  const vis=al.filter(a=>filtro==='todas'||a.nivel===filtro);
+  const rows=vis.length? vis.map(a=>{
+    const m=alertaNivel(a.nivel);
+    const exp=!!(S.mon.aExp&&S.mon.aExp[a.respuestaId]);
+    const r=monRespById(a.respuestaId);
+    const det=exp&&r?`<div style="width:100%;margin-top:.5rem;border-top:1px solid var(--border);padding-top:.4rem">${monOrigenHtml(r,S.mon.gest||{})}</div>`:'';
+    return `<div class="lr" style="flex-wrap:wrap;cursor:pointer;border-left:4px solid ${m.c}" onclick="monAlertaToggle('${a.respuestaId}')"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${m.ico} ${esc(a.personaNombre)} <span style="font-size:.6rem;font-weight:800;color:${m.c}">${m.lbl}</span></div><div class="lrs">${esc(a.motivo)} · hace ${alertaHace(a.fecha)} · ${exp?'▲ ocultar':'▼ detalle'}</div></div>${det}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin alertas${filtro!=='todas'?' de ese nivel':''}.</div>`;
+  const cont=`<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem"><span style="font-weight:700">Alertas clínicas</span><span style="margin-left:auto;font-size:.85rem;font-weight:700">🔴 ${nR} · 🟡 ${nA} · ⚪ ${nS}</span></div>`;
+  const cero=!al.length?`<div style="font-size:.82rem;color:var(--g,#1D9E75);font-weight:700;margin-bottom:.5rem">Sin alertas clínicas ✓</div>`:'';
+  return `${cont}${cero}<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.6rem">${fb('todas','Todas')}${fb('roja','🔴 Rojas')}${fb('amarilla','🟡 Amarillas')}${fb('seguimiento','⚪ Seguimiento')}</div>
+    <div style="font-size:.66rem;color:var(--ink3);margin-bottom:.5rem">Computadas al vuelo (read-only) de los últimos 30 días. "Marcar atendido" crea la gestión y apaga la alerta. Umbrales: WHO-5 &lt;52 ámbar / ≤28 rojo (propuesta, pendiente firma médica).</div>
+    <div class="card">${rows}</div>`;
+}
+function monAlertaToggle(id){ if(!S.mon)return; if(!S.mon.aExp)S.mon.aExp={}; S.mon.aExp[id]=!S.mon.aExp[id]; render(); }
+
+// Bloque de alertas para el Dashboard del superadmin (compacto, arriba del mapa).
+function alertasBloqueDash(resp, gest){
+  if(resp==null || gest==null) return `<div class="card" style="margin-bottom:.7rem"><div style="font-weight:800;margin-bottom:.3rem">Alertas clínicas</div><div style="font-size:.78rem;color:var(--ink3)">Cargando…</div></div>`;
+  const al=computarAlertas(resp, gest);
+  const nR=al.filter(a=>a.nivel==='roja').length, nA=al.filter(a=>a.nivel==='amarilla').length, nS=al.filter(a=>a.nivel==='seguimiento').length;
+  const head=`<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem"><div style="font-weight:800">Alertas clínicas</div><span style="margin-left:auto;font-size:.82rem;font-weight:700">🔴 ${nR} · 🟡 ${nA} · ⚪ ${nS}</span></div>`;
+  if(!al.length) return `<div class="card" style="margin-bottom:.7rem;border-left:4px solid #1D9E75">${head}<div style="font-size:.82rem;color:#1D9E75;font-weight:700">Sin alertas clínicas ✓</div></div>`;
+  const rows=al.map(a=>{
+    const m=alertaNivel(a.nivel);
+    return `<div class="lr" style="flex-wrap:wrap;border-left:4px solid ${m.c}"><div class="lrb" style="flex:1 1 65%"><div class="lrn">${m.ico} ${esc(a.personaNombre)}</div><div class="lrs">${esc(a.motivo)} · hace ${alertaHace(a.fecha)}</div></div><button class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:.3rem" onclick="monMarcarAtendido('${a.respuestaId}')">Marcar atendido</button></div>`;
+  }).join('');
+  return `<div class="card" style="margin-bottom:.7rem">${head}${rows}</div>`;
 }
 
 /* ===================== GEO — demanda por barrio (v2 de Estadísticas) =====================
