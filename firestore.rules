@@ -471,12 +471,16 @@ service cloud.firestore {
     // permite. El write total del catch-all contradecía la inmutabilidad de auditoria/respuestas/gestiones,
     // así que se CONDICIONA (no se agregan denies decorativos). Path con variable de colección + resto=**
     // = misma cobertura que /{document=**} sobre documentos (coleccion = colección TOP-level; las 3
-    // inmutables son top-level). El write del superadmin sobre esas 3 queda vedado PARA TODOS por esta vía;
-    // sus create/read legítimos ya viven en sus matches propios (create if esInterno, etc.).
+    // inmutables son top-level). El write del superadmin sobre esas colecciones queda vedado PARA TODOS por
+    // esta vía; sus create/read legítimos ya viven en sus matches propios (create if esInterno, etc.).
+    // Etapa 29b — 'usuarios' también EXCLUIDA: si no, el catch-all PUENTEABA la guarda anti auto-edición del
+    // match /usuarios (permisivas-only: cualquier match que permite, permite). Toda la administración de
+    // usuarios del superadmin ya vive en /usuarios (read/create/delete/update completos, con la guarda
+    // self-rol/activo ahora EFECTIVA). El create/delete real lo hace la CF por Admin SDK (bypassa reglas).
     match /{coleccion}/{resto=**} {
       allow read:  if esSuperadmin();
       allow write: if esSuperadmin()
-                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto']);
+                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios']);
     }
   }
 }
