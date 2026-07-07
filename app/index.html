@@ -4250,7 +4250,8 @@ function monAttach(){
   const upd=()=>{ if(!monFormOpen()) render(); }; // no re-renderiza con el editor abierto (perdería lo tipeado)
   S.monUnsub=[
     db.collection('cuestionarios').onSnapshot(s=>{ if(!S.mon) return; S.mon.cuest=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.mon){ S.mon.err=(e.message||String(e)); render(); } }),
-    db.collection('respuestas_cuestionario').orderBy('creadoEn','desc').limit(200).onSnapshot(s=>{ if(!S.mon) return; S.mon.resp=s.docs.map(d=>({id:d.id,...d.data()})); if(!monFormOpen()) render(); }, e=>{ if(S.mon){ S.mon.respErr=(e.message||String(e)); render(); } })
+    db.collection('respuestas_cuestionario').orderBy('creadoEn','desc').limit(200).onSnapshot(s=>{ if(!S.mon) return; S.mon.resp=s.docs.map(d=>({id:d.id,...d.data()})); if(!monFormOpen()) render(); }, e=>{ if(S.mon){ S.mon.respErr=(e.message||String(e)); render(); } }),
+    db.collection('gestiones_contacto').onSnapshot(s=>{ if(!S.mon) return; const o={}; s.docs.forEach(d=>{ o[d.id]=d.data(); }); S.mon.gest=o; if(!monFormOpen()) render(); }, ()=>{ /* degrada limpio: sin gestiones cargadas */ })
   ];
 }
 function monDetach(){ if(S.monUnsub){ S.monUnsub.forEach(u=>{ try{u();}catch(_){} }); S.monUnsub=null; } }
@@ -4306,6 +4307,7 @@ function monDraftSync(){
   if(!S.mon||!S.mon.draft) return;
   const d=S.mon.draft;
   const nm=document.getElementById('mon-c-nombre'); if(nm) d.nombre=nm.value;
+  const w=document.getElementById('mon-c-who5'); if(w) d.incluirWHO5=w.checked;
   (d.preguntas||[]).forEach((q,i)=>{
     const t=document.getElementById('mon-q-texto-'+i); if(t) q.texto=t.value.slice(0,200);
     const tp=document.getElementById('mon-q-tipo-'+i); if(tp) q.tipo=tp.value;
@@ -4332,8 +4334,10 @@ function monCuestForm(){
   return `<div class="card"><div class="ch">${isNew?'Nuevo cuestionario':'Editar cuestionario'}</div>
     <div class="field"><label>Nombre</label><input id="mon-c-nombre" value="${esc(d.nombre||'')}" placeholder="Ej. Chequeo semanal"></div>
     <div class="field"><label>Frecuencia</label><div style="font-size:.78rem;color:var(--ink3)">Semanal — única opción en Nivel 1.</div></div>
+    <div class="field"><label style="display:flex;align-items:center;gap:.5rem;cursor:pointer"><input type="checkbox" id="mon-c-who5" ${d.incluirWHO5?'checked':''}> Incluir Índice de Bienestar OMS (WHO-5)</label>
+      <div style="font-size:.66rem;color:var(--ink3);margin-top:.25rem;line-height:1.4">Módulo <b>sellado</b> de 5 afirmaciones (redacción oficial OMS, <b>no editable</b>). Va <b>primero</b> en el cuestionario del socio; calcula puntaje 0–100 (umbral OMS &lt;52 = bienestar bajo).</div></div>
     ${isNew?'':`<div class="field"><label>Estado de alta</label><select id="mon-c-activo"><option value="si" ${d.activo!==false?'selected':''}>Activo</option><option value="no" ${d.activo===false?'selected':''}>Baja lógica</option></select></div>`}
-    <div class="field"><label>Preguntas</label>${qrows}</div>
+    <div class="field"><label>Preguntas del armador</label>${qrows}</div>
     <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.7rem">
       <button class="btn-o" style="width:auto;padding:.35rem .65rem;margin:0" onclick="monPregAdd('si_no')">+ Sí/No</button>
       <button class="btn-o" style="width:auto;padding:.35rem .65rem;margin:0" onclick="monPregAdd('escala')">+ Escala 1–5</button>
@@ -4347,8 +4351,8 @@ function monCuestForm(){
 function monPregAdd(tipo){ if(!S.mon||!S.mon.draft)return; monDraftSync(); S.mon.draft.preguntas.push({id:monPregNewId(),texto:'',tipo:(['si_no','escala','texto'].includes(tipo)?tipo:'si_no')}); render(); }
 function monPregDel(i){ if(!S.mon||!S.mon.draft)return; monDraftSync(); S.mon.draft.preguntas.splice(i,1); render(); }
 function monPregMove(i,dir){ if(!S.mon||!S.mon.draft)return; monDraftSync(); const a=S.mon.draft.preguntas,j=i+dir; if(j<0||j>=a.length)return; const t=a[i];a[i]=a[j];a[j]=t; render(); }
-function monCuestNuevo(){ if(!puedeConfig())return; S.mon.cedit='new'; S.mon.draft={nombre:'',activo:true,preguntas:[]}; render(); }
-function monCuestEditar(id){ if(!puedeConfig())return; const c=(S.mon.cuest||[]).find(x=>x.id===id); if(!c)return; S.mon.cedit=id; S.mon.draft={nombre:c.nombre||'',activo:c.activo!==false,preguntas:(c.preguntas||[]).map(q=>({id:q.id||monPregNewId(),texto:q.texto||'',tipo:(['si_no','escala','texto'].includes(q.tipo)?q.tipo:'si_no')}))}; render(); }
+function monCuestNuevo(){ if(!puedeConfig())return; S.mon.cedit='new'; S.mon.draft={nombre:'',activo:true,incluirWHO5:false,preguntas:[]}; render(); }
+function monCuestEditar(id){ if(!puedeConfig())return; const c=(S.mon.cuest||[]).find(x=>x.id===id); if(!c)return; S.mon.cedit=id; S.mon.draft={nombre:c.nombre||'',activo:c.activo!==false,incluirWHO5:c.incluirWHO5===true,preguntas:(c.preguntas||[]).map(q=>({id:q.id||monPregNewId(),texto:q.texto||'',tipo:(['si_no','escala','texto'].includes(q.tipo)?q.tipo:'si_no')}))}; render(); }
 function monCuestCancelar(){ if(S.mon){ S.mon.cedit=null; S.mon.draft=null; } render(); }
 async function monCuestGuardar(){
   if(!puedeConfig()) return; // la regla es la defensa real
@@ -4357,19 +4361,20 @@ async function monCuestGuardar(){
   const d=S.mon.draft; if(!d) return;
   const nombre=(d.nombre||'').trim();
   if(!nombre){ monCErr('El nombre es requerido.'); return; }
+  const incluirWHO5 = !!d.incluirWHO5;
   const preguntas=(d.preguntas||[])
     .map(q=>({ id:q.id||monPregNewId(), texto:(q.texto||'').trim().slice(0,200), tipo:(['si_no','escala','texto'].includes(q.tipo)?q.tipo:'si_no') }))
     .filter(q=>q.texto);
-  if(!preguntas.length){ monCErr('Agregá al menos una pregunta con texto.'); return; }
+  if(!preguntas.length && !incluirWHO5){ monCErr('Agregá al menos una pregunta, o incluí el módulo WHO-5.'); return; }
   const isNew=S.mon.cedit==='new';
   try{
     if(isNew){
-      const ref=await db.collection('cuestionarios').add({ nombre, activo:true, frecuencia:'semanal', preguntas, creadoEn:FV(), creadoPor:S.user.uid });
-      audit('cuestionario_creado','cuestionario',ref.id,nombre);
+      const ref=await db.collection('cuestionarios').add({ nombre, activo:true, frecuencia:'semanal', incluirWHO5, preguntas, creadoEn:FV(), creadoPor:S.user.uid });
+      audit('cuestionario_creado','cuestionario',ref.id,nombre+(incluirWHO5?' (WHO-5)':''));
     }else{
       const activo=(document.getElementById('mon-c-activo')?.value||'si')==='si';
-      await db.collection('cuestionarios').doc(S.mon.cedit).set({ nombre, activo, frecuencia:'semanal', preguntas, actualizadoEn:FV() },{merge:true});
-      audit('cuestionario_editado','cuestionario',S.mon.cedit,nombre);
+      await db.collection('cuestionarios').doc(S.mon.cedit).set({ nombre, activo, frecuencia:'semanal', incluirWHO5, preguntas, actualizadoEn:FV() },{merge:true});
+      audit('cuestionario_editado','cuestionario',S.mon.cedit,nombre+(incluirWHO5?' (WHO-5)':''));
     }
     S.mon.cedit=null; S.mon.draft=null; render();
   }catch(e){ monCErr('No se pudo guardar: '+(e.message||e)); }
@@ -4393,24 +4398,65 @@ function monValorLbl(a){
   if(a.tipo==='escala'||/^\d+$/.test(String(v))) return String(v)+(a.tipo==='escala'?' / 5':'');
   return String(v);
 }
+// Badge WHO-5: verde ≥52, ámbar 28–51, rojo <28. <52 = 'bienestar bajo (OMS)'.
+function monWho5Badge(r){
+  if(!r.who5 || typeof r.who5.score!=='number') return '';
+  const sc=r.who5.score, bajo=sc<WHO5_UMBRAL;
+  const bg = bajo ? (sc<28?'#E5484D':'#E0A23B') : '#1D9E75';
+  const lbl = bajo ? `WHO-5 ${sc} · bienestar bajo (OMS)` : `WHO-5 ${sc}`;
+  return `<span style="display:inline-block;background:${bg};color:#fff;font-size:.6rem;font-weight:800;padding:.15rem .45rem;border-radius:6px;white-space:nowrap;margin-left:.35rem">${lbl}</span>`;
+}
+const WHO5_UMBRAL=52;
+function monRespFiltroContacto(on){ if(S.mon){ S.mon.soloContacto=!!on; } render(); }
+async function monMarcarAtendido(respuestaId){
+  if(!puedeConfig()) return; // la regla (esInterno) es la defensa real
+  try{
+    await db.collection('gestiones_contacto').doc(respuestaId).set({ atendidoPor:S.user.uid, atendidoPorNombre:S.user.nombre||'', atendidoEn:FV(), nota:'' });
+    audit('contacto_atendido','gestion_contacto',respuestaId,'');
+  }catch(e){ monErr('No se pudo marcar atendido: '+(e.message||e)); }
+}
 function monRespView(){
   if(S.mon.respErr) return `<div class="card">No se pudieron cargar las respuestas: ${esc(S.mon.respErr)}</div>`;
   if(S.mon.resp===null) return `<div class="card">Cargando respuestas…</div>`;
+  const gest=S.mon.gest||{};
   const desdeMs=estRangeMs(S.mon.rDesde,false), hastaMs=estRangeMs(S.mon.rHasta,true);
-  const list=(S.mon.resp||[]).filter(r=>{ const ms=tms(r.creadoEn); return ms!=null && ms>=desdeMs && ms<=hastaMs; });
+  let list=(S.mon.resp||[]).filter(r=>{ const ms=tms(r.creadoEn); return ms!=null && ms>=desdeMs && ms<=hastaMs; });
+  const nPedidos=list.filter(r=>r.pedidoContacto).length;
+  const nPendientes=list.filter(r=>r.pedidoContacto && !gest[r.id]).length;
+  if(S.mon.soloContacto) list=list.filter(r=>r.pedidoContacto);
   const rows=list.length? list.map(r=>{
     const exp=!!(S.mon.rExp&&S.mon.rExp[r.id]);
-    const det=exp? `<div style="width:100%;margin-top:.5rem;border-top:1px solid var(--border);padding-top:.4rem">`+
-      ((r.respuestas||[]).length? (r.respuestas||[]).map(a=>`<div style="display:flex;justify-content:space-between;gap:1rem;padding:.28rem 0"><span style="font-size:.78rem;color:var(--ink2)">${esc(a.texto||a.preguntaId||'—')}</span><span style="font-size:.82rem;font-weight:700;text-align:right;white-space:nowrap">${esc(monValorLbl(a))}</span></div>`).join('') : `<div style="font-size:.76rem;color:var(--ink3)">Sin respuestas cargadas.</div>`)
-      +`</div>` : '';
+    const pedido=!!r.pedidoContacto, g=gest[r.id], alerta=pedido && !g;
+    // detalle expandible
+    let det='';
+    if(exp){
+      const respHtml=(r.respuestas||[]).length? (r.respuestas||[]).map(a=>`<div style="display:flex;justify-content:space-between;gap:1rem;padding:.26rem 0"><span style="font-size:.78rem;color:var(--ink2)">${esc(a.texto||a.preguntaId||'—')}</span><span style="font-size:.82rem;font-weight:700;text-align:right;white-space:nowrap">${esc(monValorLbl(a))}</span></div>`).join('') : `<div style="font-size:.76rem;color:var(--ink3)">Sin preguntas del armador.</div>`;
+      const who5D = (r.who5 && typeof r.who5.score==='number')
+        ? `<div style="margin-top:.4rem;font-size:.76rem"><b>WHO-5 (OMS):</b> score <b>${r.who5.score}</b>/100 · raw ${r.who5.raw}/25 · valores [${(r.who5.valores||[]).join(', ')}]${r.who5.score<WHO5_UMBRAL?' · <span style="color:var(--r);font-weight:700">bienestar bajo (OMS)</span>':''}</div>` : '';
+      let contD='';
+      if(pedido){
+        const motivo=r.motivoContacto?`<div style="font-size:.76rem;color:var(--ink2);margin-top:.25rem">Motivo: “${esc(r.motivoContacto)}”</div>`:'';
+        contD = g
+          ? `<div style="margin-top:.5rem;background:#eef7f1;border:1px solid #cfe8db;border-radius:8px;padding:.5rem .6rem"><div style="font-size:.78rem;font-weight:700;color:var(--g,#1D9E75)">✓ Contacto atendido</div><div style="font-size:.72rem;color:var(--ink2)">por ${esc(g.atendidoPorNombre||g.atendidoPor||'—')} · ${monRespFmt(g.atendidoEn)}</div>${motivo}</div>`
+          : `<div style="margin-top:.5rem;background:#fff0ee;border:1px solid #f3c9c4;border-radius:8px;padding:.5rem .6rem"><div style="font-size:.78rem;font-weight:700;color:var(--r)">📞 Pidió que lo contacten</div>${motivo}<button class="btn-r" style="width:auto;padding:.35rem .75rem;margin-top:.5rem" onclick="event.stopPropagation();monMarcarAtendido('${r.id}')">Marcar atendido</button></div>`;
+      }
+      det=`<div style="width:100%;margin-top:.5rem;border-top:1px solid var(--border);padding-top:.4rem">${respHtml}${who5D}${contD}</div>`;
+    }
     const nP=(r.respuestas||[]).length;
-    return `<div class="lr" style="flex-wrap:wrap;cursor:pointer" onclick="monRespToggle('${r.id}')"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(r.personaNombre||'—')}</div><div class="lrs">${monRespFmt(r.creadoEn)} · ${esc(r.cuestionarioNombre||'—')} · ${nP} resp. · ${exp?'▲ ocultar':'▼ detalle'}</div></div>${det}</div>`;
-  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin respuestas en el rango.</div>`;
+    const icoPedido = pedido ? (g?' · 📞 atendido':' · 📞 pide contacto') : '';
+    const rowStyle = 'flex-wrap:wrap;cursor:pointer'+(alerta?';border-left:4px solid var(--r);background:#fff6f5':'');
+    return `<div class="lr" style="${rowStyle}" onclick="monRespToggle('${r.id}')"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${esc(r.personaNombre||'—')}${monWho5Badge(r)}</div><div class="lrs">${monRespFmt(r.creadoEn)} · ${esc(r.cuestionarioNombre||'—')} · ${nP} resp.${icoPedido} · ${exp?'▲ ocultar':'▼ detalle'}</div></div></div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin respuestas${S.mon.soloContacto?' con pedido de contacto':''} en el rango.</div>`;
+  const filtro=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink2);cursor:pointer"><input type="checkbox" onchange="monRespFiltroContacto(this.checked)" ${S.mon.soloContacto?'checked':''}>Solo pedidos de contacto</label>`;
+  const contador = nPendientes
+    ? `<div style="background:#fff0ee;border:1px solid #f3c9c4;border-radius:8px;padding:.45rem .6rem;margin-bottom:.5rem;font-size:.76rem;color:var(--r);font-weight:700">📞 ${nPendientes} pedido${nPendientes===1?'':'s'} de contacto sin atender${nPedidos>nPendientes?` (${nPedidos} en total)`:''} — ALERTA (revisar)</div>`
+    : (nPedidos?`<div style="font-size:.7rem;color:var(--g,#1D9E75);margin-bottom:.5rem">✓ ${nPedidos} pedido${nPedidos===1?'':'s'} de contacto, todos atendidos.</div>`:'');
   return `<div style="display:flex;gap:.5rem;margin-bottom:.6rem">
       <div class="field" style="flex:1;margin:0"><label>Desde</label><input type="date" value="${esc(S.mon.rDesde||'')}" onchange="monRespSetD('rDesde',this.value)"></div>
       <div class="field" style="flex:1;margin:0"><label>Hasta</label><input type="date" value="${esc(S.mon.rHasta||'')}" onchange="monRespSetD('rHasta',this.value)"></div>
     </div>
-    <div style="font-size:.66rem;color:var(--ink3);margin-bottom:.5rem">Respuestas inmutables · últimas 200 · tocá una fila para ver el detalle.</div>
+    ${contador}${filtro}
+    <div style="font-size:.66rem;color:var(--ink3);margin:.4rem 0 .5rem">Respuestas inmutables · últimas 200 · tocá una fila para el detalle. WHO-5 &lt;52 = bienestar bajo (OMS); pedidos sin atender = alerta.</div>
     <div class="card">${rows}</div>`;
 }
 

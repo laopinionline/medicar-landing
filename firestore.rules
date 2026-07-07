@@ -441,11 +441,21 @@ service cloud.firestore {
     //  - read: rol INTERNO (para el panel de Monitoreo) o el propio afiliado (sus respuestas).
     //  - SIN update, SIN delete: inmutables, como /auditoria.
     match /respuestas_cuestionario/{id} {
+      // hasOnly permite SUBCONJUNTOS: los cuestionarios sin WHO-5 / sin contacto validan igual (Etapa 26
+      // suma who5, pedidoContacto, motivoContacto a la whitelist).
       allow create: if esInterno()
                        || ( isSignedIn()
                             && request.resource.data.personaId == miPersonaId()
-                            && request.resource.data.keys().hasOnly(['cuestionarioId','cuestionarioNombre','personaId','personaNombre','respuestas','creadoEn']) );
+                            && request.resource.data.keys().hasOnly(['cuestionarioId','cuestionarioNombre','personaId','personaNombre','respuestas','who5','pedidoContacto','motivoContacto','creadoEn']) );
       allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId());
+    }
+
+    // gestiones_contacto/{respuestaId}: atención de un "quiero que me contacten" (Etapa 26). La respuesta es
+    // INMUTABLE; la gestión vive aparte. doc id = respuestaId (idempotente: una gestión por respuesta).
+    //  - create: rol INTERNO (médico/admin marcan atendido). read: rol INTERNO. SIN update, SIN delete.
+    match /gestiones_contacto/{respuestaId} {
+      allow create: if esInterno();
+      allow read:   if esInterno();
     }
 
     // Resto del datastore: cerrado para todos, salvo superadmin (poder total).

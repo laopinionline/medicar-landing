@@ -172,6 +172,37 @@ function chequeoEstado(c){
 }
 function fmtFecha(ms){ if(ms==null) return '—'; const d=new Date(ms); return DIAS[d.getDay()]+' '+('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2); }
 
+/* ---------- WHO-5 (Índice de Bienestar OMS) — MÓDULO SELLADO, redacción oficial ----------
+   Versión oficial en español (OMS · WHO-5, versión 1998), alojada por la OMS (cdn.who.int) —
+   © Psychiatric Research Unit, WHO Collaborating Center for Mental Health, Hillerød. Redacción VERBATIM.
+   NO editable desde el armador (el armador solo tiene un flag incluirWHO5). El encabezado temporal
+   "durante las últimas dos semanas" SE MANTIENE textual (parte de la validación), aunque el chequeo sea
+   semanal. Corregidos 2 typos evidentes del PDF oficial (flaggeados a la dirección médica): encabezado
+   "la últimas"→"las últimas", ítem 4 "descandado"→"descansado". */
+const WHO5 = {
+  intro: 'Por favor, indicá para cada una de las cinco afirmaciones cuál define mejor cómo te has sentido durante las últimas dos semanas. Cifras mayores significan mayor bienestar.',
+  encabezado: 'Durante las últimas dos semanas:',
+  items: [
+    'Me he sentido alegre y de buen humor',
+    'Me he sentido tranquilo y relajado',
+    'Me he sentido activo y enérgico',
+    'Me he despertado fresco y descansado',
+    'Mi vida cotidiana ha estado llena de cosas que me interesan'
+  ],
+  // Escala oficial de 6 opciones (valor 5..0, labels verbatim).
+  opciones: [ [5,'Todo el tiempo'], [4,'La mayor parte del tiempo'], [3,'Más de la mitad del tiempo'], [2,'Menos de la mitad del tiempo'], [1,'De vez en cuando'], [0,'Nunca'] ],
+  copyright: '© Psychiatric Research Unit, WHO Collaborating Center for Mental Health, Frederiksborg General Hospital, DK-3400 Hillerød',
+  UMBRAL: 52 // score < 52 = bienestar bajo (raw < 13 ×4); indicación de evaluación — fuente OMS
+};
+// Heurística de regularidad (documentada): ≥1 respuesta histórica Y (última > 14 días O ≤2 de las últimas 4 semanas).
+function regularidadFloja(c){
+  if(!c || !(c.histCount>=1)) return false;
+  const now=Date.now();
+  const masDe14 = c.lastRespMs!=null && (now-c.lastRespMs) > 14*86400000;
+  const pocas4wk = (c.respLast4wk||0) <= 2;
+  return masDe14 || pocas4wk;
+}
+
 /* ---------- Carga de datos del socio ---------- */
 async function cargarCredencial(uid){
   const uDoc = await db.collection('usuarios').doc(uid).get();
@@ -211,14 +242,22 @@ async function cargarCredencial(uid){
       cuestionario = arr[0];
     }
   }catch(_){}
-  let lastRespMs = null;
+  let lastRespMs = null, histCount = 0, respLast4wk = 0;
   try{
+    const now = Date.now();
     const rs = await db.collection('respuestas_cuestionario').where('personaId','==',personaId).get();
-    rs.docs.forEach(d=>{ const ms=tsMs(d.data().creadoEn); if(ms!=null && (lastRespMs==null || ms>lastRespMs)) lastRespMs=ms; });
+    rs.docs.forEach(d=>{
+      const ms=tsMs(d.data().creadoEn);
+      histCount++;
+      if(ms!=null){
+        if(lastRespMs==null || ms>lastRespMs) lastRespMs=ms;
+        if((now-ms) <= 28*86400000) respLast4wk++; // respuestas en las últimas 4 semanas (regularidad)
+      }
+    });
   }catch(_){}
   const prefDay = (typeof u.prefRecordatorio==='number' && u.prefRecordatorio>=0 && u.prefRecordatorio<=6) ? u.prefRecordatorio : 0;
 
-  return { estado:'ok', u, per, socio, planNombre, personaId, cuestionario, lastRespMs, prefDay };
+  return { estado:'ok', u, per, socio, planNombre, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk };
 }
 
 /* ---------- Auth flow ---------- */
@@ -418,9 +457,14 @@ function homeChequeoBlock(c){
     body=`<div class="card" style="padding:1rem"><div style="font-weight:700">Tu próximo chequeo</div>
       <div style="font-size:.8rem;color:var(--ink2);margin-top:.3rem"><b>${fmtFecha(st.dueMs)}</b>. Te avisamos acá.</div></div>`;
   }
+  // Aviso de regularidad (suave, no bloquea): heurística documentada en regularidadFloja().
+  const regBanner = regularidadFloja(c)
+    ? `<div style="display:flex;gap:.55rem;align-items:flex-start;background:#fff7ee;border:1px solid #f3d9b8;border-radius:12px;padding:.7rem .8rem;margin-top:.6rem;font-size:.78rem;color:#8a5a10;line-height:1.45">💡<div>La regularidad es importante: responder cada semana nos ayuda a mantener una lógica médica sobre tu estado de salud.</div></div>`
+    : '';
   return `<div class="sec">
     <div class="sec-h">Chequeo semanal</div>
     ${body}
+    ${regBanner}
     <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.6rem;padding:0 .2rem">
       <span style="font-size:.76rem;color:var(--ink2)">Día de recordatorio</span>${prefSel}
     </div>
@@ -436,19 +480,41 @@ async function guardarPref(v){
 }
 function abrirChequeo(){
   const c=S.cred; if(!c||!c.cuestionario) return;
-  S.chk={ open:true, answers:{}, err:'', busy:false };
+  S.chk={ open:true, answers:{}, who5:[null,null,null,null,null], pedido:false, motivo:'', err:'', busy:false };
   S.view='chequeo'; render();
 }
 function cerrarChequeo(){ S.chk=null; S.view='home'; render(); }
 function chkSyncText(){
   const c=S.cred||{}; const q=c.cuestionario; if(!q||!S.chk) return;
   (q.preguntas||[]).forEach(p=>{ if(p.tipo==='texto'){ const e=el('chk-txt-'+p.id); if(e) S.chk.answers[p.id]=e.value.slice(0,200); } });
+  const m=el('chk-motivo'); if(m) S.chk.motivo=m.value.slice(0,200);
 }
 function chkSet(pid,val){ if(!S.chk) return; chkSyncText(); S.chk.answers[pid]=val; render(); }
+function chkWho5Set(i,val){ if(!S.chk) return; chkSyncText(); S.chk.who5[i]=val; render(); }
+function chkTogglePedido(){ if(!S.chk) return; chkSyncText(); S.chk.pedido=!S.chk.pedido; render(); }
 function chequeoFormView(){
   const c=S.cred||{}; const q=c.cuestionario;
   if(!q){ S.view='home'; return homeView(); }
   const A=(S.chk&&S.chk.answers)||{};
+  // Bloque WHO-5 (sellado) PRIMERO, si el cuestionario activo lo incluye.
+  let who5Block='';
+  if(q.incluirWHO5){
+    const W=(S.chk&&S.chk.who5)||[];
+    const itemsHtml=WHO5.items.map((txt,i)=>{
+      const opts=WHO5.opciones.map(([val,lbl])=>{
+        const sel=W[i]===val;
+        return `<button type="button" onclick="chkWho5Set(${i},${val})" style="display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;padding:.5rem .7rem;margin-bottom:.3rem;border-radius:8px;border:1.5px solid ${sel?'var(--r)':'var(--line)'};background:${sel?'var(--r)':'#fff'};color:${sel?'#fff':'var(--ink)'};font-size:.85rem;font-weight:${sel?'700':'500'};cursor:pointer"><span>${esc(lbl)}</span><span style="opacity:.6;font-size:.72rem">${val}</span></button>`;
+      }).join('');
+      return `<div class="sec" style="margin-top:.9rem"><div style="font-weight:700;font-size:.9rem;margin-bottom:.45rem">${i+1}. ${esc(txt)}</div>${opts}</div>`;
+    }).join('');
+    who5Block=`<div style="background:#f2f6fb;border:1px solid #d9e4f0;border-radius:14px;padding:.9rem .85rem;margin-top:1rem">
+      <div style="font-weight:800;font-size:.92rem;color:#1a3a5c">Índice de Bienestar (OMS · WHO-5)</div>
+      <div style="font-size:.78rem;color:var(--ink2);line-height:1.45;margin-top:.3rem">${esc(WHO5.intro)}</div>
+      <div style="font-weight:700;font-size:.82rem;margin-top:.7rem">${esc(WHO5.encabezado)}</div>
+      ${itemsHtml}
+      <div style="font-size:.58rem;color:var(--ink3);margin-top:.8rem;line-height:1.4">${esc(WHO5.copyright)}</div>
+    </div>`;
+  }
   const preg=(q.preguntas||[]).map((p,i)=>{
     let ctrl='';
     if(p.tipo==='si_no'){
@@ -461,6 +527,15 @@ function chequeoFormView(){
     }
     return `<div class="sec" style="margin-top:1rem"><div style="font-weight:700;font-size:.92rem;margin-bottom:.5rem">${i+1}. ${esc(p.texto||'')}</div>${ctrl}</div>`;
   }).join('');
+  // "Quiero que me contacten" al final (en TODO cuestionario).
+  const ped=!!(S.chk&&S.chk.pedido);
+  const contacto=`<div class="sec" style="margin-top:1.3rem">
+    <button type="button" onclick="chkTogglePedido()" style="display:flex;align-items:center;gap:.6rem;width:100%;text-align:left;padding:.7rem .8rem;border-radius:10px;border:1.5px solid ${ped?'var(--r)':'var(--line)'};background:${ped?'#fff5f4':'#fff'};cursor:pointer">
+      <span style="width:20px;height:20px;flex:none;border-radius:5px;border:2px solid ${ped?'var(--r)':'var(--ink3)'};background:${ped?'var(--r)':'#fff'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900">${ped?'✓':''}</span>
+      <span style="font-size:.88rem;font-weight:700;color:var(--ink)">Me gustaría que un médico de MEDICAR me contacte</span>
+    </button>
+    ${ped?`<input id="chk-motivo" maxlength="200" value="${esc((S.chk&&S.chk.motivo)||'')}" placeholder="Motivo (opcional)" style="width:100%;margin-top:.5rem;padding:.6rem .75rem;border:1.5px solid var(--line);border-radius:10px;font-size:.9rem">`:''}
+  </div>`;
   return `<div class="home">
     <div class="topbar">
       <img src="${ICON}" alt="">
@@ -469,7 +544,9 @@ function chequeoFormView(){
       <button class="mini" onclick="cerrarChequeo()">Cerrar</button>
     </div>
     <div style="font-size:.85rem;color:var(--ink2);line-height:1.45">Contanos cómo pasaste la semana. Tus respuestas ayudan al equipo médico de MEDICAR.</div>
+    ${who5Block}
     ${preg}
+    ${contacto}
     <div class="err ${S.chk&&S.chk.err?'on':''}" style="margin-top:1rem">${esc(S.chk&&S.chk.err||'')}</div>
     <button class="btn-r" style="margin-top:.8rem" onclick="enviarChequeo()">${S.chk&&S.chk.busy?'Enviando…':'Enviar'}</button>
     <button class="btn-o" style="margin-top:.6rem" onclick="cerrarChequeo()">Cancelar</button>
@@ -480,24 +557,38 @@ async function enviarChequeo(){
   const c=S.cred||{}; const q=c.cuestionario; if(!q||!S.chk||S.chk.busy) return;
   chkSyncText();
   const A=S.chk.answers||{};
+  // WHO-5 (si incluido): las 5 afirmaciones son obligatorias.
+  if(q.incluirWHO5){
+    const w=S.chk.who5||[];
+    if(w.length!==5 || w.some(v=>v===null||v===undefined)){ S.chk.err='Respondé las 5 afirmaciones del Índice de Bienestar (OMS).'; render(); return; }
+  }
   // si_no y escala obligatorias; texto opcional.
   const faltan=(q.preguntas||[]).filter(p=> (p.tipo==='si_no'||p.tipo==='escala') && (A[p.id]===undefined||A[p.id]===null));
   if(faltan.length){ S.chk.err='Respondé todas las preguntas (el texto es opcional).'; render(); return; }
   const respuestas=(q.preguntas||[]).map(p=>({ preguntaId:p.id, texto:p.texto||'', valor:(A[p.id]!==undefined?A[p.id]:'') }));
+  const payload={
+    cuestionarioId:q.id, cuestionarioNombre:q.nombre||'',
+    personaId:c.personaId, personaNombre:nombreDe(c.per,c.u),
+    respuestas,
+    pedidoContacto: !!S.chk.pedido,
+    motivoContacto: (S.chk.pedido && (S.chk.motivo||'').trim()) ? (S.chk.motivo||'').trim().slice(0,200) : null,
+    creadoEn: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if(q.incluirWHO5){
+    const valores=S.chk.who5.map(v=>Number(v)||0);
+    const raw=valores.reduce((a,b)=>a+b,0);
+    payload.who5={ valores, raw, score: raw*4 }; // raw 0-25 → score 0-100 (raw×4)
+  }
   S.chk.busy=true; S.chk.err=''; render();
   try{
-    await db.collection('respuestas_cuestionario').add({
-      cuestionarioId:q.id, cuestionarioNombre:q.nombre||'',
-      personaId:c.personaId, personaNombre:nombreDe(c.per,c.u),
-      respuestas, creadoEn: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    if(S.cred) S.cred.lastRespMs=Date.now(); // el home pasa a "ya respondiste esta semana"
+    await db.collection('respuestas_cuestionario').add(payload);
+    if(S.cred){ S.cred.lastRespMs=Date.now(); S.cred.histCount=(S.cred.histCount||0)+1; S.cred.respLast4wk=(S.cred.respLast4wk||0)+1; }
     S.chk=null; S.view='home'; render();
   }catch(e){
+    // Feedback claro al socio, sin detalles técnicos. El botón queda re-habilitado (busy=false).
+    console.warn('[chequeo] no se pudo enviar:', e);
     S.chk.busy=false;
-    S.chk.err=(e&&e.code==='permission-denied')
-      ? 'No se pudo enviar (permisos). Se habilita al publicar las reglas.'
-      : ((e&&e.message)||'No se pudo enviar. Revisá tu conexión.');
+    S.chk.err='No pudimos enviar tu chequeo. Probá de nuevo en un momento.';
     render();
   }
 }
