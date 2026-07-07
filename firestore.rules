@@ -346,18 +346,26 @@ service cloud.firestore {
     //  - Lectura: cualquier rol INTERNO (no afiliado). ADEMAS el AFILIADO lee SOLO su propia persona
     //    (id == su personaId) para la credencial de la app del socio (Etapa 23). Read-only.
     //  - Escritura (alta/edicion): admin/superadmin o gestionar_afiliados. Sin delete desde la app.
+    // Lectura (Etapa 32 — acceso por necesidad): SOLO los lectores reales del padrón (admin/superadmin,
+    // gestionar_afiliados = panel Afiliados, configurar_sistema = abonos/estadísticas) + el afiliado sobre
+    // SU propia persona. Se CIERRA a médico/despachante/chofer: ninguno lee /personas en la app (recon E32).
     match /personas/{id} {
-      allow read:           if esInterno() || (isSignedIn() && id == miPersonaId());
+      allow read:           if isAdmin() || esSuperadmin()
+                               || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema')
+                               || (isSignedIn() && id == miPersonaId());
       allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
     }
 
     // socios/{id}: padron de afiliados (Estructura 3, Admin). Apunta a personas via personaId; planId a planes.
-    //  - Lectura: rol INTERNO. ADEMAS el AFILIADO lee SOLO su(s) propia(s) afiliacion(es)
-    //    (socio.personaId == su personaId) para la credencial (Etapa 23). El != null evita el
-    //    caso null==null (afiliado sin vinculo leyendo un socio sin personaId). Read-only.
+    //  - Lectura (Etapa 32 — acceso por necesidad, ROL-AWARE): despachante (atribucion del despacho, L1292),
+    //    admin/superadmin, gestionar_afiliados (panel Afiliados), configurar_sistema (abonos/estadisticas
+    //    tambien leen socios), + el AFILIADO sobre su(s) propia(s) afiliacion(es) (para la credencial, E23;
+    //    el != null evita el caso null==null). Se CIERRA a medico/chofer: no leen /socios en la app (recon E32).
     //  - Escritura: admin/superadmin o gestionar_afiliados. Baja LOGICA via 'activo', sin delete desde la app.
     match /socios/{id} {
-      allow read:           if esInterno() || (isSignedIn() && miPersonaId() != null && resource.data.personaId == miPersonaId());
+      allow read:           if esDespachante() || isAdmin() || esSuperadmin()
+                               || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema')
+                               || (isSignedIn() && miPersonaId() != null && resource.data.personaId == miPersonaId());
       allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
     }
 
