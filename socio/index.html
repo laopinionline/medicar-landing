@@ -118,6 +118,53 @@ input{font-family:inherit}
 .center .btn-o,.center .btn-r{max-width:16rem}
 .spin{width:34px;height:34px;border:3px solid var(--linea);border-top-color:var(--rojo);border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---------- TRAMO 2 · tiles del home + formularios ---------- */
+.tile{display:flex;align-items:center;gap:.85rem;width:100%;text-align:left;padding:1rem;border-radius:var(--radio);border:1px solid var(--linea);background:#fff;box-shadow:var(--sombra);cursor:pointer;transition:box-shadow .15s,transform .1s}
+.tile:active{transform:scale(.99)}
+.tile:hover{box-shadow:var(--sombra-alta)}
+.tile-ic{width:44px;height:44px;flex:none;border-radius:12px;background:var(--nieve);display:flex;align-items:center;justify-content:center;font-size:1.35rem}
+.tile-tx{flex:1;min-width:0}
+.tile-t{font-weight:800;font-size:.95rem;color:var(--tinta)}
+.tile-s{font-size:.76rem;color:var(--gris);margin-top:.12rem;line-height:1.35}
+.tile-go{flex:none;color:var(--rojo);display:flex;align-items:center;transition:transform .2s ease}
+.tile:hover .tile-go{transform:translateX(4px)}
+/* hero (chequeo pendiente) */
+.hero{color:#fff;border-radius:18px;padding:1.15rem 1.2rem;position:relative;overflow:hidden;background:linear-gradient(135deg,var(--rojo),var(--rojo-hondo));box-shadow:0 10px 24px -10px rgba(237,28,36,.5)}
+.hero .lines-bg{position:absolute;right:-8px;bottom:-16px;opacity:.14;pointer-events:none}
+.hero-t{font-weight:800;font-size:1.05rem;position:relative;z-index:1}
+.hero-s{font-size:.83rem;opacity:.93;margin-top:.25rem;line-height:1.4;position:relative;z-index:1}
+.hero .go{margin-top:.9rem;display:inline-flex;align-items:center;gap:.5rem;background:#fff;color:var(--rojo);font-weight:800;font-size:.95rem;padding:.7rem 1.1rem;border-radius:11px;border:none;cursor:pointer;position:relative;z-index:1}
+.hero .go .chev{transition:transform .2s ease}
+.hero .go:hover .chev{transform:translateX(4px)}
+/* opciones seleccionables (si/no, escala, WHO-5, síntomas) */
+.q{font-weight:700;font-size:.92rem;margin-bottom:.55rem;color:var(--tinta)}
+.opt-row{display:flex;gap:.5rem}
+.opt{display:flex;align-items:center;justify-content:center;gap:.5rem;flex:1;padding:.7rem;border-radius:12px;border:1.5px solid var(--linea);background:#fff;color:var(--tinta);font-weight:700;font-size:.9rem;cursor:pointer;transition:.12s}
+.opt:active{transform:scale(.98)}
+.opt.on{border-color:var(--rojo);background:var(--rojo);color:#fff}
+.opt.wide{width:100%;justify-content:space-between;text-align:left;margin-bottom:.4rem}
+.opt .val{opacity:.55;font-size:.72rem;font-weight:600}
+.opt.on .val{opacity:.85}
+.opt .chk{width:20px;height:20px;flex:none;border-radius:6px;border:2px solid var(--gris);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:900}
+.opt.on .chk{border-color:#fff;background:#fff;color:var(--rojo)}
+.scale-lbl{display:flex;justify-content:space-between;font-size:.62rem;color:var(--gris);margin-top:.25rem}
+/* WHO-5 sellado */
+.who5-box{background:var(--nieve);border:1px solid var(--linea);border-radius:14px;padding:1rem .9rem;margin-top:1rem}
+.who5-h{font-weight:800;font-size:.92rem;color:var(--rojo)}
+.who5-intro{font-size:.78rem;color:var(--gris);line-height:1.45;margin-top:.3rem}
+.who5-enc{font-weight:700;font-size:.82rem;margin-top:.7rem;color:var(--tinta)}
+.who5-cite{font-size:.58rem;color:var(--ink3);margin-top:.85rem;line-height:1.4}
+/* resultado (semáforo N3 / confirmación reporte) */
+.result{border-radius:18px;padding:1.2rem;border:1.5px solid}
+.result.ok{background:#eef7f1;border-color:#cfe8db}
+.result.warn{background:#fff7ee;border-color:#f0c98a}
+.result-t{font-weight:800;font-size:1.05rem}
+.result-s{font-size:.86rem;line-height:1.5;margin-top:.35rem}
+.result .call{display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:.9rem;background:var(--rojo);color:#fff;font-weight:800;padding:.8rem;border-radius:12px;text-decoration:none}
+.reg-hint{display:flex;gap:.55rem;align-items:flex-start;background:var(--nieve);border:1px solid var(--linea);border-radius:12px;padding:.7rem .8rem;margin-top:.6rem;font-size:.78rem;color:var(--gris);line-height:1.45}
+.pref-row{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.7rem;padding:0 .2rem}
+.pref-row select{padding:.45rem .55rem;border:1.5px solid var(--linea);border-radius:9px;font-size:.85rem;background:#fff;color:var(--tinta)}
 </style>
 </head>
 <body>
@@ -829,33 +876,32 @@ function homeView(){
 function homeChequeoBlock(c){
   const st=chequeoEstado(c);
   if(!st.activo) return ''; // sin cuestionario activo → no se muestra nada
-  const prefSel=`<select onchange="guardarPref(this.value)" style="padding:.4rem .5rem;border:1.5px solid var(--line);border-radius:8px;font-size:.85rem;background:#fff">`+
+  const prefSel=`<select onchange="guardarPref(this.value)">`+
     DIAS.map((d,i)=>`<option value="${i}" ${((c.prefDay||0)===i)?'selected':''}>${d}</option>`).join('')+`</select>`;
   let body;
   if(st.pending){
-    body=`<div style="background:linear-gradient(135deg,#DC1400,#B01000);color:#fff;border-radius:16px;padding:1.1rem 1.15rem">
-      <div style="font-weight:800;font-size:1.05rem">Tenés tu chequeo semanal 📝</div>
-      <div style="font-size:.82rem;opacity:.92;margin-top:.25rem;line-height:1.4">Contanos cómo pasaste la semana. Son unas pocas preguntas.</div>
-      <button onclick="abrirChequeo()" style="margin-top:.85rem;width:100%;background:#fff;color:var(--r);font-weight:800;font-size:.95rem;padding:.75rem;border-radius:10px;border:none;cursor:pointer">Responder ahora</button>
+    body=`<div class="hero">
+      <svg class="lines-bg" width="120" height="72" viewBox="0 0 120 60"><rect x="6" y="16" width="108" height="6" rx="3" fill="#fff"/><rect x="22" y="30" width="92" height="6" rx="3" fill="#fff"/><rect x="40" y="44" width="74" height="6" rx="3" fill="#fff"/></svg>
+      <div class="hero-t">Tenés tu chequeo semanal</div>
+      <div class="hero-s">Contanos cómo pasaste la semana — es cortito, casi una charla.</div>
+      <button class="go" onclick="abrirChequeo()">Responder ahora ${chv(13)}</button>
     </div>`;
   }else if(st.answered7){
-    body=`<div class="card" style="padding:1rem"><div style="font-weight:700;color:var(--g)">✓ Ya respondiste esta semana</div>
-      <div style="font-size:.8rem;color:var(--ink2);margin-top:.3rem">Gracias. Tu próximo chequeo: <b>${fmtFecha(st.nextMs)}</b>.</div></div>`;
+    body=`<div class="card" style="padding:1rem"><div style="font-weight:800;color:var(--verde)">✓ Ya respondiste esta semana</div>
+      <div style="font-size:.8rem;color:var(--gris);margin-top:.3rem">Gracias. Tu próximo chequeo: <b>${fmtFecha(st.nextMs)}</b>.</div></div>`;
   }else{
-    body=`<div class="card" style="padding:1rem"><div style="font-weight:700">Tu próximo chequeo</div>
-      <div style="font-size:.8rem;color:var(--ink2);margin-top:.3rem"><b>${fmtFecha(st.dueMs)}</b>. Te avisamos acá.</div></div>`;
+    body=`<div class="card" style="padding:1rem"><div style="font-weight:800;color:var(--tinta)">Tu próximo chequeo</div>
+      <div style="font-size:.8rem;color:var(--gris);margin-top:.3rem"><b>${fmtFecha(st.dueMs)}</b>. Te avisamos acá.</div></div>`;
   }
   // Aviso de regularidad (suave, no bloquea): heurística documentada en regularidadFloja().
   const regBanner = regularidadFloja(c)
-    ? `<div style="display:flex;gap:.55rem;align-items:flex-start;background:#fff7ee;border:1px solid #f3d9b8;border-radius:12px;padding:.7rem .8rem;margin-top:.6rem;font-size:.78rem;color:#8a5a10;line-height:1.45">💡<div>La regularidad es importante: responder cada semana nos ayuda a mantener una lógica médica sobre tu estado de salud.</div></div>`
+    ? `<div class="reg-hint">💡<div>La regularidad es importante: responder cada semana nos ayuda a mantener una lógica médica sobre tu estado de salud.</div></div>`
     : '';
   return `<div class="sec">
     <div class="sec-h">Chequeo semanal</div>
     ${body}
     ${regBanner}
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.6rem;padding:0 .2rem">
-      <span style="font-size:.76rem;color:var(--ink2)">Día de recordatorio</span>${prefSel}
-    </div>
+    <div class="pref-row"><span style="font-size:.76rem;color:var(--gris)">Día de recordatorio</span>${prefSel}</div>
   </div>`;
 }
 async function guardarPref(v){
@@ -891,52 +937,44 @@ function chequeoFormView(){
     const itemsHtml=WHO5.items.map((txt,i)=>{
       const opts=WHO5.opciones.map(([val,lbl])=>{
         const sel=W[i]===val;
-        return `<button type="button" onclick="chkWho5Set(${i},${val})" style="display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;padding:.5rem .7rem;margin-bottom:.3rem;border-radius:8px;border:1.5px solid ${sel?'var(--r)':'var(--line)'};background:${sel?'var(--r)':'#fff'};color:${sel?'#fff':'var(--ink)'};font-size:.85rem;font-weight:${sel?'700':'500'};cursor:pointer"><span>${esc(lbl)}</span><span style="opacity:.6;font-size:.72rem">${val}</span></button>`;
+        return `<button type="button" class="opt wide ${sel?'on':''}" onclick="chkWho5Set(${i},${val})"><span>${esc(lbl)}</span><span class="val">${val}</span></button>`;
       }).join('');
-      return `<div class="sec" style="margin-top:.9rem"><div style="font-weight:700;font-size:.9rem;margin-bottom:.45rem">${i+1}. ${esc(txt)}</div>${opts}</div>`;
+      return `<div class="sec" style="margin-top:.9rem"><div class="q">${i+1}. ${esc(txt)}</div>${opts}</div>`;
     }).join('');
-    who5Block=`<div style="background:#f2f6fb;border:1px solid #d9e4f0;border-radius:14px;padding:.9rem .85rem;margin-top:1rem">
-      <div style="font-weight:800;font-size:.92rem;color:#1a3a5c">Índice de Bienestar (OMS · WHO-5)</div>
-      <div style="font-size:.78rem;color:var(--ink2);line-height:1.45;margin-top:.3rem">${esc(WHO5.intro)}</div>
-      <div style="font-weight:700;font-size:.82rem;margin-top:.7rem">${esc(WHO5.encabezado)}</div>
+    who5Block=`<div class="who5-box">
+      <div class="who5-h">Índice de Bienestar (OMS · WHO-5)</div>
+      <div class="who5-intro">${esc(WHO5.intro)}</div>
+      <div class="who5-enc">${esc(WHO5.encabezado)}</div>
       ${itemsHtml}
-      <div style="font-size:.58rem;color:var(--ink3);margin-top:.8rem;line-height:1.4">${esc(WHO5.copyright)}</div>
+      <div class="who5-cite">${esc(WHO5.copyright)}</div>
     </div>`;
   }
   const preg=(q.preguntas||[]).map((p,i)=>{
     let ctrl='';
     if(p.tipo==='si_no'){
-      const mk=(val,lbl)=>{ const sel=A[p.id]===val; return `<button type="button" onclick="chkSet('${p.id}',${val})" style="flex:1;padding:.65rem;border-radius:10px;border:1.5px solid ${sel?'var(--r)':'var(--line)'};background:${sel?'var(--r)':'#fff'};color:${sel?'#fff':'var(--ink)'};font-weight:700;font-size:.9rem;cursor:pointer">${lbl}</button>`; };
-      ctrl=`<div style="display:flex;gap:.5rem">${mk(true,'Sí')}${mk(false,'No')}</div>`;
+      const mk=(val,lbl)=>`<button type="button" class="opt ${A[p.id]===val?'on':''}" onclick="chkSet('${p.id}',${val})">${lbl}</button>`;
+      ctrl=`<div class="opt-row">${mk(true,'Sí')}${mk(false,'No')}</div>`;
     }else if(p.tipo==='escala'){
-      ctrl=`<div style="display:flex;gap:.4rem">`+[1,2,3,4,5].map(n=>{ const sel=A[p.id]===n; return `<button type="button" onclick="chkSet('${p.id}',${n})" style="flex:1;padding:.6rem 0;border-radius:10px;border:1.5px solid ${sel?'var(--r)':'var(--line)'};background:${sel?'var(--r)':'#fff'};color:${sel?'#fff':'var(--ink)'};font-weight:700;cursor:pointer">${n}</button>`; }).join('')+`</div><div style="display:flex;justify-content:space-between;font-size:.62rem;color:var(--ink3);margin-top:.2rem"><span>Mal</span><span>Excelente</span></div>`;
+      ctrl=`<div class="opt-row">`+[1,2,3,4,5].map(n=>`<button type="button" class="opt ${A[p.id]===n?'on':''}" onclick="chkSet('${p.id}',${n})">${n}</button>`).join('')+`</div><div class="scale-lbl"><span>Mal</span><span>Excelente</span></div>`;
     }else{
-      ctrl=`<input id="chk-txt-${p.id}" maxlength="200" value="${esc(A[p.id]||'')}" placeholder="Escribí acá (opcional)" style="width:100%;padding:.65rem .75rem;border:1.5px solid var(--line);border-radius:10px;font-size:.95rem">`;
+      ctrl=`<input id="chk-txt-${p.id}" maxlength="200" value="${esc(A[p.id]||'')}" placeholder="Escribí acá (opcional)" style="width:100%;padding:.7rem .8rem;border:1.5px solid var(--linea);border-radius:12px;font-size:.95rem;background:var(--nieve)">`;
     }
-    return `<div class="sec" style="margin-top:1rem"><div style="font-weight:700;font-size:.92rem;margin-bottom:.5rem">${i+1}. ${esc(p.texto||'')}</div>${ctrl}</div>`;
+    return `<div class="sec" style="margin-top:1rem"><div class="q">${i+1}. ${esc(p.texto||'')}</div>${ctrl}</div>`;
   }).join('');
   // "Quiero que me contacten" al final (en TODO cuestionario).
   const ped=!!(S.chk&&S.chk.pedido);
   const contacto=`<div class="sec" style="margin-top:1.3rem">
-    <button type="button" onclick="chkTogglePedido()" style="display:flex;align-items:center;gap:.6rem;width:100%;text-align:left;padding:.7rem .8rem;border-radius:10px;border:1.5px solid ${ped?'var(--r)':'var(--line)'};background:${ped?'#fff5f4':'#fff'};cursor:pointer">
-      <span style="width:20px;height:20px;flex:none;border-radius:5px;border:2px solid ${ped?'var(--r)':'var(--ink3)'};background:${ped?'var(--r)':'#fff'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900">${ped?'✓':''}</span>
-      <span style="font-size:.88rem;font-weight:700;color:var(--ink)">Me gustaría que un médico de MEDICAR me contacte</span>
-    </button>
-    ${ped?`<input id="chk-motivo" maxlength="200" value="${esc((S.chk&&S.chk.motivo)||'')}" placeholder="Motivo (opcional)" style="width:100%;margin-top:.5rem;padding:.6rem .75rem;border:1.5px solid var(--line);border-radius:10px;font-size:.9rem">`:''}
+    <button type="button" class="opt wide ${ped?'on':''}" onclick="chkTogglePedido()"><span style="display:flex;align-items:center;gap:.6rem"><span class="chk">${ped?'✓':''}</span>Me gustaría que un médico de MEDICAR me contacte</span></button>
+    ${ped?`<input id="chk-motivo" maxlength="200" value="${esc((S.chk&&S.chk.motivo)||'')}" placeholder="Motivo (opcional)" style="width:100%;margin-top:.5rem;padding:.65rem .8rem;border:1.5px solid var(--linea);border-radius:12px;font-size:.9rem;background:var(--nieve)">`:''}
   </div>`;
   return `<div class="home">
-    <div class="topbar">
-      <img src="${ICON}" alt="">
-      <div class="tb-t">Chequeo semanal</div>
-      <div class="tb-sp"></div>
-      <button class="mini" onclick="cerrarChequeo()">Cerrar</button>
-    </div>
-    <div style="font-size:.85rem;color:var(--ink2);line-height:1.45">Contanos cómo pasaste la semana. Tus respuestas ayudan al equipo médico de MEDICAR.</div>
+    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Chequeo semanal</div><div class="tb-sp"></div><button class="mini" onclick="cerrarChequeo()">Cerrar</button></div>
+    <div style="font-size:.85rem;color:var(--gris);line-height:1.45">Contanos cómo pasaste la semana. Tus respuestas ayudan al equipo médico de MEDICAR.</div>
     ${who5Block}
     ${preg}
     ${contacto}
     <div class="err ${S.chk&&S.chk.err?'on':''}" style="margin-top:1rem">${esc(S.chk&&S.chk.err||'')}</div>
-    <button class="btn-r" style="margin-top:.8rem" onclick="enviarChequeo()">${S.chk&&S.chk.busy?'Enviando…':'Enviar'}</button>
+    <button class="btn-r" style="margin-top:.9rem" onclick="enviarChequeo()">${S.chk&&S.chk.busy?'Enviando…':'Enviar'}${S.chk&&S.chk.busy?'':chv(14,'cw')}</button>
     <button class="btn-o" style="margin-top:.6rem" onclick="cerrarChequeo()">Cancelar</button>
     <div class="footer"><div class="foot-note">Se registra una sola vez por semana.</div></div>
   </div>`;
@@ -986,9 +1024,10 @@ async function enviarChequeo(){
 function homeReporteBlock(c){
   return `<div class="sec">
     <div class="sec-h">¿No te sentís bien?</div>
-    <button onclick="abrirReporte()" style="display:flex;align-items:center;gap:.7rem;width:100%;text-align:left;padding:.9rem 1rem;border-radius:14px;border:1.5px solid var(--line);background:#fff;cursor:pointer">
-      <span style="font-size:1.5rem;flex:none">🩹</span>
-      <span><span style="display:block;font-weight:800;font-size:.95rem;color:var(--ink)">No me siento bien / Reportar un síntoma</span><span style="display:block;font-size:.76rem;color:var(--ink2);margin-top:.1rem">Contanos qué te pasa ahora — un médico de MEDICAR lo revisa.</span></span>
+    <button class="tile" onclick="abrirReporte()">
+      <span class="tile-ic">🩹</span>
+      <span class="tile-tx"><span class="tile-t">No me siento bien</span><span class="tile-s">Contanos qué te pasa ahora — un médico de MEDICAR lo revisa.</span></span>
+      <span class="tile-go">${chv(15)}</span>
     </button>
   </div>`;
 }
@@ -1006,17 +1045,18 @@ function reporteFormView(){
   if(S.rpt&&S.rpt.done){
     const roja=S.rpt.done.tieneBanderaRoja;
     const box = roja
-      ? `<div style="background:linear-gradient(135deg,#DC1400,#B01000);color:#fff;border-radius:16px;padding:1.2rem 1.15rem">
-          <div style="font-weight:800;font-size:1.1rem">Recibimos tu reporte</div>
-          <div style="font-size:.9rem;opacity:.95;margin-top:.4rem;line-height:1.5">Un médico de MEDICAR va a contactarte. <b>Si es una emergencia, no esperes: llamá al ${TEL_EMERG}.</b></div>
-          <a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:.9rem;background:#fff;color:var(--r);font-weight:800;font-size:1.05rem;padding:.8rem;border-radius:12px;text-decoration:none">${IC.phone}<span>Llamar al ${TEL_EMERG}</span></a>
+      ? `<div class="result" style="background:linear-gradient(135deg,var(--rojo),var(--rojo-hondo));border:none;color:#fff">
+          <div class="result-t">Recibimos tu reporte</div>
+          <div class="result-s" style="opacity:.95">Un médico de MEDICAR va a contactarte. <b>Si es una emergencia, no esperes: llamá al ${TEL_EMERG}.</b></div>
+          <a href="tel:${TEL_EMERG}" class="call" style="background:#fff;color:var(--rojo)">${IC.phone}<span>Llamar al ${TEL_EMERG}</span></a>
         </div>`
-      : `<div class="card" style="padding:1.1rem"><div style="font-weight:800;font-size:1.02rem;color:var(--g)">Recibimos tu reporte ✓</div>
-          <div style="font-size:.85rem;color:var(--ink2);margin-top:.35rem;line-height:1.5">Si necesitás atención inmediata, llamá al <b>${TEL_EMERG}</b>.</div>
-          <a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:.8rem;background:var(--r);color:#fff;font-weight:800;padding:.75rem;border-radius:12px;text-decoration:none">${IC.phone}<span>Llamar al ${TEL_EMERG}</span></a>
+      : `<div class="result ok">
+          <div class="result-t" style="color:var(--verde)">Recibimos tu reporte ✓</div>
+          <div class="result-s" style="color:var(--ink2)">Si necesitás atención inmediata, llamá al <b>${TEL_EMERG}</b>.</div>
+          <a href="tel:${TEL_EMERG}" class="call">${IC.phone}<span>Llamar al ${TEL_EMERG}</span></a>
         </div>`;
     return `<div class="home">
-      <div class="topbar"><img src="${ICON}" alt=""><div class="tb-t">Reporte enviado</div><div class="tb-sp"></div><button class="mini" onclick="cerrarReporte()">Volver</button></div>
+      <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Reporte enviado</div><div class="tb-sp"></div><button class="mini" onclick="cerrarReporte()">Volver</button></div>
       ${box}
       <div class="footer"><div class="foot-note">Tu reporte quedó registrado. Podés cerrar la app.</div></div>
     </div>`;
@@ -1024,18 +1064,16 @@ function reporteFormView(){
   const sel=(S.rpt&&S.rpt.sel)||{};
   const cat=(c.sintomas||[]);
   const sintHtml = cat.length
-    ? cat.map(s=>{ const on=!!sel[s.id]; return `<button type="button" onclick="rptToggle('${s.id}')" style="display:flex;align-items:center;gap:.6rem;width:100%;text-align:left;padding:.65rem .75rem;margin-bottom:.4rem;border-radius:10px;border:1.5px solid ${on?'var(--r)':'var(--line)'};background:${on?'#fff5f4':'#fff'};cursor:pointer">
-        <span style="width:20px;height:20px;flex:none;border-radius:5px;border:2px solid ${on?'var(--r)':'var(--ink3)'};background:${on?'var(--r)':'#fff'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900">${on?'✓':''}</span>
-        <span style="font-size:.9rem;font-weight:600;color:var(--ink)">${esc(s.nombre||'—')}</span></button>`; }).join('')
-    : `<div style="font-size:.8rem;color:var(--ink3)">No hay una lista de síntomas configurada. Contanos abajo qué te pasa.</div>`;
+    ? cat.map(s=>{ const on=!!sel[s.id]; return `<button type="button" class="opt wide ${on?'on':''}" onclick="rptToggle('${s.id}')"><span style="display:flex;align-items:center;gap:.6rem"><span class="chk">${on?'✓':''}</span>${esc(s.nombre||'—')}</span></button>`; }).join('')
+    : `<div style="font-size:.8rem;color:var(--gris)">No hay una lista de síntomas configurada. Contanos abajo qué te pasa.</div>`;
   return `<div class="home">
-    <div class="topbar"><img src="${ICON}" alt=""><div class="tb-t">Reportar un síntoma</div><div class="tb-sp"></div><button class="mini" onclick="cerrarReporte()">Cerrar</button></div>
-    <div style="font-size:.85rem;color:var(--ink2);line-height:1.45">Marcá lo que sentís y contanos con tus palabras. Un médico de MEDICAR lo revisa.</div>
+    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Reportar un síntoma</div><div class="tb-sp"></div><button class="mini" onclick="cerrarReporte()">Cerrar</button></div>
+    <div style="font-size:.85rem;color:var(--gris);line-height:1.45">Marcá lo que sentís y contanos con tus palabras. Un médico de MEDICAR lo revisa.</div>
     <div class="sec" style="margin-top:1rem"><div class="sec-h">¿Qué sentís?</div>${sintHtml}</div>
     <div class="sec" style="margin-top:1rem"><div class="sec-h">Contanos qué te pasa</div>
-      <textarea id="rpt-texto" maxlength="300" rows="3" placeholder="Escribí acá (opcional, máx. 300)" style="width:100%;padding:.7rem .8rem;border:1.5px solid var(--line);border-radius:12px;font-size:.95rem;font-family:inherit;resize:vertical">${esc((S.rpt&&S.rpt.texto)||'')}</textarea></div>
+      <textarea id="rpt-texto" maxlength="300" rows="3" placeholder="Escribí acá (opcional, máx. 300)" style="width:100%;padding:.75rem .8rem;border:1.5px solid var(--linea);border-radius:12px;font-size:.95rem;font-family:inherit;resize:vertical;background:var(--nieve)">${esc((S.rpt&&S.rpt.texto)||'')}</textarea></div>
     <div class="err ${S.rpt&&S.rpt.err?'on':''}" style="margin-top:1rem">${esc(S.rpt&&S.rpt.err||'')}</div>
-    <button class="btn-r" style="margin-top:.8rem" onclick="enviarReporte()">${S.rpt&&S.rpt.busy?'Enviando…':'Enviar reporte'}</button>
+    <button class="btn-r" style="margin-top:.9rem" onclick="enviarReporte()">${S.rpt&&S.rpt.busy?'Enviando…':'Enviar reporte'}${S.rpt&&S.rpt.busy?'':chv(14,'cw')}</button>
     <button class="btn-o" style="margin-top:.6rem" onclick="cerrarReporte()">Cancelar</button>
     <div class="footer"><div class="foot-note">Ante una emergencia, llamá directo al ${TEL_EMERG}.</div></div>
   </div>`;
@@ -1074,9 +1112,10 @@ const PARAMS = [
 function homeParamsBlock(c){
   return `<div class="sec">
     <div class="sec-h">Registrar mis signos</div>
-    <button onclick="abrirParams()" style="display:flex;align-items:center;gap:.7rem;width:100%;text-align:left;padding:.9rem 1rem;border-radius:14px;border:1.5px solid var(--line);background:#fff;cursor:pointer">
-      <span style="font-size:1.5rem;flex:none">🩺</span>
-      <span><span style="display:block;font-weight:800;font-size:.95rem;color:var(--ink)">Registrar mis signos</span><span style="display:block;font-size:.76rem;color:var(--ink2);margin-top:.1rem">Pulso, presión, temperatura, oxígeno — si podés medirlos en casa.</span></span>
+    <button class="tile" onclick="abrirParams()">
+      <span class="tile-ic">🩺</span>
+      <span class="tile-tx"><span class="tile-t">Registrar mis signos</span><span class="tile-s">Pulso, presión, temperatura, oxígeno — si podés medirlos en casa.</span></span>
+      <span class="tile-go">${chv(15)}</span>
     </button>
   </div>`;
 }
@@ -1092,28 +1131,30 @@ function paramsFormView(){
   if(S.par&&S.par.done){
     const amar = S.par.done.nivel!=='bajo'; // bajo=verde; bajo-medio/medio/alto=amarillo
     const box = amar
-      ? `<div style="background:#fff7ee;border:1.5px solid #f0c98a;border-radius:16px;padding:1.15rem 1.1rem">
-          <div style="font-weight:800;font-size:1.05rem;color:#8a5a10">Registramos tus valores</div>
-          <div style="font-size:.88rem;color:#7a5210;margin-top:.35rem;line-height:1.5">Un médico de MEDICAR podría contactarte. Si no te sentís bien o es una emergencia, llamá al <b>${TEL_EMERG}</b>.</div>
-          <a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:.85rem;background:var(--r);color:#fff;font-weight:800;padding:.8rem;border-radius:12px;text-decoration:none">${IC.phone}<span>Llamar al ${TEL_EMERG}</span></a>
+      ? `<div class="result warn">
+          <div class="result-t" style="color:#8a5a10">Registramos tus valores</div>
+          <div class="result-s" style="color:#7a5210">Un médico de MEDICAR podría contactarte. Si no te sentís bien o es una emergencia, llamá al <b>${TEL_EMERG}</b>.</div>
+          <a href="tel:${TEL_EMERG}" class="call">${IC.phone}<span>Llamar al ${TEL_EMERG}</span></a>
         </div>`
-      : `<div class="card" style="padding:1.15rem"><div style="font-weight:800;font-size:1.02rem;color:var(--g)">Tus valores están en rango ✓</div>
-          <div style="font-size:.86rem;color:var(--ink2);margin-top:.35rem;line-height:1.5">Gracias por registrar.</div></div>`;
+      : `<div class="result ok">
+          <div class="result-t" style="color:var(--verde)">Tus valores están en rango ✓</div>
+          <div class="result-s" style="color:var(--ink2)">Gracias por registrar.</div>
+        </div>`;
     return `<div class="home">
-      <div class="topbar"><img src="${ICON}" alt=""><div class="tb-t">Signos registrados</div><div class="tb-sp"></div><button class="mini" onclick="cerrarParams()">Volver</button></div>
+      <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Signos registrados</div><div class="tb-sp"></div><button class="mini" onclick="cerrarParams()">Volver</button></div>
       ${box}
       <div class="footer"><div class="foot-note">Tus valores quedaron registrados para tu equipo médico.</div></div>
     </div>`;
   }
   const v=(S.par&&S.par.vals)||{};
-  const inputs=PARAMS.map(p=>`<div class="sec" style="margin-top:.9rem"><div style="font-weight:700;font-size:.9rem;margin-bottom:.4rem">${p.lbl} <span style="font-size:.72rem;color:var(--ink3);font-weight:500">(${p.uni})</span></div>
-    <input id="par-${p.k}" type="number" inputmode="decimal" step="${p.step}" min="${p.min}" max="${p.max}" value="${esc(v[p.k]||'')}" placeholder="opcional" style="width:100%;padding:.7rem .8rem;border:1.5px solid var(--line);border-radius:10px;font-size:1rem"></div>`).join('');
+  const inputs=PARAMS.map(p=>`<div class="field" style="margin-top:.9rem"><label>${p.lbl} · ${p.uni}</label>
+    <input id="par-${p.k}" type="number" inputmode="decimal" step="${p.step}" min="${p.min}" max="${p.max}" value="${esc(v[p.k]||'')}" placeholder="opcional"></div>`).join('');
   return `<div class="home">
-    <div class="topbar"><img src="${ICON}" alt=""><div class="tb-t">Registrar mis signos</div><div class="tb-sp"></div><button class="mini" onclick="cerrarParams()">Cerrar</button></div>
-    <div style="font-size:.85rem;color:var(--ink2);line-height:1.45">Cargá los que puedas medir (al menos uno). Los que no midas, dejalos vacíos.</div>
+    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Registrar mis signos</div><div class="tb-sp"></div><button class="mini" onclick="cerrarParams()">Cerrar</button></div>
+    <div style="font-size:.85rem;color:var(--gris);line-height:1.45">Cargá los que puedas medir (al menos uno). Los que no midas, dejalos vacíos.</div>
     ${inputs}
     <div class="err ${S.par&&S.par.err?'on':''}" style="margin-top:1rem">${esc(S.par&&S.par.err||'')}</div>
-    <button class="btn-r" style="margin-top:.8rem" onclick="enviarParams()">${S.par&&S.par.busy?'Enviando…':'Enviar'}</button>
+    <button class="btn-r" style="margin-top:.9rem" onclick="enviarParams()">${S.par&&S.par.busy?'Enviando…':'Enviar'}${S.par&&S.par.busy?'':chv(14,'cw')}</button>
     <button class="btn-o" style="margin-top:.6rem" onclick="cerrarParams()">Cancelar</button>
     <div class="footer"><div class="foot-note">Ante una emergencia, llamá directo al ${TEL_EMERG}.</div></div>
   </div>`;
