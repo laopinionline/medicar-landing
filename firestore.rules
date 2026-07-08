@@ -114,10 +114,16 @@ service cloud.firestore {
     // Lectura: los 3 roles operativos.
     // Escritura: diferenciada por rol y por los campos que toca cada accion.
     match /episodios/{id} {
-      // Lectura: los roles operativos ven todo el tablero. Ademas, el CHOFER dueno del
-      // episodio puede leer SOLO su propio episodio (choferId == su uid). No entra a
-      // esOperativo: solo gana lectura puntual de lo suyo (vista "mi despacho", Bloque 3).
-      allow read:   if esOperativo()
+      // Lectura (Etapa 33 — acceso por necesidad, ROL-AWARE sobre el corazon del sistema):
+      //  - despachante / admin / superadmin: ven TODO el tablero (lo operan).
+      //  - MEDICO de guardia: SOLO sus episodios (medicoId==uid) + los OFRECIDOS (ofrecido==true) — no el
+      //    tablero completo ni el archivo historico. Sus 2 queries de bandeja (where medicoId==uid /
+      //    where ofrecido==true) son query-safe: cada una matchea una rama OR. Handoff TOMAR es un update
+      //    ATOMICO (medicoId=uid + ofrecido=false en el mismo write) -> sin ventana de perdida de lectura.
+      //  - CHOFER dueno: SOLO su propio episodio (choferId==uid), vista "mi despacho" (Bloque 3).
+      allow read:   if esDespachante() || isAdmin() || esSuperadmin()
+                       || (esMedico() && (resource.data.medicoId == request.auth.uid
+                                          || resource.data.ofrecido == true))
                        || (isSignedIn() && resource.data.choferId == request.auth.uid);
 
       // Alta (fase despacho): solo despachante. Admin tambien. Superadmin sin restriccion.
