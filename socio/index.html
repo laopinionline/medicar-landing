@@ -134,7 +134,7 @@ const TEL_EMERG = '443044';
 const ICON = 'icon.svg';
 
 // Estado mínimo de la vista.
-const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null, chk:null, rpt:null };
+const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null, chk:null, rpt:null, par:null };
 const el = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -201,6 +201,30 @@ function regularidadFloja(c){
   const masDe14 = c.lastRespMs!=null && (now-c.lastRespMs) > 14*86400000;
   const pocas4wk = (c.respLast4wk||0) <= 2;
   return masDe14 || pocas4wk;
+}
+
+/* ---------- NEWS2 PARCIAL — fuente Royal College of Physicians — BORRADOR firma médica ----------
+   Tabla SELLADA (4 de 6 parámetros; los demás NO medidos → NEWS2 PARCIAL explícito). BORRADOR: adoptar
+   como disparador de alerta SOLO tras firma de la dirección médica de MEDICAR (ver Doctrina-Alertas-Clinicas).
+   SALVAGUARDA de la fuente: parámetro faltante NO es 0, es DATO FALTANTE → score PARCIAL, nunca un agregado
+   bajo falsamente tranquilizador. Subscore null = no medido. */
+function news2FC(v){   if(v==null) return null; if(v<=40)return 3; if(v<=50)return 2; if(v<=90)return 0; if(v<=110)return 1; if(v<=130)return 2; return 3; } // ≤40/≥131=3 · 41-50/111-130=2 · 91-110=1 · 51-90=0
+function news2SIS(v){  if(v==null) return null; if(v<=90)return 3; if(v<=100)return 2; if(v<=110)return 1; if(v<=219)return 0; return 3; } // ≤90/≥220=3 · 91-100=2 · 101-110=1 · 111-219=0
+function news2TEMP(v){ if(v==null) return null; if(v<=35.0)return 3; if(v<=36.0)return 1; if(v<=38.0)return 0; if(v<=39.0)return 1; return 2; } // ≤35.0=3 · ≥39.1=2 · 35.1-36.0/38.1-39.0=1 · 36.1-38.0=0
+function news2SPO2(v){ if(v==null) return null; if(v<=91)return 3; if(v<=93)return 2; if(v<=95)return 1; return 0; } // ≤91=3 · 92-93=2 · 94-95=1 · ≥96=0 (escala 1)
+// calcularNEWS2(fc, sis, temp, spo2) -> {score, parcial, redScore, subscores:{fc,sis,temp,spo2}, nivel}.
+function calcularNEWS2(fc, sis, temp, spo2){
+  const s = { fc:news2FC(fc), sis:news2SIS(sis), temp:news2TEMP(temp), spo2:news2SPO2(spo2) };
+  const presentes = [s.fc, s.sis, s.temp, s.spo2].filter(x=>x!=null);
+  const score = presentes.reduce((a,b)=>a+b, 0);
+  const parcial = presentes.length < 4;           // falta al menos 1 de los 4 → PARCIAL (salvaguarda)
+  const redScore = presentes.some(x=>x===3);       // cualquier parámetro en 3 = RED SCORE (Royal College)
+  let nivel;
+  if(score>=7) nivel='alto';                       // 7+ alto
+  else if(score>=5) nivel='medio';                 // 5-6 medio
+  else if(redScore) nivel='bajo-medio';            // 0-4 con un solo 3 = bajo-medio (RED SCORE)
+  else nivel='bajo';                               // 0-4 sin rojos = bajo
+  return { score, parcial, redScore, subscores:s, nivel };
 }
 
 /* ---------- Carga de datos del socio ---------- */
@@ -428,6 +452,8 @@ function homeView(){
     ${sinAfilNota}
 
     ${homeReporteBlock(c)}
+
+    ${homeParamsBlock(c)}
 
     ${homeChequeoBlock(c)}
 
@@ -684,6 +710,92 @@ async function enviarReporte(){
   }
 }
 
+/* ---------- Registrar mis signos (Monitoreo N3 — parámetros medidos) ---------- */
+// Rangos de tipeo sano (rechazan errores groseros; NO son el juicio clínico, eso es NEWS2).
+const PARAMS = [
+  { k:'fc',   lbl:'Frecuencia cardíaca', uni:'lpm',  min:20, max:250, step:'1' },
+  { k:'sis',  lbl:'Presión sistólica',   uni:'mmHg', min:50, max:300, step:'1' },
+  { k:'temp', lbl:'Temperatura',         uni:'°C',   min:30, max:44,  step:'0.1' },
+  { k:'spo2', lbl:'Saturación (SpO₂)',   uni:'%',    min:50, max:100, step:'1' }
+];
+function homeParamsBlock(c){
+  return `<div class="sec">
+    <div class="sec-h">Registrar mis signos</div>
+    <button onclick="abrirParams()" style="display:flex;align-items:center;gap:.7rem;width:100%;text-align:left;padding:.9rem 1rem;border-radius:14px;border:1.5px solid var(--line);background:#fff;cursor:pointer">
+      <span style="font-size:1.5rem;flex:none">🩺</span>
+      <span><span style="display:block;font-weight:800;font-size:.95rem;color:var(--ink)">Registrar mis signos</span><span style="display:block;font-size:.76rem;color:var(--ink2);margin-top:.1rem">Pulso, presión, temperatura, oxígeno — si podés medirlos en casa.</span></span>
+    </button>
+  </div>`;
+}
+function abrirParams(){
+  if(!S.cred || !S.cred.personaId) return;
+  S.par={ vals:{}, err:'', busy:false, done:null };
+  S.view='parametros'; render();
+}
+function cerrarParams(){ S.par=null; S.view='home'; render(); }
+function parSync(){ if(!S.par) return; PARAMS.forEach(p=>{ const e=el('par-'+p.k); if(e) S.par.vals[p.k]=e.value; }); }
+function paramsFormView(){
+  // Confirmación tras enviar — SEMÁFORO SUAVE (verde/amarillo). NUNCA score, "rojo", ni diagnóstico.
+  if(S.par&&S.par.done){
+    const amar = S.par.done.nivel!=='bajo'; // bajo=verde; bajo-medio/medio/alto=amarillo
+    const box = amar
+      ? `<div style="background:#fff7ee;border:1.5px solid #f0c98a;border-radius:16px;padding:1.15rem 1.1rem">
+          <div style="font-weight:800;font-size:1.05rem;color:#8a5a10">Registramos tus valores</div>
+          <div style="font-size:.88rem;color:#7a5210;margin-top:.35rem;line-height:1.5">Un médico de MEDICAR podría contactarte. Si no te sentís bien o es una emergencia, llamá al <b>${TEL_EMERG}</b>.</div>
+          <a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:.85rem;background:var(--r);color:#fff;font-weight:800;padding:.8rem;border-radius:12px;text-decoration:none">${IC.phone}<span>Llamar al ${TEL_EMERG}</span></a>
+        </div>`
+      : `<div class="card" style="padding:1.15rem"><div style="font-weight:800;font-size:1.02rem;color:var(--g)">Tus valores están en rango ✓</div>
+          <div style="font-size:.86rem;color:var(--ink2);margin-top:.35rem;line-height:1.5">Gracias por registrar.</div></div>`;
+    return `<div class="home">
+      <div class="topbar"><img src="${ICON}" alt=""><div class="tb-t">Signos registrados</div><div class="tb-sp"></div><button class="mini" onclick="cerrarParams()">Volver</button></div>
+      ${box}
+      <div class="footer"><div class="foot-note">Tus valores quedaron registrados para tu equipo médico.</div></div>
+    </div>`;
+  }
+  const v=(S.par&&S.par.vals)||{};
+  const inputs=PARAMS.map(p=>`<div class="sec" style="margin-top:.9rem"><div style="font-weight:700;font-size:.9rem;margin-bottom:.4rem">${p.lbl} <span style="font-size:.72rem;color:var(--ink3);font-weight:500">(${p.uni})</span></div>
+    <input id="par-${p.k}" type="number" inputmode="decimal" step="${p.step}" min="${p.min}" max="${p.max}" value="${esc(v[p.k]||'')}" placeholder="opcional" style="width:100%;padding:.7rem .8rem;border:1.5px solid var(--line);border-radius:10px;font-size:1rem"></div>`).join('');
+  return `<div class="home">
+    <div class="topbar"><img src="${ICON}" alt=""><div class="tb-t">Registrar mis signos</div><div class="tb-sp"></div><button class="mini" onclick="cerrarParams()">Cerrar</button></div>
+    <div style="font-size:.85rem;color:var(--ink2);line-height:1.45">Cargá los que puedas medir (al menos uno). Los que no midas, dejalos vacíos.</div>
+    ${inputs}
+    <div class="err ${S.par&&S.par.err?'on':''}" style="margin-top:1rem">${esc(S.par&&S.par.err||'')}</div>
+    <button class="btn-r" style="margin-top:.8rem" onclick="enviarParams()">${S.par&&S.par.busy?'Enviando…':'Enviar'}</button>
+    <button class="btn-o" style="margin-top:.6rem" onclick="cerrarParams()">Cancelar</button>
+    <div class="footer"><div class="foot-note">Ante una emergencia, llamá directo al ${TEL_EMERG}.</div></div>
+  </div>`;
+}
+async function enviarParams(){
+  const c=S.cred||{}; if(!S.par||S.par.busy||!c.personaId) return;
+  parSync();
+  // Parseo + validación de rango de tipeo. Vacío → null (no medido). Fuera de rango → error.
+  const parsed={}; let algun=false, invalido=null;
+  for(const p of PARAMS){
+    const raw=(S.par.vals[p.k]||'').trim();
+    if(raw===''){ parsed[p.k]=null; continue; }
+    const n=Number(raw);
+    if(isNaN(n) || n<p.min || n>p.max){ invalido=p; break; }
+    parsed[p.k]=n; algun=true;
+  }
+  if(invalido){ S.par.err=`Revisá ${invalido.lbl}: tiene que estar entre ${invalido.min} y ${invalido.max} ${invalido.uni}.`; render(); return; }
+  if(!algun){ S.par.err='Cargá al menos un valor.'; render(); return; }
+  const n2=calcularNEWS2(parsed.fc, parsed.sis, parsed.temp, parsed.spo2);
+  S.par.busy=true; S.par.err=''; render();
+  try{
+    await db.collection('chequeos_parametros').add({
+      personaId:c.personaId, personaNombre:nombreDe(c.per,c.u),
+      personaTelefono: (c.per && c.per.telefono) || '',
+      fc:parsed.fc, sis:parsed.sis, temp:parsed.temp, spo2:parsed.spo2,
+      news2Score:n2.score, news2Parcial:n2.parcial, news2RedScore:n2.redScore, news2Nivel:n2.nivel,
+      creadoEn: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    S.par.busy=false; S.par.done={ nivel:n2.nivel }; render(); // done SOLO lleva el nivel para el semáforo suave
+  }catch(e){
+    console.warn('[parametros] no se pudo enviar:', e);
+    S.par.busy=false; S.par.err='No pudimos registrar tus valores. Probá de nuevo en un momento.'; render();
+  }
+}
+
 function render(){
   const root=el('app'); if(!root) return;
   let html='';
@@ -695,6 +807,7 @@ function render(){
     case 'home': html=homeView(); break;
     case 'chequeo': html=chequeoFormView(); break;
     case 'reporte': html=reporteFormView(); break;
+    case 'parametros': html=paramsFormView(); break;
     default: html=bootView();
   }
   root.innerHTML=html;
