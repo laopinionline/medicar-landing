@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MEDICAR — Socio</title>
 <meta name="description" content="Credencial digital del socio de MEDICAR.">
-<meta name="theme-color" content="#DC1400">
+<meta name="theme-color" content="#ED1C24">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -20,96 +20,451 @@
 
 <style>
 :root{
-  --r:#DC1400; --r-dk:#B01000; --o:#F07800;
-  --bg:#F0EDE7; --card:#FFFFFF; --dark:#141414;
-  --ink:#1A1A1A; --ink2:#555555; --ink3:#999999;
-  --line:#E5E0D8; --g:#1D9E75;
+  /* tokens de marca (sistema-visual.html · manual Bidondo) */
+  --rojo:#ED1C24; --rojo-hondo:#C8151C; --naranja:#F7941E;
+  --tinta:#1A1A1A; --gris:#6B7075; --linea:#E7E9EC; --nieve:#F7F8FA;
+  --blanco:#FFFFFF; --verde:#2E8B57; --ambar:#E6A100;
+  --radio:16px;
+  --sombra:0 1px 2px rgba(20,22,25,.04), 0 8px 24px rgba(20,22,25,.06);
+  --sombra-alta:0 2px 4px rgba(20,22,25,.05), 0 18px 48px rgba(20,22,25,.12);
+  /* ALIAS: nombres viejos -> tokens nuevos (vistas aun no redisenadas siguen andando con la paleta nueva) */
+  --r:var(--rojo); --r-dk:var(--rojo-hondo); --o:var(--naranja);
+  --bg:var(--nieve); --card:var(--blanco); --dark:var(--tinta);
+  --ink:var(--tinta); --ink2:var(--gris); --ink3:#9AA0A6; --line:var(--linea); --g:var(--verde);
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+html,body{background:var(--nieve);color:var(--tinta);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
 body{min-height:100svh;min-height:100vh}
-#app{max-width:480px;margin:0 auto;min-height:100svh;display:flex;flex-direction:column}
+#app{max-width:480px;margin:0 auto;min-height:100svh;display:flex;flex-direction:column;background:var(--blanco)}
 button{font-family:inherit;cursor:pointer;border:none}
 input{font-family:inherit}
 
-/* ---------- LOGIN ---------- */
-.login{flex:1;display:flex;flex-direction:column;background:var(--dark);position:relative;overflow:hidden}
-.login-bg{position:absolute;right:-2rem;top:-1rem;font-size:9rem;font-weight:800;color:rgba(255,255,255,.04);letter-spacing:-.05em;pointer-events:none}
-.login-top{padding:3.2rem 1.6rem 1.6rem;position:relative;z-index:1}
-.login-logo{width:64px;height:64px;border-radius:16px;display:block}
-.login-h1{color:#fff;font-size:1.7rem;font-weight:800;margin-top:1rem;letter-spacing:-.02em}
-.login-h1 em{color:var(--r);font-style:normal}
-.login-sub{color:rgba(255,255,255,.55);font-size:.86rem;margin-top:.25rem}
-.sheet{background:var(--bg);border-radius:22px 22px 0 0;margin-top:auto;padding:1.7rem 1.6rem calc(1.6rem + env(safe-area-inset-bottom));position:relative;z-index:1}
-.sheet h2{font-size:1.15rem;font-weight:800;margin-bottom:1rem}
-.field{margin-bottom:.85rem}
-.field label{display:block;font-size:.74rem;font-weight:700;color:var(--ink2);margin-bottom:.32rem}
-.field input{width:100%;padding:.8rem .9rem;border:1.5px solid var(--line);border-radius:12px;font-size:1rem;background:#fff;outline:none}
-.field input:focus{border-color:var(--r)}
-.btn-r{width:100%;background:var(--r);color:#fff;font-weight:800;font-size:1rem;padding:.9rem;border-radius:12px}
-.btn-r:active{background:var(--r-dk)}
-.btn-o{width:100%;background:transparent;color:var(--ink);font-weight:700;font-size:.95rem;padding:.8rem;border-radius:12px;border:1.5px solid var(--line)}
-.btn-o:active{background:#0000000a}
-.err{display:none;background:#FDECEC;color:#B01000;font-size:.82rem;font-weight:600;padding:.6rem .75rem;border-radius:10px;margin-bottom:.8rem}
+/* ---------- MARCA (chevron + palabra, PEGADOS) ---------- */
+.chev{display:inline-block;vertical-align:middle;flex:none}
+.brand{display:inline-flex;align-items:center;gap:2px}
+.brand .word{font-style:italic;font-weight:800;letter-spacing:-.02em;color:var(--rojo);line-height:1}
+@keyframes spin-pulse{0%{transform:translateX(-6px);opacity:.4}50%{transform:translateX(6px);opacity:1}100%{transform:translateX(-6px);opacity:.4}}
+@keyframes pbeat{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+.chev-load{animation:spin-pulse 1.1s ease-in-out infinite}
+
+/* ---------- LOGIN (blanco, limpio) ---------- */
+.login{flex:1;display:flex;flex-direction:column;justify-content:center;padding:2.4rem 1.7rem calc(2rem + env(safe-area-inset-bottom));background:var(--blanco)}
+.login-brand{display:flex;flex-direction:column;gap:.7rem;margin-bottom:2.2rem}
+.login-brand .brand .word{font-size:2.1rem}
+.login-brand .login-sub{color:var(--gris);font-size:.9rem;font-weight:500}
+.login h2{font-size:1.05rem;font-weight:800;margin-bottom:1.1rem;color:var(--tinta)}
+
+/* ---------- CAMPOS / BOTONES ---------- */
+.field{margin-bottom:1rem}
+.field label{display:block;font-size:.7rem;font-weight:800;color:var(--gris);margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.05em}
+.field input,.field textarea{width:100%;padding:.85rem .95rem;border:1.5px solid var(--linea);border-radius:12px;font-size:1rem;background:var(--nieve);outline:none;color:var(--tinta)}
+.field input:focus,.field textarea:focus{border-color:var(--rojo);background:#fff}
+.btn-r{display:inline-flex;align-items:center;justify-content:center;gap:.55rem;width:100%;background:var(--rojo);color:#fff;font-weight:800;font-size:1rem;padding:.95rem;border-radius:12px;box-shadow:var(--sombra)}
+.btn-r:active{background:var(--rojo-hondo)}
+.btn-r .chev{transition:transform .2s ease}
+.btn-r:hover .chev{transform:translateX(4px)}
+.btn-o{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;background:transparent;color:var(--tinta);font-weight:700;font-size:.95rem;padding:.85rem;border-radius:12px;border:1.5px solid var(--linea)}
+.btn-o:active{background:var(--nieve)}
+.err{display:none;background:#FDECEC;color:var(--rojo-hondo);font-size:.82rem;font-weight:600;padding:.65rem .8rem;border-radius:10px;margin-bottom:.85rem}
 .err.on{display:block}
 
 /* ---------- HOME ---------- */
-.home{flex:1;display:flex;flex-direction:column;padding:1.2rem 1.1rem calc(1.4rem + env(safe-area-inset-bottom))}
+.home{flex:1;display:flex;flex-direction:column;padding:1.2rem 1.1rem calc(1.4rem + env(safe-area-inset-bottom));background:var(--blanco)}
 .topbar{display:flex;align-items:center;gap:.6rem;margin-bottom:1.1rem}
-.topbar img{width:38px;height:38px;border-radius:10px}
-.topbar .tb-t{font-weight:800;font-size:1.05rem;letter-spacing:-.02em}
-.topbar .tb-t em{color:var(--r);font-style:normal}
+.topbar .brand .word{font-size:1.15rem}
+.topbar .tb-t{font-weight:800;font-size:1.05rem;letter-spacing:-.02em;color:var(--tinta)}
+.topbar .tb-t em{color:var(--rojo);font-style:normal}
 .topbar .tb-sp{margin-left:auto}
-.mini{background:none;color:var(--ink3);font-size:.78rem;font-weight:700;padding:.4rem .2rem}
+.mini{background:none;color:var(--gris);font-size:.78rem;font-weight:700;padding:.4rem .2rem}
 
-/* credencial */
-.cred{background:linear-gradient(150deg,#1c1c1c 0%,#2a1210 55%,var(--r-dk) 130%);color:#fff;border-radius:20px;padding:1.3rem 1.3rem 1.4rem;position:relative;overflow:hidden;box-shadow:0 10px 30px -12px rgba(0,0,0,.5)}
-.cred::after{content:"";position:absolute;right:-40px;bottom:-50px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.04)}
-.cred-top{display:flex;justify-content:space-between;align-items:flex-start;position:relative;z-index:1}
-.cred-brand{font-weight:800;letter-spacing:.02em;font-size:1rem}
-.cred-brand em{color:#ff6a58;font-style:normal}
-.cred-chip{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:.28rem .55rem;border-radius:999px}
-.chip-on{background:rgba(29,158,117,.25);color:#7ff0c8;border:1px solid rgba(29,158,117,.5)}
-.chip-off{background:rgba(229,72,77,.22);color:#ff9a9a;border:1px solid rgba(229,72,77,.5)}
-.cred-name{font-size:1.45rem;font-weight:800;margin-top:1.1rem;line-height:1.15;position:relative;z-index:1}
-.cred-num{font-size:1.5rem;font-weight:800;letter-spacing:.08em;margin-top:.9rem;font-variant-numeric:tabular-nums;position:relative;z-index:1}
-.cred-num-lbl{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.5);margin-bottom:.05rem}
-.cred-grid{display:flex;gap:1.4rem;margin-top:1rem;position:relative;z-index:1;flex-wrap:wrap}
-.cred-cell .cc-l{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:rgba(255,255,255,.5)}
-.cred-cell .cc-v{font-size:.95rem;font-weight:700;margin-top:.1rem}
+/* ---------- CREDENCIAL (mockup sistema visual) ---------- */
+.cred{border-radius:20px;padding:1.3rem 1.3rem 1.4rem;color:#fff;position:relative;overflow:hidden;background:linear-gradient(135deg,#2a2d31,#1a1a1a);box-shadow:var(--sombra-alta)}
+.cred .lines-bg{position:absolute;right:-8px;top:-6px;opacity:.16;pointer-events:none}
+.cred-top{display:flex;justify-content:space-between;align-items:center;position:relative;z-index:1}
+.cred .cred-brand{display:inline-flex;align-items:center;gap:2px;font-style:italic;font-weight:800;font-size:.95rem}
+.cred .est{font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;font-weight:800;color:#25d07a}
+.cred .est.off{color:#ff9a9a}
+.cred .nom{font-size:1.4rem;font-weight:800;font-style:italic;margin-top:1rem;line-height:1.15;position:relative;z-index:1}
+.cred-num-lbl{font-size:.58rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em;color:#9aa0a6;margin-bottom:.05rem}
+.cred-num{font-size:1.5rem;font-weight:800;letter-spacing:.06em;font-variant-numeric:tabular-nums}
+.cred .grid{display:flex;gap:1.5rem;margin-top:1rem;flex-wrap:wrap;position:relative;z-index:1}
+.cred .grid .cell span{display:block;font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:#9aa0a6;font-weight:800}
+.cred .grid .cell b{font-size:.95rem;font-weight:700;margin-top:.1rem;display:block}
 
+/* ---------- SECCIONES / TARJETAS (transicional para el resto del home) ---------- */
 .sec{margin-top:1.3rem}
-.sec-h{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);margin:0 .2rem .5rem}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden}
-.row{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.85rem 1rem;border-bottom:1px solid var(--line)}
+.sec-h{font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--gris);margin:0 .2rem .5rem}
+.card{background:#fff;border:1px solid var(--linea);border-radius:var(--radio);overflow:hidden;box-shadow:var(--sombra)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.85rem 1rem;border-bottom:1px solid var(--linea)}
 .row:last-child{border-bottom:none}
-.row .rl{font-size:.8rem;color:var(--ink2);font-weight:600}
+.row .rl{font-size:.8rem;color:var(--gris);font-weight:600}
 .row .rv{font-size:.9rem;font-weight:700;text-align:right}
-
-.btn-emerg{display:flex;align-items:center;justify-content:center;gap:.6rem;width:100%;background:var(--r);color:#fff;font-weight:800;font-size:1.15rem;padding:1.05rem;border-radius:16px;text-decoration:none;margin-top:1.3rem;box-shadow:0 8px 20px -8px rgba(220,20,0,.6)}
-.btn-emerg:active{background:var(--r-dk)}
-.btn-emerg .em-sub{display:block;font-size:.66rem;font-weight:700;opacity:.85;letter-spacing:.04em}
+.btn-emerg{display:flex;align-items:center;justify-content:center;gap:.6rem;width:100%;background:var(--rojo);color:#fff;font-weight:800;font-size:1.15rem;padding:1.05rem;border-radius:16px;text-decoration:none;margin-top:1.3rem;box-shadow:0 8px 20px -8px rgba(237,28,36,.55)}
+.btn-emerg:active{background:var(--rojo-hondo)}
+.btn-emerg .em-sub{display:block;font-size:.66rem;font-weight:700;opacity:.9;letter-spacing:.04em}
 .btn-emerg svg{width:26px;height:26px;flex:none}
-
-.hint{display:flex;gap:.65rem;align-items:flex-start;background:#fff7ee;border:1px solid #f3d9b8;border-radius:14px;padding:.8rem .9rem;margin-top:1.2rem;font-size:.8rem;color:#8a5a10;line-height:1.45}
-.hint svg{width:20px;height:20px;flex:none;color:var(--o);margin-top:.05rem}
-.hint b{color:#6e4708}
-.installed{margin-top:1.2rem;text-align:center;font-size:.76rem;color:var(--g);font-weight:700}
-
+.hint{display:flex;gap:.65rem;align-items:flex-start;background:var(--nieve);border:1px solid var(--linea);border-radius:14px;padding:.8rem .9rem;margin-top:1.2rem;font-size:.8rem;color:var(--gris);line-height:1.45}
+.hint svg{width:20px;height:20px;flex:none;color:var(--naranja);margin-top:.05rem}
+.hint b{color:var(--tinta)}
+.installed{margin-top:1.2rem;text-align:center;font-size:.76rem;color:var(--verde);font-weight:700}
 .footer{margin-top:auto;padding-top:1.5rem}
 .foot-note{text-align:center;font-size:.68rem;color:var(--ink3);margin-top:.9rem;line-height:1.5}
 
-/* estados especiales */
-.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:2rem 1.6rem;gap:.8rem}
+/* ---------- estados especiales ---------- */
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:2rem 1.6rem;gap:.85rem;background:var(--blanco)}
 .center .big{font-size:2.6rem}
-.center h3{font-size:1.15rem;font-weight:800}
-.center p{font-size:.9rem;color:var(--ink2);line-height:1.5;max-width:22rem}
+.center h3{font-size:1.15rem;font-weight:800;color:var(--tinta)}
+.center p{font-size:.9rem;color:var(--gris);line-height:1.5;max-width:22rem}
 .center .btn-o,.center .btn-r{max-width:16rem}
-.spin{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--r);border-radius:50%;animation:sp .8s linear infinite}
+.spin{width:34px;height:34px;border:3px solid var(--linea);border-top-color:var(--rojo);border-radius:50%;animation:sp .8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="cm" viewBox="0 0 1794 2190">
+    <g class="ar-in" transform="translate(0.000000,2190.000000) scale(0.100000,-0.100000)" fill="#F7941E"><path d="M2358 16416 c-43 -45 -78 -89 -78 -97 0 -8 -20 -35 -45 -59 -25 -24
+-45 -51 -45 -60 0 -9 -20 -36 -45 -60 -25 -24 -45 -52 -45 -61 0 -9 -7 -22
+-15 -29 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -29 0
+-10 -13 -30 -30 -46 -16 -16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15
+-27 -15 -45 0 -18 -7 -38 -15 -45 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30
+-8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7
+-38 -15 -45 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30 -15
+-60 0 -30 -6 -52 -15 -60 -10 -9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75 -12
+-10 -15 -37 -15 -120 0 -83 -3 -110 -15 -120 -22 -18 -22 -402 0 -420 11 -9
+15 -35 15 -105 0 -70 4 -96 15 -105 10 -9 15 -32 15 -75 0 -43 5 -66 15 -75 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -27 15 -45 0 -18 7 -38 15 -45 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -29 0 -10 13 -30 30 -46
+17 -16 30 -36 30 -46 0 -9 7 -22 15 -29 8 -7 15 -20 15 -29 0 -10 14 -30 30
+-46 17 -16 30 -36 30 -45 0 -9 20 -36 45 -60 25 -24 45 -51 45 -60 0 -8 263
+-278 585 -600 322 -322 585 -592 585 -600 0 -8 270 -285 600 -615 330 -330
+600 -600 600 -600 0 0 -493 -493 -1095 -1095 -602 -602 -1095 -1102 -1095
+-1110 0 -9 -40 -56 -90 -105 -49 -49 -90 -97 -90 -105 0 -9 -20 -36 -45 -60
+-25 -24 -45 -51 -45 -60 0 -9 -13 -29 -30 -45 -16 -16 -30 -36 -30 -45 0 -9
+-13 -29 -30 -45 -16 -16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20
+-15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8
+-7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23
+-15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -8 -7 -15 -27 -15 -45 0
+-18 -7 -38 -15 -45 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30
+-15 -60 0 -30 -6 -52 -15 -60 -10 -9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75
+-11 -9 -15 -35 -15 -105 0 -70 -4 -96 -15 -105 -22 -18 -22 -402 0 -420 12
+-10 15 -37 15 -120 0 -83 3 -110 15 -120 10 -9 15 -32 15 -75 0 -43 5 -66 15
+-75 9 -8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15
+-45 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15
+-45 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15
+-30 8 -7 15 -27 15 -44 0 -23 9 -41 30 -61 16 -16 30 -36 30 -46 0 -9 7 -22
+15 -29 8 -7 15 -20 15 -29 0 -10 13 -30 30 -46 17 -16 30 -36 30 -45 0 -9 14
+-29 30 -45 17 -16 30 -36 30 -45 0 -9 20 -35 45 -60 24 -24 45 -51 47 -61 2
+-13 152 -179 162 -179 11 0 4782 4785 4784 4798 2 10 23 38 47 62 25 25 45 52
+45 61 0 9 7 22 15 29 8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20 15 30 0 10 7
+23 15 30 8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20 15 30 0 10 7 23 15 30 8
+7 15 27 15 45 0 18 7 38 15 45 9 8 15 30 15 60 0 30 6 52 15 60 11 9 15 33 15
+90 0 57 4 81 15 90 12 10 15 38 15 135 0 97 -3 125 -15 135 -11 9 -15 33 -15
+90 0 57 -4 81 -15 90 -9 8 -15 30 -15 60 0 30 -6 52 -15 60 -8 7 -15 27 -15
+45 0 18 -7 38 -15 45 -8 7 -15 20 -15 30 0 10 -7 23 -15 30 -8 7 -15 20 -15
+30 0 10 -7 23 -15 30 -8 7 -15 20 -15 30 0 10 -7 23 -15 30 -8 7 -15 20 -15
+30 0 10 -7 23 -15 30 -8 7 -15 20 -15 29 0 9 -20 36 -45 61 -24 24 -45 52 -47
+62 -3 17 -4777 4800 -4788 4797 -3 -1 -40 -38 -82 -83z"/></g>
+    <g class="ar-out" transform="translate(0.000000,2190.000000) scale(0.100000,-0.100000)" fill="#ED1C24"><path d="M7068 19896 c-76 -78 -138 -149 -138 -157 0 -8 -20 -35 -45 -59 -25
+-24 -45 -51 -45 -60 0 -9 -20 -36 -45 -60 -25 -24 -45 -51 -45 -60 0 -9 -13
+-29 -30 -45 -16 -16 -30 -36 -30 -45 0 -9 -13 -29 -30 -45 -16 -16 -30 -36
+-30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -29 0 -10 -13 -30 -30 -46 -16
+-16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -30 0 -10 -7 -23
+-15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0
+-10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20
+-15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -8
+-7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38
+-15 -45 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0
+-18 -7 -38 -15 -45 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30
+-15 -60 0 -30 -6 -52 -15 -60 -9 -8 -15 -30 -15 -60 0 -30 -6 -52 -15 -60 -10
+-9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75 -10 -9 -15 -32 -15 -75 0 -43 -5 -66
+-15 -75 -12 -10 -15 -37 -15 -120 0 -83 -3 -110 -15 -120 -13 -11 -15 -67 -15
+-390 0 -323 2 -379 15 -390 12 -10 15 -37 15 -120 0 -83 3 -110 15 -120 10 -9
+15 -32 15 -75 0 -43 5 -66 15 -75 10 -9 15 -32 15 -75 0 -43 5 -66 15 -75 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -29 0 -10 14 -30 30 -46
+17 -16 30 -36 30 -46 0 -9 7 -22 15 -29 8 -7 15 -20 15 -29 0 -10 14 -30 30
+-46 17 -16 30 -36 30 -45 0 -9 13 -29 30 -45 16 -16 30 -36 30 -45 0 -9 20
+-36 45 -60 25 -24 45 -51 45 -60 0 -9 27 -42 60 -75 33 -33 60 -66 60 -75 0
+-8 851 -866 1890 -1905 1040 -1039 1890 -1897 1890 -1905 0 -8 -850 -866
+-1890 -1905 -1039 -1039 -1890 -1897 -1890 -1905 0 -9 -27 -42 -60 -75 -33
+-33 -60 -66 -60 -75 0 -9 -20 -36 -45 -60 -25 -24 -45 -51 -45 -60 0 -9 -13
+-29 -30 -45 -16 -16 -30 -36 -30 -45 0 -9 -13 -29 -30 -45 -16 -16 -30 -36
+-30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -29 0 -10 -13 -30 -30 -46 -16
+-16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -30 0 -10 -7 -23
+-15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0
+-10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20
+-15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -8
+-7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38
+-15 -45 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0
+-18 -7 -38 -15 -45 -9 -8 -15 -30 -15 -60 0 -30 -6 -52 -15 -60 -8 -7 -15 -27
+-15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30 -15 -60 0 -30 -6 -52 -15 -60 -10
+-9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75 -10 -9 -15 -32 -15 -75 0 -43 -5 -66
+-15 -75 -12 -10 -15 -37 -15 -120 0 -83 -3 -110 -15 -120 -13 -11 -15 -67 -15
+-390 0 -323 2 -379 15 -390 12 -10 15 -37 15 -120 0 -83 3 -110 15 -120 10 -9
+15 -32 15 -75 0 -43 5 -66 15 -75 10 -9 15 -32 15 -75 0 -43 5 -66 15 -75 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 9 -8 15 -30 15 -60 0 -30 6 -52 15 -60 8
+-7 15 -27 15 -45 0 -18 7 -38 15 -45 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -29 0 -10 13 -30 30 -46
+16 -16 30 -36 30 -46 0 -9 7 -22 15 -29 8 -7 15 -20 15 -29 0 -10 14 -30 30
+-46 16 -16 30 -36 30 -45 0 -9 13 -29 30 -45 16 -16 30 -36 30 -45 0 -9 20
+-36 45 -60 25 -24 45 -51 45 -60 0 -9 20 -35 45 -60 24 -24 45 -51 47 -61 2
+-13 272 -299 282 -299 1 0 1725 1723 3831 3830 2107 2106 3831 3838 3833 3848
+2 10 30 45 62 77 33 33 60 66 60 75 0 9 20 36 45 60 25 24 45 52 45 61 0 9 7
+22 15 29 8 7 15 20 15 29 0 10 14 30 30 46 17 16 30 36 30 46 0 9 7 22 15 29
+8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20
+15 30 0 10 7 23 15 30 8 7 15 27 15 45 0 18 7 38 15 45 8 7 15 27 15 45 0 18
+7 38 15 45 8 7 15 27 15 45 0 18 7 38 15 45 9 8 15 30 15 60 0 30 6 52 15 60
+10 9 15 32 15 75 0 43 5 66 15 75 12 10 15 38 15 135 0 97 3 125 15 135 12 10
+15 37 15 120 0 83 -3 110 -15 120 -12 10 -15 38 -15 135 0 97 -3 125 -15 135
+-10 9 -15 32 -15 75 0 43 -5 66 -15 75 -9 8 -15 30 -15 60 0 30 -6 52 -15 60
+-8 7 -15 27 -15 45 0 18 -7 38 -15 45 -8 7 -15 27 -15 45 0 18 -7 38 -15 45
+-8 7 -15 27 -15 45 0 18 -7 38 -15 45 -8 7 -15 20 -15 30 0 10 -7 23 -15 30
+-8 7 -15 20 -15 30 0 10 -7 23 -15 30 -8 7 -15 20 -15 30 0 10 -7 23 -15 30
+-8 7 -15 20 -15 29 0 10 -13 30 -30 46 -16 16 -30 36 -30 46 0 9 -7 22 -15 29
+-8 7 -15 20 -15 29 0 9 -20 37 -45 61 -25 24 -45 51 -45 60 0 9 -27 42 -60 75
+-32 32 -60 67 -62 77 -3 17 -7657 7680 -7668 7677 -3 -1 -67 -66 -142 -143z"/></g>
+  </symbol>
+  <symbol id="cw" viewBox="0 0 1794 2190">
+    <g class="ar-in" transform="translate(0.000000,2190.000000) scale(0.100000,-0.100000)" fill="rgba(255,255,255,.6)"><path d="M2358 16416 c-43 -45 -78 -89 -78 -97 0 -8 -20 -35 -45 -59 -25 -24
+-45 -51 -45 -60 0 -9 -20 -36 -45 -60 -25 -24 -45 -52 -45 -61 0 -9 -7 -22
+-15 -29 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -29 0
+-10 -13 -30 -30 -46 -16 -16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15
+-27 -15 -45 0 -18 -7 -38 -15 -45 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30
+-8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7
+-38 -15 -45 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30 -15
+-60 0 -30 -6 -52 -15 -60 -10 -9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75 -12
+-10 -15 -37 -15 -120 0 -83 -3 -110 -15 -120 -22 -18 -22 -402 0 -420 11 -9
+15 -35 15 -105 0 -70 4 -96 15 -105 10 -9 15 -32 15 -75 0 -43 5 -66 15 -75 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -27 15 -45 0 -18 7 -38 15 -45 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -29 0 -10 13 -30 30 -46
+17 -16 30 -36 30 -46 0 -9 7 -22 15 -29 8 -7 15 -20 15 -29 0 -10 14 -30 30
+-46 17 -16 30 -36 30 -45 0 -9 20 -36 45 -60 25 -24 45 -51 45 -60 0 -8 263
+-278 585 -600 322 -322 585 -592 585 -600 0 -8 270 -285 600 -615 330 -330
+600 -600 600 -600 0 0 -493 -493 -1095 -1095 -602 -602 -1095 -1102 -1095
+-1110 0 -9 -40 -56 -90 -105 -49 -49 -90 -97 -90 -105 0 -9 -20 -36 -45 -60
+-25 -24 -45 -51 -45 -60 0 -9 -13 -29 -30 -45 -16 -16 -30 -36 -30 -45 0 -9
+-13 -29 -30 -45 -16 -16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20
+-15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8
+-7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23
+-15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -8 -7 -15 -27 -15 -45 0
+-18 -7 -38 -15 -45 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30
+-15 -60 0 -30 -6 -52 -15 -60 -10 -9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75
+-11 -9 -15 -35 -15 -105 0 -70 -4 -96 -15 -105 -22 -18 -22 -402 0 -420 12
+-10 15 -37 15 -120 0 -83 3 -110 15 -120 10 -9 15 -32 15 -75 0 -43 5 -66 15
+-75 9 -8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15
+-45 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15
+-45 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15
+-30 8 -7 15 -27 15 -44 0 -23 9 -41 30 -61 16 -16 30 -36 30 -46 0 -9 7 -22
+15 -29 8 -7 15 -20 15 -29 0 -10 13 -30 30 -46 17 -16 30 -36 30 -45 0 -9 14
+-29 30 -45 17 -16 30 -36 30 -45 0 -9 20 -35 45 -60 24 -24 45 -51 47 -61 2
+-13 152 -179 162 -179 11 0 4782 4785 4784 4798 2 10 23 38 47 62 25 25 45 52
+45 61 0 9 7 22 15 29 8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20 15 30 0 10 7
+23 15 30 8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20 15 30 0 10 7 23 15 30 8
+7 15 27 15 45 0 18 7 38 15 45 9 8 15 30 15 60 0 30 6 52 15 60 11 9 15 33 15
+90 0 57 4 81 15 90 12 10 15 38 15 135 0 97 -3 125 -15 135 -11 9 -15 33 -15
+90 0 57 -4 81 -15 90 -9 8 -15 30 -15 60 0 30 -6 52 -15 60 -8 7 -15 27 -15
+45 0 18 -7 38 -15 45 -8 7 -15 20 -15 30 0 10 -7 23 -15 30 -8 7 -15 20 -15
+30 0 10 -7 23 -15 30 -8 7 -15 20 -15 30 0 10 -7 23 -15 30 -8 7 -15 20 -15
+30 0 10 -7 23 -15 30 -8 7 -15 20 -15 29 0 9 -20 36 -45 61 -24 24 -45 52 -47
+62 -3 17 -4777 4800 -4788 4797 -3 -1 -40 -38 -82 -83z"/></g>
+    <g class="ar-out" transform="translate(0.000000,2190.000000) scale(0.100000,-0.100000)" fill="#ffffff"><path d="M7068 19896 c-76 -78 -138 -149 -138 -157 0 -8 -20 -35 -45 -59 -25
+-24 -45 -51 -45 -60 0 -9 -20 -36 -45 -60 -25 -24 -45 -51 -45 -60 0 -9 -13
+-29 -30 -45 -16 -16 -30 -36 -30 -45 0 -9 -13 -29 -30 -45 -16 -16 -30 -36
+-30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -29 0 -10 -13 -30 -30 -46 -16
+-16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -30 0 -10 -7 -23
+-15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0
+-10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20
+-15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -8
+-7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38
+-15 -45 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0
+-18 -7 -38 -15 -45 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30
+-15 -60 0 -30 -6 -52 -15 -60 -9 -8 -15 -30 -15 -60 0 -30 -6 -52 -15 -60 -10
+-9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75 -10 -9 -15 -32 -15 -75 0 -43 -5 -66
+-15 -75 -12 -10 -15 -37 -15 -120 0 -83 -3 -110 -15 -120 -13 -11 -15 -67 -15
+-390 0 -323 2 -379 15 -390 12 -10 15 -37 15 -120 0 -83 3 -110 15 -120 10 -9
+15 -32 15 -75 0 -43 5 -66 15 -75 10 -9 15 -32 15 -75 0 -43 5 -66 15 -75 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -29 0 -10 14 -30 30 -46
+17 -16 30 -36 30 -46 0 -9 7 -22 15 -29 8 -7 15 -20 15 -29 0 -10 14 -30 30
+-46 17 -16 30 -36 30 -45 0 -9 13 -29 30 -45 16 -16 30 -36 30 -45 0 -9 20
+-36 45 -60 25 -24 45 -51 45 -60 0 -9 27 -42 60 -75 33 -33 60 -66 60 -75 0
+-8 851 -866 1890 -1905 1040 -1039 1890 -1897 1890 -1905 0 -8 -850 -866
+-1890 -1905 -1039 -1039 -1890 -1897 -1890 -1905 0 -9 -27 -42 -60 -75 -33
+-33 -60 -66 -60 -75 0 -9 -20 -36 -45 -60 -25 -24 -45 -51 -45 -60 0 -9 -13
+-29 -30 -45 -16 -16 -30 -36 -30 -45 0 -9 -13 -29 -30 -45 -16 -16 -30 -36
+-30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -29 0 -10 -13 -30 -30 -46 -16
+-16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -30 0 -10 -7 -23
+-15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0
+-10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20
+-15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -8
+-7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38
+-15 -45 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0
+-18 -7 -38 -15 -45 -9 -8 -15 -30 -15 -60 0 -30 -6 -52 -15 -60 -8 -7 -15 -27
+-15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30 -15 -60 0 -30 -6 -52 -15 -60 -10
+-9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75 -10 -9 -15 -32 -15 -75 0 -43 -5 -66
+-15 -75 -12 -10 -15 -37 -15 -120 0 -83 -3 -110 -15 -120 -13 -11 -15 -67 -15
+-390 0 -323 2 -379 15 -390 12 -10 15 -37 15 -120 0 -83 3 -110 15 -120 10 -9
+15 -32 15 -75 0 -43 5 -66 15 -75 10 -9 15 -32 15 -75 0 -43 5 -66 15 -75 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 9 -8 15 -30 15 -60 0 -30 6 -52 15 -60 8
+-7 15 -27 15 -45 0 -18 7 -38 15 -45 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -29 0 -10 13 -30 30 -46
+16 -16 30 -36 30 -46 0 -9 7 -22 15 -29 8 -7 15 -20 15 -29 0 -10 14 -30 30
+-46 16 -16 30 -36 30 -45 0 -9 13 -29 30 -45 16 -16 30 -36 30 -45 0 -9 20
+-36 45 -60 25 -24 45 -51 45 -60 0 -9 20 -35 45 -60 24 -24 45 -51 47 -61 2
+-13 272 -299 282 -299 1 0 1725 1723 3831 3830 2107 2106 3831 3838 3833 3848
+2 10 30 45 62 77 33 33 60 66 60 75 0 9 20 36 45 60 25 24 45 52 45 61 0 9 7
+22 15 29 8 7 15 20 15 29 0 10 14 30 30 46 17 16 30 36 30 46 0 9 7 22 15 29
+8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20
+15 30 0 10 7 23 15 30 8 7 15 27 15 45 0 18 7 38 15 45 8 7 15 27 15 45 0 18
+7 38 15 45 8 7 15 27 15 45 0 18 7 38 15 45 9 8 15 30 15 60 0 30 6 52 15 60
+10 9 15 32 15 75 0 43 5 66 15 75 12 10 15 38 15 135 0 97 3 125 15 135 12 10
+15 37 15 120 0 83 -3 110 -15 120 -12 10 -15 38 -15 135 0 97 -3 125 -15 135
+-10 9 -15 32 -15 75 0 43 -5 66 -15 75 -9 8 -15 30 -15 60 0 30 -6 52 -15 60
+-8 7 -15 27 -15 45 0 18 -7 38 -15 45 -8 7 -15 27 -15 45 0 18 -7 38 -15 45
+-8 7 -15 27 -15 45 0 18 -7 38 -15 45 -8 7 -15 20 -15 30 0 10 -7 23 -15 30
+-8 7 -15 20 -15 30 0 10 -7 23 -15 30 -8 7 -15 20 -15 30 0 10 -7 23 -15 30
+-8 7 -15 20 -15 29 0 10 -13 30 -30 46 -16 16 -30 36 -30 46 0 9 -7 22 -15 29
+-8 7 -15 20 -15 29 0 9 -20 37 -45 61 -25 24 -45 51 -45 60 0 9 -27 42 -60 75
+-32 32 -60 67 -62 77 -3 17 -7657 7680 -7668 7677 -3 -1 -67 -66 -142 -143z"/></g>
+  </symbol>
+  <symbol id="cmono" viewBox="0 0 1794 2190">
+    <g class="ar-in" transform="translate(0.000000,2190.000000) scale(0.100000,-0.100000)" fill="#B4B8BD"><path d="M2358 16416 c-43 -45 -78 -89 -78 -97 0 -8 -20 -35 -45 -59 -25 -24
+-45 -51 -45 -60 0 -9 -20 -36 -45 -60 -25 -24 -45 -52 -45 -61 0 -9 -7 -22
+-15 -29 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -29 0
+-10 -13 -30 -30 -46 -16 -16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15
+-27 -15 -45 0 -18 -7 -38 -15 -45 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30
+-8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7
+-38 -15 -45 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30 -15
+-60 0 -30 -6 -52 -15 -60 -10 -9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75 -12
+-10 -15 -37 -15 -120 0 -83 -3 -110 -15 -120 -22 -18 -22 -402 0 -420 11 -9
+15 -35 15 -105 0 -70 4 -96 15 -105 10 -9 15 -32 15 -75 0 -43 5 -66 15 -75 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -27 15 -45 0 -18 7 -38 15 -45 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -29 0 -10 13 -30 30 -46
+17 -16 30 -36 30 -46 0 -9 7 -22 15 -29 8 -7 15 -20 15 -29 0 -10 14 -30 30
+-46 17 -16 30 -36 30 -45 0 -9 20 -36 45 -60 25 -24 45 -51 45 -60 0 -8 263
+-278 585 -600 322 -322 585 -592 585 -600 0 -8 270 -285 600 -615 330 -330
+600 -600 600 -600 0 0 -493 -493 -1095 -1095 -602 -602 -1095 -1102 -1095
+-1110 0 -9 -40 -56 -90 -105 -49 -49 -90 -97 -90 -105 0 -9 -20 -36 -45 -60
+-25 -24 -45 -51 -45 -60 0 -9 -13 -29 -30 -45 -16 -16 -30 -36 -30 -45 0 -9
+-13 -29 -30 -45 -16 -16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20
+-15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8
+-7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23
+-15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -8 -7 -15 -27 -15 -45 0
+-18 -7 -38 -15 -45 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30
+-15 -60 0 -30 -6 -52 -15 -60 -10 -9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75
+-11 -9 -15 -35 -15 -105 0 -70 -4 -96 -15 -105 -22 -18 -22 -402 0 -420 12
+-10 15 -37 15 -120 0 -83 3 -110 15 -120 10 -9 15 -32 15 -75 0 -43 5 -66 15
+-75 9 -8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15
+-45 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15
+-45 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15
+-30 8 -7 15 -27 15 -44 0 -23 9 -41 30 -61 16 -16 30 -36 30 -46 0 -9 7 -22
+15 -29 8 -7 15 -20 15 -29 0 -10 13 -30 30 -46 17 -16 30 -36 30 -45 0 -9 14
+-29 30 -45 17 -16 30 -36 30 -45 0 -9 20 -35 45 -60 24 -24 45 -51 47 -61 2
+-13 152 -179 162 -179 11 0 4782 4785 4784 4798 2 10 23 38 47 62 25 25 45 52
+45 61 0 9 7 22 15 29 8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20 15 30 0 10 7
+23 15 30 8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20 15 30 0 10 7 23 15 30 8
+7 15 27 15 45 0 18 7 38 15 45 9 8 15 30 15 60 0 30 6 52 15 60 11 9 15 33 15
+90 0 57 4 81 15 90 12 10 15 38 15 135 0 97 -3 125 -15 135 -11 9 -15 33 -15
+90 0 57 -4 81 -15 90 -9 8 -15 30 -15 60 0 30 -6 52 -15 60 -8 7 -15 27 -15
+45 0 18 -7 38 -15 45 -8 7 -15 20 -15 30 0 10 -7 23 -15 30 -8 7 -15 20 -15
+30 0 10 -7 23 -15 30 -8 7 -15 20 -15 30 0 10 -7 23 -15 30 -8 7 -15 20 -15
+30 0 10 -7 23 -15 30 -8 7 -15 20 -15 29 0 9 -20 36 -45 61 -24 24 -45 52 -47
+62 -3 17 -4777 4800 -4788 4797 -3 -1 -40 -38 -82 -83z"/></g>
+    <g class="ar-out" transform="translate(0.000000,2190.000000) scale(0.100000,-0.100000)" fill="#8b9096"><path d="M7068 19896 c-76 -78 -138 -149 -138 -157 0 -8 -20 -35 -45 -59 -25
+-24 -45 -51 -45 -60 0 -9 -20 -36 -45 -60 -25 -24 -45 -51 -45 -60 0 -9 -13
+-29 -30 -45 -16 -16 -30 -36 -30 -45 0 -9 -13 -29 -30 -45 -16 -16 -30 -36
+-30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -29 0 -10 -13 -30 -30 -46 -16
+-16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -30 0 -10 -7 -23
+-15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0
+-10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20
+-15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -8
+-7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38
+-15 -45 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0
+-18 -7 -38 -15 -45 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30
+-15 -60 0 -30 -6 -52 -15 -60 -9 -8 -15 -30 -15 -60 0 -30 -6 -52 -15 -60 -10
+-9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75 -10 -9 -15 -32 -15 -75 0 -43 -5 -66
+-15 -75 -12 -10 -15 -37 -15 -120 0 -83 -3 -110 -15 -120 -13 -11 -15 -67 -15
+-390 0 -323 2 -379 15 -390 12 -10 15 -37 15 -120 0 -83 3 -110 15 -120 10 -9
+15 -32 15 -75 0 -43 5 -66 15 -75 10 -9 15 -32 15 -75 0 -43 5 -66 15 -75 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -29 0 -10 14 -30 30 -46
+17 -16 30 -36 30 -46 0 -9 7 -22 15 -29 8 -7 15 -20 15 -29 0 -10 14 -30 30
+-46 17 -16 30 -36 30 -45 0 -9 13 -29 30 -45 16 -16 30 -36 30 -45 0 -9 20
+-36 45 -60 25 -24 45 -51 45 -60 0 -9 27 -42 60 -75 33 -33 60 -66 60 -75 0
+-8 851 -866 1890 -1905 1040 -1039 1890 -1897 1890 -1905 0 -8 -850 -866
+-1890 -1905 -1039 -1039 -1890 -1897 -1890 -1905 0 -9 -27 -42 -60 -75 -33
+-33 -60 -66 -60 -75 0 -9 -20 -36 -45 -60 -25 -24 -45 -51 -45 -60 0 -9 -13
+-29 -30 -45 -16 -16 -30 -36 -30 -45 0 -9 -13 -29 -30 -45 -16 -16 -30 -36
+-30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -29 0 -10 -13 -30 -30 -46 -16
+-16 -30 -36 -30 -46 0 -9 -7 -22 -15 -29 -8 -7 -15 -20 -15 -30 0 -10 -7 -23
+-15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0
+-10 -7 -23 -15 -30 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -20
+-15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38 -15 -45 -8
+-7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0 -18 -7 -38
+-15 -45 -8 -7 -15 -20 -15 -30 0 -10 -7 -23 -15 -30 -8 -7 -15 -27 -15 -45 0
+-18 -7 -38 -15 -45 -9 -8 -15 -30 -15 -60 0 -30 -6 -52 -15 -60 -8 -7 -15 -27
+-15 -45 0 -18 -7 -38 -15 -45 -9 -8 -15 -30 -15 -60 0 -30 -6 -52 -15 -60 -10
+-9 -15 -32 -15 -75 0 -43 -5 -66 -15 -75 -10 -9 -15 -32 -15 -75 0 -43 -5 -66
+-15 -75 -12 -10 -15 -37 -15 -120 0 -83 -3 -110 -15 -120 -13 -11 -15 -67 -15
+-390 0 -323 2 -379 15 -390 12 -10 15 -37 15 -120 0 -83 3 -110 15 -120 10 -9
+15 -32 15 -75 0 -43 5 -66 15 -75 10 -9 15 -32 15 -75 0 -43 5 -66 15 -75 9
+-8 15 -30 15 -60 0 -30 6 -52 15 -60 9 -8 15 -30 15 -60 0 -30 6 -52 15 -60 8
+-7 15 -27 15 -45 0 -18 7 -38 15 -45 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -27 15 -45 0 -18 7 -38 15 -45 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -30 0 -10 7 -23 15 -30 8
+-7 15 -20 15 -30 0 -10 7 -23 15 -30 8 -7 15 -20 15 -29 0 -10 13 -30 30 -46
+16 -16 30 -36 30 -46 0 -9 7 -22 15 -29 8 -7 15 -20 15 -29 0 -10 14 -30 30
+-46 16 -16 30 -36 30 -45 0 -9 13 -29 30 -45 16 -16 30 -36 30 -45 0 -9 20
+-36 45 -60 25 -24 45 -51 45 -60 0 -9 20 -35 45 -60 24 -24 45 -51 47 -61 2
+-13 272 -299 282 -299 1 0 1725 1723 3831 3830 2107 2106 3831 3838 3833 3848
+2 10 30 45 62 77 33 33 60 66 60 75 0 9 20 36 45 60 25 24 45 52 45 61 0 9 7
+22 15 29 8 7 15 20 15 29 0 10 14 30 30 46 17 16 30 36 30 46 0 9 7 22 15 29
+8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20 15 30 0 10 7 23 15 30 8 7 15 20
+15 30 0 10 7 23 15 30 8 7 15 27 15 45 0 18 7 38 15 45 8 7 15 27 15 45 0 18
+7 38 15 45 8 7 15 27 15 45 0 18 7 38 15 45 9 8 15 30 15 60 0 30 6 52 15 60
+10 9 15 32 15 75 0 43 5 66 15 75 12 10 15 38 15 135 0 97 3 125 15 135 12 10
+15 37 15 120 0 83 -3 110 -15 120 -12 10 -15 38 -15 135 0 97 -3 125 -15 135
+-10 9 -15 32 -15 75 0 43 -5 66 -15 75 -9 8 -15 30 -15 60 0 30 -6 52 -15 60
+-8 7 -15 27 -15 45 0 18 -7 38 -15 45 -8 7 -15 27 -15 45 0 18 -7 38 -15 45
+-8 7 -15 27 -15 45 0 18 -7 38 -15 45 -8 7 -15 20 -15 30 0 10 -7 23 -15 30
+-8 7 -15 20 -15 30 0 10 -7 23 -15 30 -8 7 -15 20 -15 30 0 10 -7 23 -15 30
+-8 7 -15 20 -15 29 0 10 -13 30 -30 46 -16 16 -30 36 -30 46 0 9 -7 22 -15 29
+-8 7 -15 20 -15 29 0 9 -20 37 -45 61 -25 24 -45 51 -45 60 0 9 -27 42 -60 75
+-32 32 -60 67 -62 77 -3 17 -7657 7680 -7668 7677 -3 -1 -67 -66 -142 -143z"/></g>
+  </symbol>
+</svg>
 <div id="app"></div>
 
 <script>
@@ -342,28 +697,26 @@ const IC = {
   phone:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
   share:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>'
 };
+// Chevron de marca (asset vectorizado de Bidondo — symbol #cm color / #cw blanco / #cmono mono). Ratio alto: h = w·1.22.
+function chv(w, sym){ sym=sym||'cm'; return `<svg class="chev" width="${w}" height="${Math.round(w*1.22)}" viewBox="0 0 1794 2190"><use href="#${sym}"/></svg>`; }
 
 /* ---------- Vistas ---------- */
 function loginView(){
   return `<div class="login">
-    <div class="login-bg">+</div>
-    <div class="login-top">
-      <img class="login-logo" src="${ICON}" alt="MEDICAR">
-      <div class="login-h1">MEDI<em>CAR</em></div>
+    <div class="login-brand">
+      <div class="brand">${chv(28)}<span class="word">medicar</span></div>
       <div class="login-sub">Emergencias médicas · Pergamino</div>
     </div>
-    <div class="sheet">
-      <h2>Ingresá con tu cuenta de socio</h2>
-      <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
-      <div class="field"><label>Email</label><input id="em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com"></div>
-      <div class="field"><label>Contraseña</label><input id="pw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
-      <button class="btn-r" onclick="doLogin()">${S.busy?'Ingresando…':'Ingresar'}</button>
-      <div class="foot-note">Esta app es exclusiva para socios de MEDICAR.<br>Ante una emergencia llamá al <b>${TEL_EMERG}</b>.</div>
-    </div>
+    <h2>Ingresá con tu cuenta de socio</h2>
+    <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
+    <div class="field"><label>Email</label><input id="em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com"></div>
+    <div class="field"><label>Contraseña</label><input id="pw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <button class="btn-r" onclick="doLogin()">${S.busy?'Ingresando…':'Ingresar'}${S.busy?'':chv(15,'cw')}</button>
+    <div class="foot-note" style="margin-top:1.3rem">Esta app es exclusiva para socios de MEDICAR.<br>Ante una emergencia llamá al <b>${TEL_EMERG}</b>.</div>
   </div>`;
 }
 
-function bootView(){ return `<div class="center"><div class="spin"></div><p>Cargando tu credencial…</p></div>`; }
+function bootView(){ return `<div class="center"><svg class="chev chev-load" width="30" height="37" viewBox="0 0 1794 2190"><use href="#cm"/></svg><p style="margin-top:1rem;color:var(--gris)">Cargando tu credencial…</p></div>`; }
 
 function noAfiliadoView(){
   return `<div class="center">
@@ -401,9 +754,9 @@ function homeView(){
   const numero = socio && socio.numeroAfiliado ? socio.numeroAfiliado : '—';
   const plan = c.planNombre || '—';
   const tipo = socio ? tipoLbl(socio.tipoAfiliado) : '—';
-  const estadoChip = socio
-    ? (activo ? `<span class="cred-chip chip-on">Activo</span>` : `<span class="cred-chip chip-off">Inactivo</span>`)
-    : `<span class="cred-chip chip-off">Sin afiliación</span>`;
+  const estadoLinea = socio
+    ? (activo ? `<div class="est">● Afiliado activo</div>` : `<div class="est off">● Inactivo</div>`)
+    : `<div class="est off">● Sin afiliación</div>`;
 
   // contacto (solo lectura)
   const contacto = [
@@ -427,26 +780,26 @@ function homeView(){
 
   return `<div class="home">
     <div class="topbar">
-      <img src="${ICON}" alt="">
-      <div class="tb-t">MEDI<em>CAR</em></div>
+      <div class="brand">${chv(20)}<span class="word">medicar</span></div>
       <div class="tb-sp"></div>
       <button class="mini" onclick="salir()">Salir</button>
     </div>
 
     <div class="cred">
+      <svg class="lines-bg" width="130" height="80" viewBox="0 0 120 60"><rect x="6" y="16" width="108" height="6" rx="3" fill="#fff"/><rect x="22" y="30" width="92" height="6" rx="3" fill="#fff"/><rect x="40" y="44" width="74" height="6" rx="3" fill="#fff"/></svg>
       <div class="cred-top">
-        <div class="cred-brand">MEDI<em>CAR</em> · Credencial</div>
-        ${estadoChip}
+        <div class="cred-brand">${chv(14,'cw')}<span style="margin-left:1px">medicar</span></div>
+        ${estadoLinea}
       </div>
-      <div class="cred-name">${esc(nombre)}</div>
+      <div class="nom">${esc(nombre)}</div>
       <div style="margin-top:.9rem;position:relative;z-index:1">
         <div class="cred-num-lbl">N° de afiliado</div>
         <div class="cred-num">${esc(numero)}</div>
       </div>
-      <div class="cred-grid">
-        <div class="cred-cell"><div class="cc-l">DNI</div><div class="cc-v">${esc(fmtDni(per.dni))}</div></div>
-        <div class="cred-cell"><div class="cc-l">Plan</div><div class="cc-v">${esc(plan)}</div></div>
-        <div class="cred-cell"><div class="cc-l">Tipo</div><div class="cc-v">${esc(tipo)}</div></div>
+      <div class="grid">
+        <div class="cell"><span>DNI</span><b>${esc(fmtDni(per.dni))}</b></div>
+        <div class="cell"><span>Plan</span><b>${esc(plan)}</b></div>
+        <div class="cell"><span>Tipo</span><b>${esc(tipo)}</b></div>
       </div>
     </div>
     ${sinAfilNota}
