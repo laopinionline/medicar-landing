@@ -172,6 +172,24 @@ input.sp-cap:focus-visible{outline:2px solid var(--r);outline-offset:2px}
 .atabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:1.25rem}
 .atab{flex:1;padding:.62rem .2rem;font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;font-weight:600;color:var(--ink3);border-bottom:2px solid transparent;background:none;margin-bottom:-1px;text-align:center;transition:all .18s}
 .atab.on{color:var(--r);border-bottom-color:var(--r)}
+
+/* ---------- TRAMO 3 · vistas home/perfil (lenguaje nuevo) ---------- */
+.sn{font-style:italic}                                   /* KPIs grandes en itálica (mockup panel) */
+.card-t{font-size:1.05rem;font-weight:800;font-style:italic;letter-spacing:-.01em;color:var(--tinta);margin-bottom:.15rem}
+.card-sub{font-size:.8rem;color:var(--gris);margin-bottom:1rem;line-height:1.55}
+.tile{display:flex;align-items:center;gap:.85rem;width:100%;background:var(--card);border:1px solid var(--linea);border-radius:var(--radio);padding:.95rem 1.05rem;margin-bottom:.7rem;box-shadow:var(--sombra);text-align:left;transition:box-shadow .15s,transform .1s;cursor:pointer}
+.tile:active{transform:scale(.99);box-shadow:var(--sombra-alta)}
+.tile-ic{width:38px;height:38px;flex:none;border-radius:11px;background:#fdecec;color:var(--rojo);display:flex;align-items:center;justify-content:center}
+.tile-ic svg{width:20px;height:20px}
+.tile-tx{flex:1;min-width:0}
+.tile-tx b{display:block;font-size:.92rem;font-weight:700;color:var(--tinta)}
+.tile-tx span{font-size:.75rem;color:var(--gris)}
+.tile-go{flex:none;opacity:.85}
+.acc-go{display:flex;align-items:center;justify-content:center;gap:.4rem;width:100%;margin-top:.85rem;background:var(--nieve);border:1px solid var(--linea);border-radius:12px;padding:.7rem;font-size:.76rem;font-weight:700;letter-spacing:.04em;color:var(--tinta);transition:background .15s}
+.acc-go:active{background:#eceef1}
+.acc-go .chev{opacity:.9}
+.pname{font-style:italic;letter-spacing:-.01em}          /* nombre de perfil en itálica (marca) */
+.ptop .av{box-shadow:var(--rglow)}
 </style>
 </head>
 <body>
@@ -827,7 +845,7 @@ async function chLoad(){
 function chVacio(){
   return `<div class="card" style="text-align:center;padding:2rem 1.2rem">
     <div style="font-size:2rem;line-height:1;margin-bottom:.6rem">🚐</div>
-    <div style="font-weight:700;margin-bottom:.4rem">Sin despacho asignado</div>
+    <div style="font-weight:800;font-style:italic;font-size:1.05rem;margin-bottom:.4rem">Sin despacho asignado</div>
     <div style="font-size:.85rem;color:var(--ink2);line-height:1.6">Hola, ${esc(S.user.nombre||'chofer')}. No tenés un despacho activo en este momento.</div>
     <div style="font-size:.78rem;color:var(--ink3);margin-top:.8rem">Cuando te asignen a un episodio, vas a verlo acá.</div>
   </div>`;
@@ -869,14 +887,14 @@ function aHome(){
     <div class="stat"><div class="sn acc">${u.plan||'—'}</div><div class="sl">Tu plan</div></div>
   </div>
   <div class="card">
-    <div class="ch">Emergencia</div>
-    <p style="font-size:.85rem;color:var(--ink2);line-height:1.65;margin-bottom:1rem;font-weight:300">Ante cualquier emergencia llamá al <strong>443044</strong>. Atención las 24 horas, los 365 días del año.</p>
-    <a href="tel:443044" style="display:block;text-align:center;background:var(--r);color:#fff;padding:.9rem;border-radius:10px;font-size:.85rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;box-shadow:var(--rglow)">📞 LLAMAR · 443044</a>
+    <div class="card-t">Emergencia</div>
+    <div class="card-sub">Ante cualquier emergencia llamá al <strong>443044</strong>. Atención las 24 horas, los 365 días del año.</div>
+    <a href="tel:443044" style="display:block;text-align:center;background:var(--rojo);color:#fff;padding:.9rem;border-radius:12px;font-size:.85rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;text-decoration:none;box-shadow:var(--rglow)">📞 Llamar · 443044</a>
   </div>
   <div class="card">
     <div class="ch">Últimas atenciones</div>
     ${HISTORIA.slice(0,2).map(h=>`<div class="lr"><div class="lrb"><div class="lrn">${h.motivo}</div><div class="lrs">${h.fecha} · ${h.medico}</div></div><span class="badge ${h.tipo==='Emergencia'?'br':'ba'}">${h.tipo}</span></div>`).join('')}
-    <button class="btn-o" style="margin-top:.75rem" onclick="set({tab:'historia'})">Ver historial completo</button>
+    <button class="acc-go" onclick="set({tab:'historia'})">Ver historial completo <svg class="chev" width="9" height="11" viewBox="0 0 1794 2190"><use href="#cmono"/></svg></button>
   </div>
   <div class="card">
     <div class="ch">Mis datos</div>
@@ -1069,14 +1087,14 @@ function mHome(){
     <div class="ch">Despacho activo</div>
     <div class="lr">
       <div class="lrb"><div class="lrn">Lucía Pereyra</div><div class="lrs">Convulsión febril · Belgrano 845</div><div style="margin-top:.3rem"><span class="badge br bp">● En curso</span></div></div>
-      <button onclick="set({tab:'despacho'})" style="color:var(--r);width:20px;height:20px">${IC.arrow}</button>
+      <button onclick="set({tab:'despacho'})" style="color:var(--rojo);display:flex;align-items:center" aria-label="Ir al despacho"><svg class="chev" width="13" height="16" viewBox="0 0 1794 2190"><use href="#cm"/></svg></button>
     </div>
   </div>
   <div class="card">
     <div class="ch">Últimas atenciones</div>
     ${ATENC.slice(0,3).map(a=>`<div class="lr"><div class="lrb"><div class="lrn">${a.afiliado}</div><div class="lrs">${a.fecha} · ${a.motivo}</div></div><span class="badge ${a.estado==='en_curso'?'br':'bg'}">${a.estado==='en_curso'?'Activa':'Cerrada'}</span></div>`).join('')}
   </div>
-  <button class="btn-r" onclick="set({tab:'registro',step:0})">+ Registrar nueva atención</button>`;
+  <button class="btn-r" onclick="set({tab:'registro',step:0})" style="display:flex;align-items:center;justify-content:center;gap:.5rem">+ Registrar nueva atención<svg class="chev chev-adv" width="12" height="15" viewBox="0 0 1794 2190"><use href="#cw"/></svg></button>`;
 }
 
 function desp(){
