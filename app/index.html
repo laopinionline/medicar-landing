@@ -190,6 +190,13 @@ input.sp-cap:focus-visible{outline:2px solid var(--r);outline-offset:2px}
 .panel-h b{font-size:1.15rem;font-style:italic;font-weight:800;letter-spacing:-.01em;color:var(--tinta)}
 .live-tag{display:inline-flex;align-items:center;gap:.35rem;font-size:.6rem;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:var(--gris)}
 .live-tag::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--rojo);animation:ld 1.2s ease infinite}
+/* ---------- Multi-rol · pantalla de selección de rol ---------- */
+.rolesel{min-height:100svh;display:flex;align-items:center;justify-content:center;padding:1.5rem;background:var(--nieve)}
+.rolesel-box{width:100%;max-width:420px;background:var(--blanco);border:1px solid var(--linea);border-radius:20px;box-shadow:var(--sombra-alta);padding:2rem 1.5rem;animation:pageIn .2s ease both}
+.rolesel-brand{display:flex;align-items:center;justify-content:center;gap:.5rem;margin-bottom:1.4rem}
+.rolesel-brand span{font-style:italic;font-weight:800;font-size:1.6rem;letter-spacing:-.02em;color:var(--tinta);line-height:1}
+.rolesel-sub{text-align:center;font-size:.8rem;color:var(--gris);margin:.1rem 0 1.4rem}
+.rolesel .tile{margin-bottom:.65rem}
 </style>
 </head>
 <body>
@@ -602,7 +609,7 @@ function resetSession(keepErr){
 }
 
 const render=()=>{
-  document.getElementById('app').innerHTML=S.user?shell():login();
+  document.getElementById('app').innerHTML=S.user?(S.roleSelect?roleSelectView():shell()):login();
   bind();
 };
 
@@ -660,7 +667,9 @@ async function enterWithFbUser(fbUser){
     const snap=await db.collection('usuarios').doc(fbUser.uid).get();
     data=snap.exists?snap.data():{};
   }catch(_){ data={}; }
-  if(!data.rol){
+  // Multi-rol (Tramo 2): roles[] del doc; fallback al campo rol viejo (docs no migrados).
+  const roles=(Array.isArray(data.roles)&&data.roles.length)?data.roles.filter(Boolean):(data.rol?[data.rol]:[]);
+  if(!roles.length){
     S.loginErr='Tu cuenta no tiene rol asignado. Contactá al administrador.';
     await auth.signOut();   /* dispara onAuthStateChanged(null) -> login con el mensaje */
     return;
@@ -668,10 +677,12 @@ async function enterWithFbUser(fbUser){
   const u={
     uid:fbUser.uid,
     email:fbUser.email||data.email||'',
-    rol:data.rol,
+    roles:roles,            // array completo (multi-rol)
+    rol:roles[0],           // rol ACTIVO de sesión (arranca en el espejo; se fija al elegir)
     nombre:data.nombre||fbUser.email||'',
     afiliadoId:(data.afiliadoId!==undefined?data.afiliadoId:null),
     medicoId:(data.medicoId!==undefined?data.medicoId:null),
+    personaId:(data.personaId!==undefined?data.personaId:null),
     unidad:(data.unidad!==undefined?data.unidad:null),
     esp:(data.esp!==undefined?data.esp:null),
     fotoURL:(data.fotoURL!==undefined?data.fotoURL:null),
@@ -680,9 +691,57 @@ async function enterWithFbUser(fbUser){
   resetSession(false); // cinturón y tiradores: arranque de sesión limpio aunque no se haya pasado por logout
   S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
   S.fotoPerfilUrl=null;
-  set({user:u,tab:(u.rol==='despachante'?'bandeja':'home'),step:0}); // superadmin: home -> superView (default sección Dashboard)
-  // Médicos para asignar: solo roles operativos pueden leer staff_medico (regla).
-  if(['despachante','medico','admin','superadmin'].includes(u.rol)) loadStaffMedico();
+  S.user=u; // fijo el user; el rol ACTIVO lo resuelve entrarConRol / el selector
+  if(roles.length<=1){
+    entrarConRol(roles[0]); // mono-rol: flujo idéntico a hoy
+  } else {
+    let guardado=null; try{ guardado=sessionStorage.getItem('medicar_rol'); }catch(_){}
+    if(guardado && roles.includes(guardado)) entrarConRol(guardado); // F5 / vuelta: entra con el rol recordado
+    else set({roleSelect:true}); // multi-rol sin elección -> pantalla de selección (no rutea todavía)
+  }
+}
+
+// Fija el rol ACTIVO de la sesión (= S.user.rol, que ya leen pg/getTabs/caps) y arranca el routing
+// EXACTAMENTE como hoy. NO cambia permisos: el rol de sesión es elección de VISTA (caps-unión en reglas).
+function entrarConRol(rol){
+  if(!S.user) return;
+  S.user.rol=rol;
+  try{ sessionStorage.setItem('medicar_rol',rol); }catch(_){}
+  set({roleSelect:false,tab:(rol==='despachante'?'bandeja':'home'),step:0}); // mismo set() por rol que antes
+  if(['despachante','medico','admin','superadmin'].includes(rol)) loadStaffMedico();
+}
+// onclick del selector: SOLO roles del propio array (cero escalación).
+function elegirRol(rol){ if(!S.user||!Array.isArray(S.user.roles)||!S.user.roles.includes(rol)) return; entrarConRol(rol); }
+// "Cambiar de rol" (Perfil): vuelve al selector; limpia el recordado para que F5 no re-entre al viejo.
+function volverAlSelector(){ if(!S.user||!Array.isArray(S.user.roles)||S.user.roles.length<2) return; try{ sessionStorage.removeItem('medicar_rol'); }catch(_){} set({roleSelect:true}); }
+
+// Pantalla de selección de rol (multi-rol). Design-system: marca + .panel-h itálica + .tile por rol.
+const ROL_META={
+  afiliado:{lbl:'Como afiliado',ic:'user',sub:'Tu credencial, plan e historia'},
+  medico:{lbl:'Como médico',ic:'register',sub:'Despacho, registro y alertas'},
+  despachante:{lbl:'Como despachante',ic:'dispatch',sub:'Bandeja y nuevo despacho'},
+  admin:{lbl:'Como administrador',ic:'settings',sub:'Gestión, facturación y estadísticas'},
+  chofer:{lbl:'Como chofer',ic:'dispatch',sub:'Tu despacho actual'},
+  superadmin:{lbl:'Superadmin',ic:'settings',sub:'Panel completo'}
+};
+function roleSelectView(){
+  const u=S.user; const roles=(u&&u.roles)||[];
+  const nombre=esc((u&&u.nombre?u.nombre.split(/\s+/)[0]:'')||'');
+  const tiles=roles.map(r=>{
+    const m=ROL_META[r]||{lbl:'Como '+r,ic:'user',sub:''};
+    return `<button class="tile" onclick="elegirRol('${r}')">
+      <span class="tile-ic">${IC[m.ic]||IC.user}</span>
+      <span class="tile-tx"><b>${esc(m.lbl)}</b><span>${esc(m.sub)}</span></span>
+      <span class="tile-go"><svg class="chev" width="11" height="14" viewBox="0 0 1794 2190"><use href="#cmono"/></svg></span>
+    </button>`;
+  }).join('');
+  return `<div class="rolesel"><div class="rolesel-box">
+    <div class="rolesel-brand"><svg class="chev" width="26" height="32" viewBox="0 0 1794 2190"><use href="#cm"/></svg><span>medicar</span></div>
+    <div class="panel-h" style="justify-content:center"><b>¿Cómo querés entrar${nombre?', '+nombre:''}?</b></div>
+    <div class="rolesel-sub">Tenés más de un rol. Elegí con cuál entrás ahora.</div>
+    ${tiles}
+    <button class="btn-o" onclick="doLogout()" style="margin-top:.6rem">Salir</button>
+  </div></div>`;
 }
 
 // Carga staff_medico (where activo==true) una vez por sesión -> S.staffMedico [{uid,nombre}].
@@ -695,7 +754,7 @@ async function loadStaffMedico(){
   render();
 }
 
-function doLogout(){ auth.signOut(); }
+function doLogout(){ try{ sessionStorage.removeItem('medicar_rol'); }catch(_){} auth.signOut(); }
 
 /* SHELL */
 function shell(){
@@ -2994,6 +3053,7 @@ function miPerfil(){
     <div id="mp-err-pass" class="err" style="display:none;margin-bottom:.5rem"></div>
     <button class="btn-r" onclick="mpCambiarPass()">Cambiar contraseña</button>
   </div>
+  ${(u.roles&&u.roles.length>1)?`<button class="tile" onclick="volverAlSelector()"><span class="tile-ic">${IC.user}</span><span class="tile-tx"><b>Cambiar de rol</b><span>Entrás como ${esc(u.rol)} · tenés ${u.roles.length} roles</span></span><span class="tile-go"><svg class="chev" width="11" height="14" viewBox="0 0 1794 2190"><use href="#cmono"/></svg></span></button>`:''}
   <button class="btn-o" onclick="doLogout()" style="margin-top:.4rem">Cerrar sesión</button>`;
 }
 
