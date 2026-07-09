@@ -1104,6 +1104,7 @@ function mHome(){
 
 function desp(){
   return`
+  <div class="panel-h"><b>Despacho activo</b></div>
   <div class="desp">
     <div class="dlive">Emergencia activa</div>
     <div class="dn">Lucía Pereyra · Niña 4 años</div>
@@ -2951,7 +2952,7 @@ function dashSuper(){
   const fFds =fLoad?'…':fl.filter(m=>m.estado==='fuera_de_servicio').length;
   const fTot =fLoad?'…':fl.length;
   return `
-  <div style="font-weight:700;margin:.1rem 0 .6rem">Dashboard <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
+  <div class="panel-h" style="margin:.1rem 0 .6rem"><b>Dashboard</b><span class="live-tag">en vivo</span></div>
   ${alertasBloqueDash(d.resp, d.gest, d.reportes, d.parametros)}
   ${mapaVivoBloque(d.eps||[])}
   <div class="srow">${card(hoy,'Atenciones del día')}${card(activos,'Episodios activos')}</div>
@@ -4539,7 +4540,7 @@ function estPanel(){
   if(!puedeConfig()) return `<div class="card"><div class="ch">Estadísticas</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para ver las estadísticas.</div></div>`;
   if(!S.est){ S.est={desde:estHaceStr(30),hasta:estHoyStr(),data:null,loading:false,err:'',informe:null}; }
   const ir=(l,v)=>`<div class="ir"><span class="il">${l}</span><span class="iv">${v}</span></div>`;
-  const head=`<div style="font-weight:700;margin:.1rem 0 .5rem">Estadísticas <span style="font-size:.62rem;color:var(--ink3);font-weight:400">tablero on-demand</span></div>
+  const head=`<div class="panel-h" style="margin:.1rem 0 .5rem"><b>Estadísticas</b><span style="font-size:.62rem;color:var(--ink3);font-weight:400">tablero on-demand</span></div>
     <div class="card"><div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:end">
       <div class="field" style="flex:1;min-width:120px;margin:0"><label>Desde</label><input id="est-desde" type="date" value="${esc(S.est.desde)}" onchange="estSetD('desde',this.value)"></div>
       <div class="field" style="flex:1;min-width:120px;margin:0"><label>Hasta</label><input id="est-hasta" type="date" value="${esc(S.est.hasta)}" onchange="estSetD('hasta',this.value)"></div>
