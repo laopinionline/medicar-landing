@@ -5214,7 +5214,12 @@ function normalizarDireccion(dom){
   return { calle:calle||null, altura:null, isRural:!calle };
 }
 /* ---- Lazy-load de librerías (CDN) + assets ---- */
-function geoLoadScript(src){ return new Promise((res,rej)=>{ if(document.querySelector('script[data-geo="'+src+'"]')){ res(); return; } const s=document.createElement('script'); s.src=src; s.setAttribute('data-geo',src); s.onload=()=>res(); s.onerror=()=>rej(new Error('no cargó '+src)); document.head.appendChild(s); }); }
+/* Cache de promesas de carga por src: las llamadas concurrentes (p.ej. bind() disparado por
+   renders en ráfaga del onSnapshot) esperan LA MISMA promesa, que resuelve recién en el onload
+   real. Antes se deduplicaba por el <script> ya presente en el DOM y se resolvía al toque aunque
+   el script no hubiera terminado de cargar → window.L quedaba undefined → "reading 'map'" (race). */
+const _geoScriptP={};
+function geoLoadScript(src){ if(_geoScriptP[src]) return _geoScriptP[src]; _geoScriptP[src]=new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.setAttribute('data-geo',src); s.onload=()=>res(); s.onerror=()=>{ _geoScriptP[src]=null; rej(new Error('no cargó '+src)); }; document.head.appendChild(s); }); return _geoScriptP[src]; }
 function geoLoadCss(href){ if(document.querySelector('link[data-geo="'+href+'"]')) return; const l=document.createElement('link'); l.rel='stylesheet'; l.href=href; l.setAttribute('data-geo',href); document.head.appendChild(l); }
 async function geoEnsureTurf(){ if(!window.turf) await geoLoadScript('https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js'); return window.turf; }
 async function geoEnsureLeaflet(){ geoLoadCss('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'); if(!window.L) await geoLoadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'); return window.L; }
