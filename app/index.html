@@ -71,11 +71,6 @@ input.sp-cap::before{content:"";position:absolute;top:50%;left:3px;transform:tra
 input.sp-cap:checked{background:var(--r);border-color:var(--r)}
 input.sp-cap:checked::before{left:21px}
 input.sp-cap:focus-visible{outline:2px solid var(--r);outline-offset:2px}
-.demo{margin-top:1.5rem;background:var(--bg2);border-radius:12px;padding:1rem}
-.demo-lbl{font-size:.63rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);font-weight:600;margin-bottom:.65rem}
-.demo-pills{display:flex;gap:.5rem}
-.pill{flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.55rem .25rem;font-size:.75rem;font-weight:600;color:var(--ink2);text-align:center;cursor:pointer;transition:all .15s}
-.pill:active{background:var(--r);color:#fff;border-color:var(--r)}
 
 /* SHELL */
 .shell{display:flex;flex-direction:column;height:100svh}
@@ -628,24 +623,8 @@ function login(){
     <div class="field"><label>Email</label><input id="em" type="email" autocomplete="off" placeholder="usuario@medicaronline.ar"></div>
     <div class="field"><label>Contraseña</label><input id="pw" type="password" autocomplete="off" placeholder="••••••••"></div>
     <button class="btn-r" onclick="doLogin()" style="display:flex;align-items:center;justify-content:center;gap:.5rem">Ingresar<svg class="chev chev-adv" width="12" height="15" viewBox="0 0 1794 2190"><use href="#cw"/></svg></button>
-    <div class="demo">
-      <div class="demo-lbl">Acceso rápido demo</div>
-      <div class="demo-pills">
-        <div class="pill" onclick="quick('afiliado@demo.com')">Afiliado</div>
-        <div class="pill" onclick="quick('medico@demo.com')">Médico</div>
-        <div class="pill" onclick="quick('despachante@demo.com')">Despacho</div>
-        <div class="pill" onclick="quick('admin@demo.com')">Admin</div>
-      </div>
-    </div>
   </div>
 </div>`;
-}
-
-async function quick(e){
-  try{ if(firebase.auth().currentUser){ await firebase.auth().signOut(); } }catch(_){}
-  document.getElementById('em').value=e;
-  document.getElementById('pw').value='123456';
-  doLogin();
 }
 async function doLogin(){
   const e=document.getElementById('em').value.trim();
