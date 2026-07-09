@@ -12,15 +12,22 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Rol del usuario actual, leido de usuarios/{uid} (su doc lo crea el seed / Admin SDK).
+    // Rol "espejo" (por defecto) del usuario — usuarios/{uid}.rol. Se conserva por compat.
     function rolActual() {
       return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol;
     }
 
+    // Multi-rol (Tramo 1): lista de roles del usuario. usuarios/{uid}.roles[] si existe;
+    // si no, fallback al campo rol viejo como lista de uno (ventana de compat de migracion).
+    function rolesActual() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.get('roles', [rolActual()]);
+    }
+
+    // El usuario tiene ALGUNO de los roles pedidos (caps-union). Fail-closed: exige doc.
     function tieneRol(roles) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
-        && (rolActual() in roles);
+        && rolesActual().hasAny(roles);
     }
 
     function isAdmin() {
@@ -45,13 +52,11 @@ service cloud.firestore {
       return tieneRol(['despachante', 'medico', 'admin', 'superadmin']);
     }
 
-    // Roles INTERNOS: cualquier usuario autenticado cuyo rol NO sea afiliado (incluye chofer).
-    // Para lectura del catalogo comercial (prestaciones/planes) por todo el personal. Fail-closed:
-    // exige doc usuarios existente; un afiliado (o sin doc) queda fuera.
+    // Roles INTERNOS: usuario con AL MENOS un rol no-afiliado (incluye chofer). Un afiliado
+    // puro (roles:['afiliado']) queda fuera; un multi-rol medico+afiliado ES interno (staff).
+    // Para lectura del catalogo comercial (prestaciones/planes) por todo el personal. Fail-closed.
     function esInterno() {
-      return isSignedIn()
-        && exists(/databases/$(database)/documents/usuarios/$(request.auth.uid))
-        && rolActual() != 'afiliado';
+      return tieneRol(['superadmin', 'admin', 'despachante', 'medico', 'chofer']);
     }
 
     // Claves que cambia este write (set de campos tocados).

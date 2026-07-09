@@ -1,0 +1,10 @@
+{
+  "name": "medicar-rules-tests",
+  "private": true,
+  "version": "1.0.0",
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "firebase-tools": "^13.29.1",
+    "mocha": "^10.7.3"
+  }
+}

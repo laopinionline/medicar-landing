@@ -38,7 +38,10 @@ async function assertSuperadmin(request) {
     throw new HttpsError('unauthenticated', 'Login requerido.');
   }
   const snap = await db.collection('usuarios').doc(request.auth.uid).get();
-  if (!snap.exists || snap.data().rol !== 'superadmin') {
+  const d = snap.exists ? (snap.data() || {}) : {};
+  // Multi-rol: superadmin si roles[] lo incluye; fallback al campo rol viejo (compat migración).
+  const roles = Array.isArray(d.roles) ? d.roles : (d.rol ? [d.rol] : []);
+  if (!snap.exists || !roles.includes('superadmin')) {
     throw new HttpsError('permission-denied', 'Solo el superadmin puede gestionar personal.');
   }
   return request.auth.uid;
@@ -66,7 +69,7 @@ exports.createUser = onCall(async (request) => {
   }
   const uid = userRec.uid;
   await db.collection('usuarios').doc(uid).set({
-    rol, email, nombre, afiliadoId: null, medicoId: null, activo: true,
+    rol, roles: [rol], email, nombre, afiliadoId: null, medicoId: null, activo: true,
     creadoEn: admin.firestore.FieldValue.serverTimestamp(),
   });
   if (rol === 'medico') {
