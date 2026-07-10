@@ -613,6 +613,56 @@ const render=()=>{
   bind();
 };
 
+/* ===================== HISTORY API — Fase 1 (vistas apiladas) =====================
+   El routing es en memoria (set/pg) y no escribía historial -> el "atrás" del browser salía del sitio.
+   Descriptor MÍNIMO y plano (nunca S ni refs). Se pushea al ABRIR una vista apilada; los "Volver/Cancelar"
+   internos llaman navBack() (= history.back) para unificar con el back del browser; popstate -> navRestore
+   aplica el descriptor SOLO por las funciones existentes (set/closeEp/dspReset/afCancelar/...). */
+let navRestoring=false;
+function navDesc(){
+  if(!S.user) return {v:1};
+  if(S.roleSelect) return {v:1, tab:S.tab, roleSelect:true};
+  const d={v:1, tab:S.tab};
+  if(S.epView){ d.open='ep'; d.openId=String(S.epView); }
+  else if(S.af && S.af.edit){ d.open='af'; d.openId=String(S.af.edit); }
+  else if(S.fac && S.fac.fedit){ d.open='fac'; d.openId=String(S.fac.fedit); }
+  else if(S.tab==='despacho' && S.dsp && S.dsp.stage){ d.stage=S.dsp.stage; } // despacho: 'buscar'/'form'/'creado' son entries apilados
+  if(S.step){ d.step=S.step; }
+  return d;
+}
+function navPush(){ if(navRestoring) return; try{ history.pushState(navDesc(),''); }catch(_){} }      // al ABRIR (deeper)
+function navReplace(){ if(navRestoring) return; try{ history.replaceState(navDesc(),''); }catch(_){} } // base (login/entrar/logout)
+function navBack(){ history.back(); }                                                                  // "Volver/Cancelar" internos
+function goTab(id){ const prev=S.tab; set({tab:id}); if(id==='despacho' && prev!=='despacho') navPush(); } // el despacho (buscar) SÍ apila un entry propio; el resto de tabs no (Fase 1)
+function navRestore(desc){
+  if(!S.user) return;                 // sin sesión: onAuthStateChanged/login manejan
+  navRestoring=true;
+  try{
+    desc = desc || {v:1, tab:S.tab};
+    if(desc.roleSelect){ if(!S.roleSelect) set({roleSelect:true}); return; }
+    if(S.roleSelect) S.roleSelect=false;
+    if(desc.tab && S.tab!==desc.tab) set({tab:desc.tab});                 // dispara banDetach; resetea la sección
+    // CERRAR lo que no corresponde al descriptor (dirección "atrás") — por las funciones existentes
+    if(S.epView && desc.open!=='ep') closeEp();
+    if(S.af && S.af.edit && desc.open!=='af') afCancelar();
+    if(S.fac && S.fac.fedit && desc.open!=='fac') facFacturaCerrar();
+    if(S.tab==='despacho' && S.dsp && S.dsp.stage && S.dsp.stage!=='buscar' && (desc.stage||'buscar')==='buscar') dspReset(); // form/creado -> buscar (back)
+    // ABRIR lo que pide el descriptor (dirección "adelante"). GRACIA: solo si el id sigue en la data
+    // cargada; si no existe / la data no está -> NO se abre (queda la base del tab, sin error card).
+    const existe=(arr,id)=>Array.isArray(arr)&&arr.some(x=>x.id===id);
+    if(desc.open==='ep' && desc.openId && S.epView!==desc.openId){
+      if(S.bandeja && existe(S.bandeja.items,desc.openId)) openEp(desc.openId);
+    } else if(desc.open==='af' && desc.openId && desc.openId!=='new' && S.af && S.af.edit!==desc.openId){
+      if(existe(S.af.socios,desc.openId)) afEditar(desc.openId);
+    } else if(desc.open==='fac' && desc.openId && S.fac && S.fac.fedit!==desc.openId){
+      if(existe(S.fac.facturas,desc.openId)) facFacturaVer(desc.openId);
+    }
+    if((S.step||0)!==(desc.step||0)) set({step:desc.step||0});
+    render();
+  } finally { navRestoring=false; }
+}
+window.addEventListener('popstate', function(e){ navRestore(e.state); });
+
 /* LOGIN */
 function login(){
   return `<div style="min-height:100svh;display:flex;flex-direction:column;background:var(--dark);position:relative;overflow:hidden">
@@ -707,13 +757,14 @@ function entrarConRol(rol){
   if(!S.user) return;
   S.user.rol=rol;
   try{ sessionStorage.setItem('medicar_rol',rol); }catch(_){}
-  set({roleSelect:false,tab:(rol==='despachante'?'bandeja':'home'),step:0}); // mismo set() por rol que antes
+  set({roleSelect:false,tab:(rol==='despachante'?'bandeja':'home'),step:0}); navReplace(); // baseline de sesión: atrás desde el home base SALE (no re-entra a login/selector)
   if(['despachante','medico','admin','superadmin'].includes(rol)) loadStaffMedico();
 }
 // onclick del selector: SOLO roles del propio array (cero escalación).
 function elegirRol(rol){ if(!S.user||!Array.isArray(S.user.roles)||!S.user.roles.includes(rol)) return; entrarConRol(rol); }
 // "Cambiar de rol" (Perfil): vuelve al selector; limpia el recordado para que F5 no re-entre al viejo.
-function volverAlSelector(){ if(!S.user||!Array.isArray(S.user.roles)||S.user.roles.length<2) return; try{ sessionStorage.removeItem('medicar_rol'); }catch(_){} set({roleSelect:true}); }
+function volverAlSelector(){ if(!S.user||!Array.isArray(S.user.roles)||S.user.roles.length<2) return; try{ sessionStorage.removeItem('medicar_rol'); }catch(_){} set({roleSelect:true}); navPush(); }
+function regNext(n){ set({step:n}); navPush(); } // wizard registro: avanzar de paso (pushea)
 
 // Pantalla de selección de rol (multi-rol). Design-system: marca + .panel-h itálica + .tile por rol.
 const ROL_META={
@@ -769,7 +820,7 @@ function shell(){
   </div>
   <div class="content page">${pg()}</div>
   <nav class="bnav">
-    ${tabs.map(t=>{const on=S.tab===t.id;return `<button class="nb ${on?'on':''}" onclick="set({tab:'${t.id}'})">${on?`<span class="nb-ind"><svg width="15" height="8" viewBox="0 0 120 60"><rect x="6" y="16" width="108" height="7" rx="3.5" fill="#ED1C24"/><rect x="28" y="30" width="86" height="7" rx="3.5" fill="#ED1C24"/><rect x="50" y="44" width="64" height="7" rx="3.5" fill="#ED1C24"/></svg></span>`:''}${IC[t.icon]}<span>${t.lbl}</span></button>`;}).join('')}
+    ${tabs.map(t=>{const on=S.tab===t.id;return `<button class="nb ${on?'on':''}" onclick="goTab('${t.id}')">${on?`<span class="nb-ind"><svg width="15" height="8" viewBox="0 0 120 60"><rect x="6" y="16" width="108" height="7" rx="3.5" fill="#ED1C24"/><rect x="28" y="30" width="86" height="7" rx="3.5" fill="#ED1C24"/><rect x="50" y="44" width="64" height="7" rx="3.5" fill="#ED1C24"/></svg></span>`:''}${IC[t.icon]}<span>${t.lbl}</span></button>`;}).join('')}
   </nav>
   <div style="text-align:center;padding:.4rem .75rem calc(.4rem + env(safe-area-inset-bottom));font-size:.6rem;color:var(--ink3);background:var(--bg);border-top:1px solid var(--border)">Sus datos son confidenciales y no serán compartidos con terceros. © 2026 Medicar S.R.L.</div>
 </div>`;
@@ -1130,7 +1181,7 @@ function mHome(){
     <div class="ch">Despacho activo</div>
     <div class="lr">
       <div class="lrb"><div class="lrn">Lucía Pereyra</div><div class="lrs">Convulsión febril · Belgrano 845</div><div style="margin-top:.3rem"><span class="badge br bp">● En curso</span></div></div>
-      <button onclick="set({tab:'despacho'})" style="color:var(--rojo);display:flex;align-items:center" aria-label="Ir al despacho"><svg class="chev" width="13" height="16" viewBox="0 0 1794 2190"><use href="#cm"/></svg></button>
+      <button onclick="goTab('despacho')" style="color:var(--rojo);display:flex;align-items:center" aria-label="Ir al despacho"><svg class="chev" width="13" height="16" viewBox="0 0 1794 2190"><use href="#cm"/></svg></button>
     </div>
   </div>
   <div class="card">
@@ -1177,7 +1228,7 @@ function s0(){return`<div class="card"><div class="st">Datos del llamado</div>
   <div class="field"><label>Hora de recepción</label><input type="time" value="${new Date().toTimeString().slice(0,5)}"></div>
   <div class="field"><label>Dirección</label><input type="text" placeholder="Calle y número"></div>
   <div class="field"><label>Unidad</label><select><option>Unidad 05</option><option>Unidad 07</option><option>Unidad 03</option><option>Unidad 11</option></select></div>
-</div><button class="btn-r" onclick="set({step:1})">Continuar</button>`;}
+</div><button class="btn-r" onclick="regNext(1)">Continuar</button>`;}
 
 function s1(){return`<div class="card"><div class="st">Paciente</div>
   <div class="field"><label>Nombre completo</label><input type="text" placeholder="Nombre y apellido"></div>
@@ -1186,8 +1237,8 @@ function s1(){return`<div class="card"><div class="st">Paciente</div>
   <div class="field"><label>Cobertura</label><input type="text" placeholder="OS, prepaga o N° afiliado"></div>
   <div class="field"><label>Sexo</label><select><option value="">Seleccionar...</option><option>Masculino</option><option>Femenino</option><option>Otro</option></select></div>
 </div>
-<button class="btn-r" onclick="set({step:2})">Continuar</button>
-<button class="btn-o" onclick="set({step:0})" style="margin-top:.5rem">Volver</button>`;}
+<button class="btn-r" onclick="regNext(2)">Continuar</button>
+<button class="btn-o" onclick="navBack()" style="margin-top:.5rem">Volver</button>`;}
 
 function s2(){return`<div class="card"><div class="st">Atención médica</div>
   <div class="field"><label>Motivo</label><select>
@@ -1204,8 +1255,8 @@ function s2(){return`<div class="card"><div class="st">Atención médica</div>
   <div class="field"><label>Procedimientos</label><select multiple><option>ECG</option><option>Vía periférica</option><option>O2 suplementario</option><option>Nebulización</option><option>Inmovilización</option><option>RCP</option><option>Desfibrilación</option></select></div>
   <div class="field"><label>Evolución clínica</label><textarea placeholder="Descripción del episodio..."></textarea></div>
 </div>
-<button class="btn-r" onclick="set({step:3})">Continuar</button>
-<button class="btn-o" onclick="set({step:1})" style="margin-top:.5rem">Volver</button>`;}
+<button class="btn-r" onclick="regNext(3)">Continuar</button>
+<button class="btn-o" onclick="navBack()" style="margin-top:.5rem">Volver</button>`;}
 
 function s3(){return`<div class="card"><div class="st">Cierre de atención</div>
   <div class="field"><label>Destino</label><select><option value="">Seleccionar...</option><option>Alta en domicilio</option><option>Hospital San José</option><option>Clínica Pergamino</option><option>Hospital Garrahan CABA</option><option>Queda hospitalizado</option></select></div>
@@ -1214,7 +1265,7 @@ function s3(){return`<div class="card"><div class="st">Cierre de atención</div>
   <div class="field"><label>Hora de cierre</label><input type="time" value="${new Date().toTimeString().slice(0,5)}"></div>
 </div>
 <button class="btn-r" onclick="guardar()">Guardar atención</button>
-<button class="btn-o" onclick="set({step:2})" style="margin-top:.5rem">Volver</button>`;}
+<button class="btn-o" onclick="navBack()" style="margin-top:.5rem">Volver</button>`;}
 
 function guardar(){alert('Atención registrada.\n\nCon Firebase quedará en la historia clínica del paciente.');set({step:0,tab:'home'});}
 
@@ -1604,11 +1655,11 @@ async function dspIrAlPaciente(pac){
     d.hist=hs.docs.map(x=>x.data()).sort((a,b)=>((b.creadoEn&&b.creadoEn.seconds)||0)-((a.creadoEn&&a.creadoEn.seconds)||0));
   }catch(_){ d.hist=[]; }
   d.codigo=''; d.stage='form';
-  render();
+  render(); navPush();
 }
 function dspElegirPaciente(id){ const d=dspState(); const pac=(d.resultados||[]).find(p=>p.id===id); if(pac) dspIrAlPaciente(pac); }
 
-function dspAltaDirecta(){ const d=dspState(); const q=/^\d+$/.test((d&&d.q)||'')?d.q:''; S.dsp={stage:'form',paciente:null,noEncontrado:true,hist:[],q:q,codigo:''}; render(); } // preserva el DNI numérico tipeado -> dAlta lo pre-llena (como Fase 1)
+function dspAltaDirecta(){ const d=dspState(); const q=/^\d+$/.test((d&&d.q)||'')?d.q:''; S.dsp={stage:'form',paciente:null,noEncontrado:true,hist:[],q:q,codigo:''}; render(); navPush(); } // preserva el DNI numérico tipeado -> dAlta lo pre-llena (como Fase 1)
 function dspReset(){ S.dsp={stage:'buscar'}; render(); }
 
 function dDespForm(d){
@@ -1639,7 +1690,7 @@ function dDespForm(d){
   </div>
   <div id="dsperr" class="err" style="display:none;margin-bottom:.6rem"></div>
   <button class="btn-r" id="btnCrear" onclick="dspCrear()">Crear despacho</button>
-  <button class="btn-o" onclick="dspReset()" style="margin-top:.5rem">Cancelar</button>`;
+  <button class="btn-o" onclick="navBack()" style="margin-top:.5rem">Cancelar</button>`;
 }
 
 function dCapsula(d){
@@ -2014,10 +2065,10 @@ function banRow(e){
 }
 
 function verBandeja(){ S.dsp=null; S.bandeja=null; set({tab:'bandeja'}); }
-function verBandejaNuevo(){ S.dsp=null; set({tab:'despacho'}); }
+function verBandejaNuevo(){ S.dsp=null; set({tab:'despacho'}); navPush(); } // apila el entry 'buscar' sobre bandeja
 
 /* ---- DETALLE ---- */
-function openEp(id){ S.epView=id; S.ep={loading:true}; S.recFlash=null; render(); epLoad(id); } // limpia feedback de recursos de otro episodio
+function openEp(id){ S.epView=id; S.ep={loading:true}; S.recFlash=null; render(); navPush(); epLoad(id); } // limpia feedback de recursos de otro episodio
 function closeEp(){ S.epView=null; S.ep=null; S.bandeja=null; S.recFlash=null; render(); } // invalida la bandeja para reflejar cambios
 
 async function epLoad(id){
@@ -2164,11 +2215,11 @@ async function epCancelarOk(){
 function dEpDetalle(){
   const ep=S.ep;
   if(!ep||ep.loading) return `<div class="card">Cargando episodio…</div>`;
-  if(ep.err) return `<div class="card">Error: ${esc(ep.err)}<br><button class="btn-o" onclick="closeEp()" style="margin-top:.6rem">Volver</button></div>`;
+  if(ep.err) return `<div class="card">Error: ${esc(ep.err)}<br><button class="btn-o" onclick="navBack()" style="margin-top:.6rem">Volver</button></div>`;
   const d=ep.data;
   return `
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
-    <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="closeEp()">← Volver</button>
+    <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="navBack()">← Volver</button>
     <span class="badge">${ESTADO_LBL[d.estado]||d.estado}</span>
   </div>
   <div style="font-size:.8rem;color:var(--ink3);font-weight:700;letter-spacing:.03em;margin-bottom:.5rem">${fmtIncidente(d.nroIncidente,añoDe(d.creadoEn))}</div>
@@ -3919,7 +3970,7 @@ async function facAbonoAnular(id){
    mínima. El motor SOLO LEE abonos/cargos y escribe facturas + el facturaId de los ítems. NUNCA delete físico. */
 function facFacturaRef(fid){ const f=(S.fac.facturas||[]).find(x=>x.id===fid); return f?('la factura '+esc(f.periodo||'')+' de '+esc(f.nombre||'—')):('factura '+esc(fid)); }
 function facShowAnulF(on){ if(!S.fac) return; S.fac.showAnulF=!!on; render(); }
-function facFacturaVer(id){ if(!puedeConfig())return; S.fac.fedit=id; render(); }
+function facFacturaVer(id){ if(!puedeConfig())return; S.fac.fedit=id; render(); navPush(); }
 function facFacturaCerrar(){ if(S.fac) S.fac.fedit=null; render(); }
 function facEstBadge(e){ const m={emitida:['#3B82F6','Emitida'],pagada:['#1D9E75','Pagada'],anulada:['#E5484D','Anulada']}; const x=m[e]||['#888',e]; return `<span style="background:${x[0]};color:#fff;border-radius:6px;padding:.05rem .4rem;font-size:.62rem;font-weight:700">${x[1]}</span>`; }
 
@@ -4001,7 +4052,7 @@ function facFacturaDetalle(){
   } else {
     acciones=`<div style="font-size:.78rem;color:var(--ink3)">Factura anulada${f.motivoAnulacion?(' · '+esc(f.motivoAnulacion)):''}. Los ítems quedaron liberados (re-facturables). Se conserva como registro histórico.</div>`;
   }
-  return `<div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="facFacturaCerrar()">← Volver</button></div>
+  return `<div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="navBack()">← Volver</button></div>
     <div class="card"><div class="ch">Factura · ${esc(f.periodo||'—')} ${facEstBadge(est)}</div>
     <div style="font-size:.9rem;font-weight:700">${esc(f.nombre||'—')}</div>
     <div style="font-size:.75rem;color:var(--ink3);margin-bottom:.55rem">${afil}</div>
@@ -4088,8 +4139,8 @@ function afPanel(){
   return `${head}<button class="btn-r" onclick="afNuevo()" style="margin-bottom:.7rem">+ Nuevo socio</button>${toggle}<div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div><div class="card">${rows}</div>`;
 }
 function afShowInact(on){ if(!S.af) return; S.af.showInact=!!on; render(); }
-function afNuevo(){ if(!puedeAfil())return; S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; render(); }
-function afEditar(id){ if(!puedeAfil())return; S.af.edit=id; S.af.lk=null; render(); }
+function afNuevo(){ if(!puedeAfil())return; S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; render(); navPush(); }
+function afEditar(id){ if(!puedeAfil())return; S.af.edit=id; S.af.lk=null; render(); navPush(); }
 function afCancelar(){ if(S.af){ S.af.edit=null; S.af.lk=null; } S.convLeadId=null; S.convPrefill=null; S.convOpenAlta=false; render(); } // cancelar conversión: el lead queda como estaba
 function afForm(){ return S.af.edit==='new' ? afFormNew() : afFormEdit(); }
 
@@ -4122,7 +4173,7 @@ function afFormNew(){
   return `<div class="card"><div class="ch">Nuevo socio</div>
     ${convBanner}<div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div>
     ${dniBlock}${personaBlock}${socioBlock}
-    <button class="btn-o" onclick="afCancelar()">Cancelar</button>
+    <button class="btn-o" onclick="navBack()">Cancelar</button>
   </div>`;
 }
 async function afBuscarPersona(){
@@ -4185,7 +4236,7 @@ function afFormEdit(){
     <div class="field"><label>Carencia hasta (opcional)</label><input id="af-e-car" type="date" value="${afTsToInput(s.carenciaHasta)}"></div>
     <div class="field"><label>Estado de alta</label><select id="af-e-activo"><option value="si" ${s.activo!==false?'selected':''}>Activo</option><option value="no" ${s.activo===false?'selected':''}>Baja lógica</option></select></div>
     <button class="btn-r" onclick="afGuardarEdit('${s.id}')">Guardar</button>
-    <button class="btn-o" onclick="afCancelar()">Cancelar</button>
+    <button class="btn-o" onclick="navBack()">Cancelar</button>
   </div>`;
 }
 async function afGuardarEdit(id){
@@ -5844,7 +5895,7 @@ function bind(){
 render();
 auth.onAuthStateChanged(fbUser=>{
   if(fbUser){ enterWithFbUser(fbUser); }
-  else{ resetSession(true); render(); } // limpia TODA la sesión; keepErr preserva el mensaje "sin rol"
+  else{ resetSession(true); render(); navReplace(); } // limpia TODA la sesión; keepErr preserva el mensaje "sin rol"
 });
 </script>
 </body>
