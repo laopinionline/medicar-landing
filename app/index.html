@@ -1526,45 +1526,69 @@ function dDesp(){
 }
 
 function dDespBuscar(){
+  const d=dspState();
+  const lista=(d.resultados&&d.resultados.length)
+    ? `<div class="ch" style="margin:1rem 0 .4rem">Resultados (${d.resultados.length})</div>`+d.resultados.map(p=>{
+        const edad=calcEdad(p.fechaNacimiento);
+        return `<div class="lr" style="cursor:pointer" onclick="dspElegirPaciente('${p.id}')"><div class="lrb"><div class="lrn">${esc(((p.apellido||'')+' '+(p.nombre||'')).trim()||'—')}</div><div class="lrs">DNI ${esc(p.dni||'—')} · ${edad} años</div></div><svg class="chev" width="9" height="11" viewBox="0 0 1794 2190" style="opacity:.5"><use href="#cmono"/></svg></div>`;
+      }).join('')
+    : '';
   return `
   <div class="card">
     <div class="st">Nuevo despacho</div>
-    <p style="font-size:.8rem;color:var(--ink3);margin:.2rem 0 .8rem">Identificá al paciente por DNI o N° de afiliado. Si no está, lo das de alta en el momento.</p>
-    <div class="field"><label>DNI o N° de afiliado</label><input id="dspq" type="text" inputmode="numeric" placeholder="Ej. 30123456" autocomplete="off"></div>
+    <p style="font-size:.8rem;color:var(--ink3);margin:.2rem 0 .8rem">Identificá al paciente por DNI, N° de afiliado o apellido. Si no está, lo das de alta en el momento.</p>
+    <div class="field"><label>DNI, N° de afiliado o apellido</label><input id="dspq" type="text" placeholder="Ej. 30123456 o Pérez" value="${esc(d.q||'')}" autocomplete="off"></div>
+    <div id="dsperr" class="err" style="display:none;margin-bottom:.6rem"></div>
     <button class="btn-r" id="btnBuscar" onclick="dspBuscar()">Buscar paciente</button>
     <button class="btn-o" onclick="dspAltaDirecta()" style="margin-top:.5rem">Cargar sin DNI</button>
+    ${lista}
   </div>`;
 }
 
 async function dspBuscar(){
   const d=dspState();
   const q=(document.getElementById('dspq')?.value||'').trim();
-  if(!q){ dspMsg('Ingresá un DNI o N° de afiliado'); return; }
+  if(!q){ dspMsg('Ingresá DNI, N° de afiliado o apellido'); return; } // fix (a): #dsperr ahora existe en la vista
+  dspMsg('');
   const btn=document.getElementById('btnBuscar');
   if(btn){ btn.disabled=true; btn.textContent='Buscando…'; }
-  d.q=q;
-  let pac=null;
+  d.q=q; d.resultados=null;
   try{
-    let snap=await db.collection('pacientes').where('dni','==',q).limit(1).get();
-    if(snap.empty) snap=await db.collection('pacientes').where('numeroAfiliado','==',q).limit(1).get();
-    if(snap.empty) snap=await db.collection('pacientes').where('codigoCorporativo','==',q).limit(1).get();
-    if(!snap.empty){ const doc=snap.docs[0]; pac={id:doc.id,...doc.data()}; }
+    if(/^\d+$/.test(q)){
+      // NUMÉRICO: dni -> numeroAfiliado -> codigoCorporativo (exact-match, como hoy)
+      let snap=await db.collection('pacientes').where('dni','==',q).limit(1).get();
+      if(snap.empty) snap=await db.collection('pacientes').where('numeroAfiliado','==',q).limit(1).get();
+      if(snap.empty) snap=await db.collection('pacientes').where('codigoCorporativo','==',q).limit(1).get();
+      if(!snap.empty){ const doc=snap.docs[0]; return dspIrAlPaciente({id:doc.id,...doc.data()}); }
+    } else {
+      // ALFABÉTICO: prefijo case-insensitive sobre apellidoNorm (>= q, <= q+'')
+      const qn=normNombre(q);
+      const snap=await db.collection('pacientes').where('apellidoNorm','>=',qn).where('apellidoNorm','<=',qn+'\uf8ff').limit(15).get();
+      const rows=snap.docs.map(x=>({id:x.id,...x.data()}));
+      if(rows.length===1) return dspIrAlPaciente(rows[0]);
+      if(rows.length>1){ if(btn){ btn.disabled=false; btn.textContent='Buscar paciente'; } d.resultados=rows; render(); return; } // lista clickeable (queda en 'buscar')
+    }
   }catch(e){
     if(btn){ btn.disabled=false; btn.textContent='Buscar paciente'; }
     dspMsg('Error al buscar: '+(e.message||e)); return;
   }
-  if(pac){
-    d.paciente=pac; d.noEncontrado=false; d.hist=[];
-    try{
-      const hs=await db.collection('episodios').where('pacienteId','==',pac.id).limit(20).get();
-      d.hist=hs.docs.map(x=>x.data()).sort((a,b)=>((b.creadoEn&&b.creadoEn.seconds)||0)-((a.creadoEn&&a.creadoEn.seconds)||0));
-    }catch(_){ d.hist=[]; }
-  }else{
-    d.paciente=null; d.noEncontrado=true; d.hist=[];
-  }
+  // 0 resultados -> flujo de alta (noEncontrado), como hoy
+  d.paciente=null; d.noEncontrado=true; d.hist=[]; d.codigo=''; d.stage='form';
+  render();
+}
+
+// Paciente elegido (numérico 1, alfabético 1, o clic en la lista): carga historial y va al form. Igual que hoy.
+async function dspIrAlPaciente(pac){
+  const d=dspState();
+  d.paciente=pac; d.noEncontrado=false; d.hist=[]; d.resultados=null;
+  try{
+    const hs=await db.collection('episodios').where('pacienteId','==',pac.id).limit(20).get();
+    d.hist=hs.docs.map(x=>x.data()).sort((a,b)=>((b.creadoEn&&b.creadoEn.seconds)||0)-((a.creadoEn&&a.creadoEn.seconds)||0));
+  }catch(_){ d.hist=[]; }
   d.codigo=''; d.stage='form';
   render();
 }
+function dspElegirPaciente(id){ const d=dspState(); const pac=(d.resultados||[]).find(p=>p.id===id); if(pac) dspIrAlPaciente(pac); }
 
 function dspAltaDirecta(){ S.dsp={stage:'form',paciente:null,noEncontrado:true,hist:[],q:'',codigo:''}; render(); }
 function dspReset(){ S.dsp={stage:'buscar'}; render(); }
@@ -1698,10 +1722,13 @@ function dspPickCodigo(btn,code){
   });
 }
 
+// Normaliza para búsqueda: minúsculas + sin tildes + trim. Usado para apellidoNorm/nombreNorm.
+function normNombre(s){ return String(s==null?'':s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim(); }
 function gatherNuevo(){
   const g=id=>(document.getElementById(id)?.value||'').trim();
   const tipo=g('tipoAfil')||'no_afiliado';
   const o={apellido:g('nape'),nombre:g('nnom'),dni:g('ndni'),fechaNacimiento:g('nfn'),sexo:g('nsexo'),tipoAfiliado:tipo};
+  o.apellidoNorm=normNombre(o.apellido); o.nombreNorm=normNombre(o.nombre); // altas nuevas: campos de búsqueda
   if(tipo==='directo') o.numeroAfiliado=g('nnum');
   else if(tipo==='corporativo') o.codigoCorporativo=g('ncod');
   else { o.telefono=g('ntel'); o.direccion=g('ndir'); }
