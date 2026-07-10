@@ -951,10 +951,10 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
       <li><a href="#servicios">Servicios</a></li>
       <li><a href="#planes">Planes</a></li>
       <li><a href="#contacto">Contacto</a></li>
-      <li><a href="https://laopinionline.github.io/medicar-landing/app/" style="color:var(--r);font-weight:700">Acceso ↗</a></li>
+      <li><a href="app/" style="color:var(--r);font-weight:700">Acceso ↗</a></li>
     </ul>
     <a href="tel:443044" style="text-decoration:none"><div class="nav-tel"><span>443044</span></div></a>
-    <button class="nav-cta">Afiliarme<svg class="chev" width="10" height="12" viewBox="0 0 1794 2190"><use href="#cw"/></svg></button>
+    <button class="nav-cta" onclick="smoothScrollTo('contacto')">Afiliarme<svg class="chev" width="10" height="12" viewBox="0 0 1794 2190"><use href="#cw"/></svg></button>
   </div>
 
   <button class="nav-hamburger" id="navToggle" aria-label="Menú">
@@ -977,7 +977,7 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
       <div class="mm-tel-num">443044</div>
     </div>
   </a>
-  <button class="mm-cta-sec" onclick="closeMenu(); document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Quiero afiliarme</button>
+  <button class="mm-cta-sec" onclick="closeMenu(); smoothScrollTo('contacto')">Quiero afiliarme</button>
 </div>
 
 
@@ -988,8 +988,8 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
     <h1 class="hero-h1">Siempre<br>presentes.<em>Siempre.</em></h1>
     <p class="hero-copy">Medicar nació en Pergamino en 1985 con una convicción que no cambió en cuatro décadas: estar cuando más se necesita, con el equipo y la tecnología que la vida exige.</p>
     <div class="hero-actions">
-      <button class="btn-r" onclick="document.getElementById('contacto').scrollIntoView({behavior:'smooth'})">Quiero afiliarme<svg class="chev" width="10" height="12" viewBox="0 0 1794 2190"><use href="#cw"/></svg></button>
-      <button class="btn-dk" onclick="document.getElementById('planes').scrollIntoView({behavior:'smooth'})">Conocer los planes</button>
+      <button class="btn-r" onclick="smoothScrollTo('contacto')">Quiero afiliarme<svg class="chev" width="10" height="12" viewBox="0 0 1794 2190"><use href="#cw"/></svg></button>
+      <button class="btn-dk" onclick="smoothScrollTo('planes')">Conocer los planes</button>
     </div>
     <div class="hero-stats">
       <div><div class="hs-n">40<sub>»</sub></div><div class="hs-l">Años de servicio</div></div>
@@ -1257,7 +1257,7 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
     <h2>Acceso al sistema</h2>
     <p>Gestioná tu afiliación, consultá tu historial y accedé a todos los servicios de Medicar desde cualquier dispositivo.</p>
     <div class="acceso-actions">
-      <a href="https://laopinionline.github.io/medicar-landing/app/" class="btn-acc" style="display:inline-block;text-decoration:none;">Ingresar al sistema</a>
+      <a href="app/" class="btn-acc" style="display:inline-block;text-decoration:none;">Ingresar al sistema</a>
       <a href="#contacto" class="btn-acc-out" style="display:inline-block;text-decoration:none;">Quiero afiliarme</a>
     </div>
   </div>
@@ -1274,7 +1274,7 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
       <div class="ft-col">
         <h4>Navegación</h4>
         <ul>
-          <li><a href="#quienes">Quiénes somos</a></li><li><a href="#historia">Historia</a></li><li><a href="#servicios">Servicios</a></li><li><a href="#planes">Planes</a></li><li><a href="#contacto">Contacto</a></li><li><a href="https://laopinionline.github.io/medicar-landing/app/">Acceso →</a></li>
+          <li><a href="#quienes">Quiénes somos</a></li><li><a href="#historia">Historia</a></li><li><a href="#servicios">Servicios</a></li><li><a href="#planes">Planes</a></li><li><a href="#contacto">Contacto</a></li><li><a href="app/">Acceso →</a></li>
         </ul>
       </div>
       <div class="ft-col">
@@ -1409,6 +1409,32 @@ async function enviarFormulario() {
     if (btn) { btn.disabled = false; btn.textContent = btn.dataset.txt || 'Enviar consulta'; }
   }
 }
+</script>
+
+<script>
+// Smooth-scroll ROBUSTO: tween con requestAnimationFrame. Maneja la animación por su cuenta
+// (setea scrollTop cada frame con behavior:'instant'), así es INMUNE a la cancelación del
+// smooth-scroll nativo del browser cuando el IntersectionObserver de .fade-up muta clases
+// durante el scroll (causa del corte a ~180px). No depende de scroll-behavior ni scrollIntoView.
+function smoothScrollTo(id){
+  const el=document.getElementById(id); if(!el) return;
+  const startY=window.scrollY, dist=(el.getBoundingClientRect().top+window.scrollY)-startY;
+  const dur=Math.min(700,Math.max(320,Math.abs(dist)*0.5)), t0=performance.now();
+  function step(now){
+    const p=Math.min(1,(now-t0)/dur);
+    const e=p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2; // easeInOutCubic
+    window.scrollTo({top:startY+dist*e, behavior:'instant'});
+    if(p<1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+// Enruta TODOS los <a href="#..."> por el tween (menú, CTA de planes) sin romper sus onclick.
+document.addEventListener('click', function(e){
+  const a=e.target.closest && e.target.closest('a[href^="#"]');
+  if(!a) return;
+  const id=(a.getAttribute('href')||'').slice(1);
+  if(id && document.getElementById(id)){ e.preventDefault(); smoothScrollTo(id); }
+});
 </script>
 
 </body>
