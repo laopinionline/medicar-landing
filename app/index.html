@@ -4151,6 +4151,49 @@ function afPanel(){
   return `${head}<button class="btn-r" onclick="afNuevo()" style="margin-bottom:.7rem">+ Nuevo socio</button>${toggle}<div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div><div class="card">${rows}</div>`;
 }
 function afShowInact(on){ if(!S.af) return; S.af.showInact=!!on; render(); }
+/* ===================== NUMERACIÓN DE SOCIOS — Fase 1 (modelo + numeración transaccional) =====================
+   Tres series con contador propio (mismo patrón atómico que el nº de incidente, ver dspCrear). El número lo lleva
+   la RAÍZ (socio directo/titular familiar o empresa) como correlativo pelado de su serie; los integrantes llevan
+   sufijo -NN. Correlativos atómicos (runTransaction) que NUNCA se reusan. numeroAfiliado queda string (compat).
+   Este tramo define SOLO las primitivas; el form de alta las cablea en el tramo siguiente (afGuardarNuevo intacto). */
+const SOCIO_SERIES = {
+  directo: { counter: 'socios_directo', base: 20000 },  // directo individual y titular familiar
+  corp:    { counter: 'socios_corp',    base: 30000 },  // corporativo
+  area:    { counter: 'socios_area',    base: 40000 },  // área protegida
+};
+// Asigna el correlativo pelado de una serie y crea el doc RAÍZ (socio directo/titular o empresa) en la MISMA
+// transacción — nunca incrementa el contador sin crear el doc. buildDoc(correlativo) => objeto a escribir en targetRef.
+async function asignarNumeroRaiz(serie, targetRef, buildDoc){
+  const cfg = SOCIO_SERIES[serie];
+  if(!cfg) throw new Error('serie inválida: '+serie);
+  const counterRef = db.collection('contadores').doc(cfg.counter);
+  return await db.runTransaction(async tx=>{
+    const cs = await tx.get(counterRef);                                   // read (antes de cualquier write)
+    const ultimo = cs.exists ? (cs.data().ultimo || cfg.base) : cfg.base;
+    const next = ultimo + 1;
+    tx.set(counterRef, { ultimo: next, actualizadoEn: FV() }, { merge: true });
+    const correlativo = String(next);
+    tx.set(targetRef, buildDoc(correlativo));
+    return { correlativo, id: targetRef.id };
+  });
+}
+// Asigna el próximo sufijo -NN de una RAÍZ (titular familiar o empresa) y crea el doc INTEGRANTE en la MISMA
+// transacción. La raíz lleva ultimoSufijo (contador local) + el número base en numeroRaiz/numeroConvenio.
+async function asignarSufijo(raizRef, targetRef, buildDoc){
+  return await db.runTransaction(async tx=>{
+    const rs = await tx.get(raizRef);                                      // read (antes de cualquier write)
+    if(!rs.exists) throw new Error('raíz inexistente: '+raizRef.id);
+    const d = rs.data() || {};
+    const base = String(d.numeroRaiz || d.numeroConvenio || (String(d.numeroAfiliado||'').split('-')[0]) || '');
+    if(!base) throw new Error('la raíz no tiene número base (numeroRaiz/numeroConvenio)');
+    const next = (d.ultimoSufijo || 0) + 1;
+    const sufijo = String(next).padStart(2, '0');
+    tx.set(raizRef, { ultimoSufijo: next }, { merge: true });
+    const numeroAfiliado = base + '-' + sufijo;
+    tx.set(targetRef, buildDoc(numeroAfiliado, sufijo));
+    return { sufijo, numeroAfiliado };
+  });
+}
 function afNuevo(){ if(!puedeAfil())return; S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; render(); navPush(); }
 function afEditar(id){ if(!puedeAfil())return; S.af.edit=id; S.af.lk=null; render(); navPush(); }
 function afCancelar(){ if(S.af){ S.af.edit=null; S.af.lk=null; } S.convLeadId=null; S.convPrefill=null; S.convOpenAlta=false; render(); } // cancelar conversión: el lead queda como estaba
