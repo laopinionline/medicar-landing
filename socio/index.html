@@ -559,6 +559,40 @@ const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<'
 
 function set(patch){ Object.assign(S, patch); render(); }
 
+/* ===================== HISTORY API — Fase 1b (app socio) =====================
+   Mismo patrón que el panel (commit 5958cc5). El routing es en memoria (S.view/render)
+   y no escribía historial -> el "atrás" del navegador salía del sitio. Descriptor plano
+   mínimo; navPush al ABRIR una vista apilada; los "Volver/Cancelar" internos llaman
+   navBack()=history.back; popstate -> navRestore aplica SOLO por las funciones existentes
+   (abrir/cerrar). Flag navRestoring para no re-pushear. Solo navegación; cero lógica clínica. */
+const APILADAS=['chequeo','reporte','parametros'];
+let navRestoring=false;
+function navDesc(){ return { v:1, view: (APILADAS.includes(S.view) ? S.view : 'home') }; }
+function navPush(){ if(navRestoring) return; try{ history.pushState(navDesc(),''); }catch(_){} }      // al ABRIR (deeper)
+function navReplace(){ if(navRestoring) return; try{ history.replaceState(navDesc(),''); }catch(_){} } // base (home/login)
+function navBack(){ history.back(); }                                                                  // "Volver/Cancelar" internos
+function navRestore(desc){
+  // solo dentro de la app (home + apiladas). login/boot/no-afiliado/sin-vinculo/error los maneja onAuthStateChanged.
+  if(!S.cred || !(S.view==='home' || APILADAS.includes(S.view))) return;
+  navRestoring=true;
+  try{
+    const target=(desc&&desc.view)||'home';
+    // CERRAR la apilada actual si no corresponde (dirección "atrás") — por las funciones existentes
+    if(S.view==='chequeo'    && target!=='chequeo')    cerrarChequeo();
+    else if(S.view==='reporte'    && target!=='reporte')    cerrarReporte();
+    else if(S.view==='parametros' && target!=='parametros') cerrarParams();
+    // ABRIR la apilada del descriptor si estamos en home (dirección "adelante", best-effort).
+    // GRACIA: los abrir* tienen guard (cuestionario/personaId); si falta la data NO cambian de vista -> queda home.
+    if(S.view==='home' && APILADAS.includes(target)){
+      if(target==='chequeo') abrirChequeo();
+      else if(target==='reporte') abrirReporte();
+      else if(target==='parametros') abrirParams();
+    }
+    render();
+  } finally { navRestoring=false; }
+}
+window.addEventListener('popstate', e=>navRestore(e.state));
+
 /* ---------- Utilidades de credencial ---------- */
 function nombreDe(per, u){
   const ap=(per&&per.apellido||'').trim(), no=(per&&per.nombre||'').trim();
@@ -712,13 +746,13 @@ async function cargarCredencial(uid){
 
 /* ---------- Auth flow ---------- */
 auth.onAuthStateChanged(async user => {
-  if(!user){ set({ view:'login', cred:null, busy:false }); return; }
+  if(!user){ set({ view:'login', cred:null, busy:false }); navReplace(); return; }
   set({ view:'boot' });
   try{
     const cred = await cargarCredencial(user.uid);
     if(cred.estado === 'no-afiliado'){ set({ view:'no-afiliado', cred }); return; }
     if(cred.estado === 'sin-vinculo'){ set({ view:'sin-vinculo', cred }); return; }
-    set({ view:'home', cred });
+    set({ view:'home', cred }); navReplace();
   }catch(e){
     set({ view:'error-carga', err:(e&&e.message)||String(e) });
   }
@@ -972,7 +1006,7 @@ async function guardarPref(v){
 function abrirChequeo(){
   const c=S.cred; if(!c||!c.cuestionario) return;
   S.chk={ open:true, answers:{}, who5:[null,null,null,null,null], pedido:false, motivo:'', err:'', busy:false };
-  S.view='chequeo'; render();
+  S.view='chequeo'; render(); navPush();
 }
 function cerrarChequeo(){ S.chk=null; S.view='home'; render(); }
 function chkSyncText(){
@@ -1025,14 +1059,14 @@ function chequeoFormView(){
     ${ped?`<input id="chk-motivo" maxlength="200" value="${esc((S.chk&&S.chk.motivo)||'')}" placeholder="Motivo (opcional)" style="width:100%;margin-top:.5rem;padding:.65rem .8rem;border:1.5px solid var(--linea);border-radius:12px;font-size:.9rem;background:var(--nieve)">`:''}
   </div>`;
   return `<div class="home">
-    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Chequeo semanal</div><div class="tb-sp"></div><button class="mini" onclick="cerrarChequeo()">Cerrar</button></div>
+    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Chequeo semanal</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Cerrar</button></div>
     <div style="font-size:.85rem;color:var(--gris);line-height:1.45">Contanos cómo pasaste la semana. Tus respuestas ayudan al equipo médico de MEDICAR.</div>
     ${who5Block}
     ${preg}
     ${contacto}
     <div class="err ${S.chk&&S.chk.err?'on':''}" style="margin-top:1rem">${esc(S.chk&&S.chk.err||'')}</div>
     <button class="btn-r" style="margin-top:.9rem" onclick="enviarChequeo()">${S.chk&&S.chk.busy?'Enviando…':'Enviar'}${S.chk&&S.chk.busy?'':chv(14,'cw')}</button>
-    <button class="btn-o" style="margin-top:.6rem" onclick="cerrarChequeo()">Cancelar</button>
+    <button class="btn-o" style="margin-top:.6rem" onclick="navBack()">Cancelar</button>
     <div class="footer"><div class="foot-note">Se registra una sola vez por semana.</div></div>
   </div>`;
 }
@@ -1067,7 +1101,7 @@ async function enviarChequeo(){
   try{
     await db.collection('respuestas_cuestionario').add(payload);
     if(S.cred){ S.cred.lastRespMs=Date.now(); S.cred.histCount=(S.cred.histCount||0)+1; S.cred.respLast4wk=(S.cred.respLast4wk||0)+1; }
-    S.chk=null; S.view='home'; render();
+    S.chk=null; S.view='home'; render(); navReplace(); // cierra el entry del chequeo tras enviar
   }catch(e){
     // Feedback claro al socio, sin detalles técnicos. El botón queda re-habilitado (busy=false).
     console.warn('[chequeo] no se pudo enviar:', e);
@@ -1091,7 +1125,7 @@ function homeReporteBlock(c){
 function abrirReporte(){
   if(!S.cred || !S.cred.personaId) return;
   S.rpt={ sel:{}, texto:'', err:'', busy:false, done:null };
-  S.view='reporte'; render();
+  S.view='reporte'; render(); navPush();
 }
 function cerrarReporte(){ S.rpt=null; S.view='home'; render(); }
 function rptSyncTexto(){ if(!S.rpt) return; const e=el('rpt-texto'); if(e) S.rpt.texto=e.value.slice(0,300); }
@@ -1113,7 +1147,7 @@ function reporteFormView(){
           <a href="tel:${TEL_EMERG}" class="call">${IC.phone}<span>Llamar al ${TEL_EMERG}</span></a>
         </div>`;
     return `<div class="home">
-      <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Reporte enviado</div><div class="tb-sp"></div><button class="mini" onclick="cerrarReporte()">Volver</button></div>
+      <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Reporte enviado</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Volver</button></div>
       ${box}
       <div class="footer"><div class="foot-note">Tu reporte quedó registrado. Podés cerrar la app.</div></div>
     </div>`;
@@ -1124,14 +1158,14 @@ function reporteFormView(){
     ? cat.map(s=>{ const on=!!sel[s.id]; return `<button type="button" class="opt wide ${on?'on':''}" onclick="rptToggle('${s.id}')"><span style="display:flex;align-items:center;gap:.6rem"><span class="chk">${on?'✓':''}</span>${esc(s.nombre||'—')}</span></button>`; }).join('')
     : `<div style="font-size:.8rem;color:var(--gris)">No hay una lista de síntomas configurada. Contanos abajo qué te pasa.</div>`;
   return `<div class="home">
-    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Reportar un síntoma</div><div class="tb-sp"></div><button class="mini" onclick="cerrarReporte()">Cerrar</button></div>
+    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Reportar un síntoma</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Cerrar</button></div>
     <div style="font-size:.85rem;color:var(--gris);line-height:1.45">Marcá lo que sentís y contanos con tus palabras. Un médico de MEDICAR lo revisa.</div>
     <div class="sec" style="margin-top:1rem"><div class="sec-h">¿Qué sentís?</div>${sintHtml}</div>
     <div class="sec" style="margin-top:1rem"><div class="sec-h">Contanos qué te pasa</div>
       <textarea id="rpt-texto" maxlength="300" rows="3" placeholder="Escribí acá (opcional, máx. 300)" style="width:100%;padding:.75rem .8rem;border:1.5px solid var(--linea);border-radius:12px;font-size:.95rem;font-family:inherit;resize:vertical;background:var(--nieve)">${esc((S.rpt&&S.rpt.texto)||'')}</textarea></div>
     <div class="err ${S.rpt&&S.rpt.err?'on':''}" style="margin-top:1rem">${esc(S.rpt&&S.rpt.err||'')}</div>
     <button class="btn-r" style="margin-top:.9rem" onclick="enviarReporte()">${S.rpt&&S.rpt.busy?'Enviando…':'Enviar reporte'}${S.rpt&&S.rpt.busy?'':chv(14,'cw')}</button>
-    <button class="btn-o" style="margin-top:.6rem" onclick="cerrarReporte()">Cancelar</button>
+    <button class="btn-o" style="margin-top:.6rem" onclick="navBack()">Cancelar</button>
     <div class="footer"><div class="foot-note">Ante una emergencia, llamá directo al ${TEL_EMERG}.</div></div>
   </div>`;
 }
@@ -1179,7 +1213,7 @@ function homeParamsBlock(c){
 function abrirParams(){
   if(!S.cred || !S.cred.personaId) return;
   S.par={ vals:{}, err:'', busy:false, done:null };
-  S.view='parametros'; render();
+  S.view='parametros'; render(); navPush();
 }
 function cerrarParams(){ S.par=null; S.view='home'; render(); }
 function parSync(){ if(!S.par) return; PARAMS.forEach(p=>{ const e=el('par-'+p.k); if(e) S.par.vals[p.k]=e.value; }); }
@@ -1198,7 +1232,7 @@ function paramsFormView(){
           <div class="result-s" style="color:var(--ink2)">Gracias por registrar.</div>
         </div>`;
     return `<div class="home">
-      <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Signos registrados</div><div class="tb-sp"></div><button class="mini" onclick="cerrarParams()">Volver</button></div>
+      <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Signos registrados</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Volver</button></div>
       ${box}
       <div class="footer"><div class="foot-note">Tus valores quedaron registrados para tu equipo médico.</div></div>
     </div>`;
@@ -1207,12 +1241,12 @@ function paramsFormView(){
   const inputs=PARAMS.map(p=>`<div class="field" style="margin-top:.9rem"><label>${p.lbl} · ${p.uni}</label>
     <input id="par-${p.k}" type="number" inputmode="decimal" step="${p.step}" min="${p.min}" max="${p.max}" value="${esc(v[p.k]||'')}" placeholder="opcional"></div>`).join('');
   return `<div class="home">
-    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Registrar mis signos</div><div class="tb-sp"></div><button class="mini" onclick="cerrarParams()">Cerrar</button></div>
+    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Registrar mis signos</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Cerrar</button></div>
     <div style="font-size:.85rem;color:var(--gris);line-height:1.45">Cargá los que puedas medir (al menos uno). Los que no midas, dejalos vacíos.</div>
     ${inputs}
     <div class="err ${S.par&&S.par.err?'on':''}" style="margin-top:1rem">${esc(S.par&&S.par.err||'')}</div>
     <button class="btn-r" style="margin-top:.9rem" onclick="enviarParams()">${S.par&&S.par.busy?'Enviando…':'Enviar'}${S.par&&S.par.busy?'':chv(14,'cw')}</button>
-    <button class="btn-o" style="margin-top:.6rem" onclick="cerrarParams()">Cancelar</button>
+    <button class="btn-o" style="margin-top:.6rem" onclick="navBack()">Cancelar</button>
     <div class="footer"><div class="foot-note">Ante una emergencia, llamá directo al ${TEL_EMERG}.</div></div>
   </div>`;
 }
