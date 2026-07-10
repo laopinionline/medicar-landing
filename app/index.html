@@ -619,11 +619,18 @@ const render=()=>{
    internos llaman navBack() (= history.back) para unificar con el back del browser; popstate -> navRestore
    aplica el descriptor SOLO por las funciones existentes (set/closeEp/dspReset/afCancelar/...). */
 let navRestoring=false;
+function navSection(){ return (S.user && S.user.rol==='superadmin') ? (S.superSec||'dashboard') : (S.tab); } // sección activa (superadmin: superSec; resto: tab)
+function navSubGet(){ switch(navSection()){ case 'personal': return S.sp&&S.sp.tab; case 'catalogo': return S.cat&&S.cat.sub; case 'facturacion': return S.fac&&S.fac.sub; case 'monitoreo': return S.mon&&S.mon.sub; } return null; }
+function navSubSet(sub){ switch(navSection()){ case 'personal': if(S.sp)spTab(sub); break; case 'catalogo': if(S.cat)catSub(sub); break; case 'facturacion': if(S.fac)facSub(sub); break; case 'monitoreo': if(S.mon)monSub(sub); break; } }
 function navDesc(){
   if(!S.user) return {v:1};
   if(S.roleSelect) return {v:1, tab:S.tab, roleSelect:true};
   const d={v:1, tab:S.tab};
-  if(S.epView){ d.open='ep'; d.openId=String(S.epView); }
+  if(S.user.rol==='superadmin') d.superSec=S.superSec||'dashboard';       // superadmin navega por sección (F2b)
+  const sub=navSubGet(); if(sub) d.sub=sub;                                // sub-tab de la sección activa (F2b)
+  if(S.sp && S.sp.creating){ d.open='spNew'; }                            // alta de personal (F2b)
+  else if(S.sp && S.sp.edit){ d.open='sp'; d.openId=String(S.sp.edit); }  // ficha de personal (F2b — caso Lucas)
+  else if(S.epView){ d.open='ep'; d.openId=String(S.epView); }
   else if(S.af && S.af.edit){ d.open='af'; d.openId=String(S.af.edit); }
   else if(S.fac && S.fac.fedit){ d.open='fac'; d.openId=String(S.fac.fedit); }
   else if(S.tab==='despacho' && S.dsp && S.dsp.stage){ d.stage=S.dsp.stage; } // despacho: 'buscar'/'form'/'creado' son entries apilados
@@ -633,7 +640,7 @@ function navDesc(){
 function navPush(){ if(navRestoring) return; try{ history.pushState(navDesc(),''); }catch(_){} }      // al ABRIR (deeper)
 function navReplace(){ if(navRestoring) return; try{ history.replaceState(navDesc(),''); }catch(_){} } // base (login/entrar/logout)
 function navBack(){ history.back(); }                                                                  // "Volver/Cancelar" internos
-function goTab(id){ const prev=S.tab; set({tab:id}); if(id==='despacho' && prev!=='despacho') navPush(); } // el despacho (buscar) SÍ apila un entry propio; el resto de tabs no (Fase 1)
+function goTab(id){ const prev=S.tab; set({tab:id}); if(id!==prev) navPush(); } // Fase 2: cada cambio de tab apila su propio entry (el back navega entre tabs); las vistas apiladas de F1 pushean sobre el tab
 function navRestore(desc){
   if(!S.user) return;                 // sin sesión: onAuthStateChanged/login manejan
   navRestoring=true;
@@ -642,15 +649,20 @@ function navRestore(desc){
     if(desc.roleSelect){ if(!S.roleSelect) set({roleSelect:true}); return; }
     if(S.roleSelect) S.roleSelect=false;
     if(desc.tab && S.tab!==desc.tab) set({tab:desc.tab});                 // dispara banDetach; resetea la sección
+    if(S.user.rol==='superadmin'){ const sec=desc.superSec||'dashboard'; if(S.superSec!==sec) superNav(sec); } // superNav detacha/attacha listeners por sección (F2b)
+    if(desc.sub){ const cur=navSubGet(); if(cur && cur!==desc.sub) navSubSet(desc.sub); }                      // sub-tab de la sección activa (F2b)
     // CERRAR lo que no corresponde al descriptor (dirección "atrás") — por las funciones existentes
+    if(S.sp && (S.sp.edit||S.sp.creating) && desc.open!=='sp' && desc.open!=='spNew') spBack(); // ficha/alta de personal -> lista (back)
     if(S.epView && desc.open!=='ep') closeEp();
     if(S.af && S.af.edit && desc.open!=='af') afCancelar();
     if(S.fac && S.fac.fedit && desc.open!=='fac') facFacturaCerrar();
     if(S.tab==='despacho' && S.dsp && S.dsp.stage && S.dsp.stage!=='buscar' && (desc.stage||'buscar')==='buscar') dspReset(); // form/creado -> buscar (back)
     // ABRIR lo que pide el descriptor (dirección "adelante"). GRACIA: solo si el id sigue en la data
-    // cargada; si no existe / la data no está -> NO se abre (queda la base del tab, sin error card).
+    // cargada; si no existe / la data no está -> NO se abre (queda la base, sin error card).
     const existe=(arr,id)=>Array.isArray(arr)&&arr.some(x=>x.id===id);
-    if(desc.open==='ep' && desc.openId && S.epView!==desc.openId){
+    if(desc.open==='sp' && desc.openId && S.sp && S.sp.edit!==desc.openId){ spOpenEdit(desc.openId); } // spEditView cae a la lista si el uid no existe (gracia)
+    else if(desc.open==='spNew' && S.sp && !S.sp.creating){ spOpenCreate(); }
+    else if(desc.open==='ep' && desc.openId && S.epView!==desc.openId){
       if(S.bandeja && existe(S.bandeja.items,desc.openId)) openEp(desc.openId);
     } else if(desc.open==='af' && desc.openId && desc.openId!=='new' && S.af && S.af.edit!==desc.openId){
       if(existe(S.af.socios,desc.openId)) afEditar(desc.openId);
@@ -2620,10 +2632,10 @@ function spDetach(){ if(S.spUnsub){ S.spUnsub.forEach(u=>{ try{u();}catch(_){} }
 function spIdle(){ return !!(S.user && S.user.rol==='superadmin' && S.sp && !S.sp.edit && !S.sp.creating); }
 
 function spReintentar(){ spDetach(); S.sp=null; render(); }
-function spTab(t){ if(S.sp){ S.sp.tab=t; S.sp.edit=null; S.sp.creating=false; } render(); }
-function spOpenCreate(){ if(S.sp){ S.sp.creating=true; S.sp.edit=null; } render(); }
+function spTab(t){ if(S.sp){ S.sp.tab=t; S.sp.edit=null; S.sp.creating=false; } render(); navPush(); }
+function spOpenCreate(){ if(S.sp){ S.sp.creating=true; S.sp.edit=null; } render(); navPush(); }
 function spVincReset(){ if(S.sp){ S.sp.vincDni=''; S.sp.vincMatch=null; S.sp.vincMsg=''; S.sp.vincOk=false; } }
-function spOpenEdit(uid){ if(S.sp){ S.sp.edit=uid; S.sp.creating=false; spVincReset(); } render(); }
+function spOpenEdit(uid){ if(S.sp){ S.sp.edit=uid; S.sp.creating=false; spVincReset(); } render(); navPush(); }
 function spBack(){ if(S.sp){ S.sp.edit=null; S.sp.creating=false; spVincReset(); } render(); }
 
 function spPanel(){
@@ -2676,7 +2688,7 @@ function spRow(u){
 function spCreateView(){
   const roleOpts=ROLES_PERSONAL.map(r=>`<option value="${r}" ${r==='despachante'?'selected':''}>${r}</option>`).join('');
   return `
-  <div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="spBack()">← Volver</button></div>
+  <div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="navBack()">← Volver</button></div>
   <div class="card card-dk"><div class="ch">Crear persona</div>
     <div style="font-size:.8rem;color:rgba(255,255,255,.6)">Crea la cuenta de acceso + su ficha. Si el rol es médico, queda asignable en el despacho.</div></div>
   <div class="card">
@@ -2720,7 +2732,7 @@ function spEditView(){
   const activo=u.activo!==false;
   const roleOpts=ROLES_PERSONAL.map(r=>`<option value="${r}" ${u.rol===r?'selected':''}>${r}</option>`).join('');
   return `
-  <div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="spBack()">← Volver</button></div>
+  <div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="navBack()">← Volver</button></div>
   <div class="card card-dk"><div class="ch">Editar persona</div>
     <div style="font-size:1.05rem;font-weight:700;color:#fff">${esc(u.nombre||'—')}</div>
     <div style="font-size:.85rem;color:#fff;opacity:.8;margin-top:.15rem">${esc(u.email||'')}</div>
@@ -3041,7 +3053,7 @@ function superNav(sec){
   if(S.superSec==='estadisticas'){ S.est=null; } // on-demand, sin listeners
   if(S.superSec==='monitoreo'){ monDetach(); S.mon=null; }
   S.superSec=sec;
-  render();
+  render(); navPush();
 }
 
 /* ---- Dashboard de métricas en vivo ---- */
@@ -3437,7 +3449,7 @@ function catPanel(){
   <div id="cat-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
   return head + (sub==='prestaciones' ? catPrestView() : catPlanesView());
 }
-function catSub(id){ if(!S.cat) return; S.cat.sub=id; S.cat.pedit=null; S.cat.ledit=null; render(); }
+function catSub(id){ if(!S.cat) return; S.cat.sub=id; S.cat.pedit=null; S.cat.ledit=null; render(); navPush(); }
 function catShowInact(which,on){ if(!S.cat) return; if(which==='prest') S.cat.showInactPrest=!!on; else S.cat.showInactPlanes=!!on; render(); }
 
 /* ---- Prestaciones (set base, baja lógica, id slug estable) ---- */
@@ -3607,7 +3619,7 @@ function facPanel(){
   const body = sub==='cargos' ? facCargosView() : (sub==='abonos' ? facAbonosView() : (sub==='facturas' ? facFacturasView() : facTarifasView()));
   return head + body;
 }
-function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; S.fac.cedit=null; S.fac.aedit=null; S.fac.fedit=null; render(); }
+function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; S.fac.cedit=null; S.fac.aedit=null; S.fac.fedit=null; render(); navPush(); }
 
 /* ---- Tarifas (ABM, baja lógica) ---- */
 function facTarifasView(){
@@ -4807,7 +4819,7 @@ function monPanel(){
   <div id="mon-head-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
   return head + (sub==='respuestas' ? monRespView() : sub==='alertas' ? monAlertasView() : sub==='sintomas' ? monSintView() : monCuestView());
 }
-function monSub(id){ if(!S.mon) return; S.mon.sub=id; S.mon.cedit=null; S.mon.draft=null; render(); }
+function monSub(id){ if(!S.mon) return; S.mon.sub=id; S.mon.cedit=null; S.mon.draft=null; render(); navPush(); }
 function monShowInact(on){ if(S.mon){ S.mon.showInact=!!on; render(); } }
 
 /* ---- Cuestionarios (ABM de plantillas) ---- */
