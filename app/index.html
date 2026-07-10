@@ -633,7 +633,7 @@ function navDesc(){
 function navPush(){ if(navRestoring) return; try{ history.pushState(navDesc(),''); }catch(_){} }      // al ABRIR (deeper)
 function navReplace(){ if(navRestoring) return; try{ history.replaceState(navDesc(),''); }catch(_){} } // base (login/entrar/logout)
 function navBack(){ history.back(); }                                                                  // "Volver/Cancelar" internos
-function goTab(id){ const prev=S.tab; set({tab:id}); if(id==='despacho' && prev!=='despacho') navPush(); } // el despacho (buscar) SÍ apila un entry propio; el resto de tabs no (Fase 1)
+function goTab(id){ const prev=S.tab; set({tab:id}); if(id!==prev) navPush(); } // Fase 2: cada cambio de tab apila su propio entry (el back navega entre tabs); las vistas apiladas de F1 pushean sobre el tab
 function navRestore(desc){
   if(!S.user) return;                 // sin sesión: onAuthStateChanged/login manejan
   navRestoring=true;
