@@ -1527,54 +1527,72 @@ function dDesp(){
 
 function dDespBuscar(){
   const d=dspState();
-  const lista=(d.resultados&&d.resultados.length)
-    ? `<div class="ch" style="margin:1rem 0 .4rem">Resultados (${d.resultados.length})</div>`+d.resultados.map(p=>{
-        const edad=calcEdad(p.fechaNacimiento);
-        return `<div class="lr" style="cursor:pointer" onclick="dspElegirPaciente('${p.id}')"><div class="lrb"><div class="lrn">${esc(((p.apellido||'')+' '+(p.nombre||'')).trim()||'—')}</div><div class="lrs">DNI ${esc(p.dni||'—')} · ${edad} años</div></div><svg class="chev" width="9" height="11" viewBox="0 0 1794 2190" style="opacity:.5"><use href="#cmono"/></svg></div>`;
-      }).join('')
-    : '';
   return `
   <div class="card">
     <div class="st">Nuevo despacho</div>
-    <p style="font-size:.8rem;color:var(--ink3);margin:.2rem 0 .8rem">Identificá al paciente por DNI, N° de afiliado o apellido. Si no está, lo das de alta en el momento.</p>
-    <div class="field"><label>DNI, N° de afiliado o apellido</label><input id="dspq" type="text" placeholder="Ej. 30123456 o Pérez" value="${esc(d.q||'')}" autocomplete="off"></div>
+    <p style="font-size:.8rem;color:var(--ink3);margin:.2rem 0 .8rem">Identificá al paciente por DNI, N° de afiliado o apellido/nombre. Escribí y aparecen sugerencias. Si no está, lo das de alta.</p>
+    <div class="field"><label>DNI, N° de afiliado o apellido/nombre</label><input id="dspq" type="text" placeholder="Ej. 30123456 o Pérez" value="${esc(d.q||'')}" autocomplete="off" oninput="dspTypeahead(this.value)"></div>
     <div id="dsperr" class="err" style="display:none;margin-bottom:.6rem"></div>
     <button class="btn-r" id="btnBuscar" onclick="dspBuscar()">Buscar paciente</button>
     <button class="btn-o" onclick="dspAltaDirecta()" style="margin-top:.5rem">Cargar sin DNI</button>
-    ${lista}
+    <div id="dsplista">${dspListaHTML(d)}</div>
   </div>`;
 }
 
+// FASE 2 — el botón dispara la búsqueda; dspBuscarQ es el núcleo (compartido con el typeahead).
 async function dspBuscar(){
-  const d=dspState();
   const q=(document.getElementById('dspq')?.value||'').trim();
-  if(!q){ dspMsg('Ingresá DNI, N° de afiliado o apellido'); return; } // fix (a): #dsperr ahora existe en la vista
-  dspMsg('');
+  if(!q){ dspMsg('Ingresá DNI, N° de afiliado o apellido/nombre'); return; }
   const btn=document.getElementById('btnBuscar');
   if(btn){ btn.disabled=true; btn.textContent='Buscando…'; }
-  d.q=q; d.resultados=null;
+  await dspBuscarQ(q);
+  if(btn){ btn.disabled=false; btn.textContent='Buscar paciente'; }
+}
+// Núcleo. Numérico: exact dni/numeroAfiliado/codigoCorporativo. Alfabético: prefijo sobre apellidoNorm
+// Y nombreNorm (2 queries, merge+dedup por id, limit ~15). LISTA SIEMPRE (aunque haya 1: el despachante
+// confirma con un tap). Actualiza SOLO #dsplista (preserva el foco del input en el typeahead).
+async function dspBuscarQ(q){
+  const d=dspState(); d.q=q; dspMsg('');
+  let rows;
   try{
     if(/^\d+$/.test(q)){
-      // NUMÉRICO: dni -> numeroAfiliado -> codigoCorporativo (exact-match, como hoy)
       let snap=await db.collection('pacientes').where('dni','==',q).limit(1).get();
       if(snap.empty) snap=await db.collection('pacientes').where('numeroAfiliado','==',q).limit(1).get();
       if(snap.empty) snap=await db.collection('pacientes').where('codigoCorporativo','==',q).limit(1).get();
-      if(!snap.empty){ const doc=snap.docs[0]; return dspIrAlPaciente({id:doc.id,...doc.data()}); }
+      rows=snap.docs.map(x=>({id:x.id,...x.data()}));
     } else {
-      // ALFABÉTICO: prefijo case-insensitive sobre apellidoNorm (>= q, <= q+'')
       const qn=normNombre(q);
-      const snap=await db.collection('pacientes').where('apellidoNorm','>=',qn).where('apellidoNorm','<=',qn+'\uf8ff').limit(15).get();
-      const rows=snap.docs.map(x=>({id:x.id,...x.data()}));
-      if(rows.length===1) return dspIrAlPaciente(rows[0]);
-      if(rows.length>1){ if(btn){ btn.disabled=false; btn.textContent='Buscar paciente'; } d.resultados=rows; render(); return; } // lista clickeable (queda en 'buscar')
+      const [sa,sn]=await Promise.all([
+        db.collection('pacientes').where('apellidoNorm','>=',qn).where('apellidoNorm','<=',qn+'').limit(15).get(),
+        db.collection('pacientes').where('nombreNorm','>=',qn).where('nombreNorm','<=',qn+'').limit(15).get()
+      ]);
+      const map={}; sa.docs.forEach(x=>{ map[x.id]={id:x.id,...x.data()}; }); sn.docs.forEach(x=>{ map[x.id]={id:x.id,...x.data()}; });
+      rows=Object.values(map).slice(0,15);
     }
-  }catch(e){
-    if(btn){ btn.disabled=false; btn.textContent='Buscar paciente'; }
-    dspMsg('Error al buscar: '+(e.message||e)); return;
-  }
-  // 0 resultados -> flujo de alta (noEncontrado), como hoy
-  d.paciente=null; d.noEncontrado=true; d.hist=[]; d.codigo=''; d.stage='form';
-  render();
+  }catch(e){ dspMsg('Error al buscar: '+(e.message||e)); return; }
+  if(d.q!==q) return;                         // una búsqueda más nueva (typeahead) ganó -> descarto este resultado
+  d.resultados=rows;
+  const cont=document.getElementById('dsplista');
+  if(cont) cont.innerHTML=dspListaHTML(d);    // update puntual: NO pierde el foco del input
+  else render();
+}
+// Typeahead: en vivo mientras se tipea. Debounce 300ms, desde 2 letras, SOLO alfabético (numérico -> botón).
+let dspTypeTimer=null;
+function dspTypeahead(val){
+  clearTimeout(dspTypeTimer);
+  const q=(val||'').trim();
+  if(q.length<2 || /^\d+$/.test(q)) return;
+  dspTypeTimer=setTimeout(function(){ dspBuscarQ(q); }, 300);
+}
+// HTML de la lista (compartido por dDespBuscar y dspBuscarQ). Vacío tras búsqueda -> aviso + alta.
+function dspListaHTML(d){
+  const r=d.resultados;
+  if(r==null) return '';
+  if(!r.length) return `<div style="font-size:.82rem;color:var(--ink3);margin-top:1rem">Sin resultados para «${esc(d.q||'')}». Si el paciente no está, dalo de alta con "Cargar sin DNI".</div>`;
+  return `<div class="ch" style="margin:1rem 0 .4rem">Resultados (${r.length})</div>`+r.map(p=>{
+    const edad=calcEdad(p.fechaNacimiento);
+    return `<div class="lr" style="cursor:pointer" onclick="dspElegirPaciente('${p.id}')"><div class="lrb"><div class="lrn">${esc(((p.apellido||'')+' '+(p.nombre||'')).trim()||'—')}</div><div class="lrs">DNI ${esc(p.dni||'—')} · ${edad} años</div></div><svg class="chev" width="9" height="11" viewBox="0 0 1794 2190" style="opacity:.5"><use href="#cmono"/></svg></div>`;
+  }).join('');
 }
 
 // Paciente elegido (numérico 1, alfabético 1, o clic en la lista): carga historial y va al form. Igual que hoy.
@@ -1590,7 +1608,7 @@ async function dspIrAlPaciente(pac){
 }
 function dspElegirPaciente(id){ const d=dspState(); const pac=(d.resultados||[]).find(p=>p.id===id); if(pac) dspIrAlPaciente(pac); }
 
-function dspAltaDirecta(){ S.dsp={stage:'form',paciente:null,noEncontrado:true,hist:[],q:'',codigo:''}; render(); }
+function dspAltaDirecta(){ const d=dspState(); const q=/^\d+$/.test((d&&d.q)||'')?d.q:''; S.dsp={stage:'form',paciente:null,noEncontrado:true,hist:[],q:q,codigo:''}; render(); } // preserva el DNI numérico tipeado -> dAlta lo pre-llena (como Fase 1)
 function dspReset(){ S.dsp={stage:'buscar'}; render(); }
 
 function dDespForm(d){
