@@ -1932,6 +1932,24 @@ function banAttach(){
 }
 function banDetach(){ if(S.banUnsub){ S.banUnsub.forEach(u=>{ try{u();}catch(_){} }); S.banUnsub=null; } S.banMine=null; S.banOff=null; }
 
+/* Auto-reconexión de la bandeja (reemplaza el "↻ Actualizar" manual, retirado): al volver el tab
+   visible o recuperar red, re-suscribe la escucha en vivo — SOLO si la bandeja está activa (hay
+   listener vivo: S.banUnsub != null). Transparente: NO resetea S.bandeja ni fuerza render; el
+   snapshot inicial de la nueva escucha llama banRender() (que respeta S.epView → no pisa un
+   detalle abierto), así el listado se refresca sin flash. Debounce de 5s anti-ráfaga
+   (visibilitychange + online pueden dispararse juntos). Firestore ya reconecta solo; esto cubre
+   el stall silencioso tras mucho tiempo en background. */
+let banReconnectTs=0;
+function banAutoReconnect(){
+  if(!S.user || !S.banUnsub) return;                 // bandeja no activa -> nada
+  const now=Date.now();
+  if(now - banReconnectTs < 5000) return;            // debounce anti-ráfaga
+  banReconnectTs=now;
+  banDetach(); banAttach();                          // re-suscripción fresca; el snapshot entrante actualiza vía banRender
+}
+document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='visible') banAutoReconnect(); });
+window.addEventListener('online', banAutoReconnect);
+
 function banView(items){
   const esMedico=S.user.rol==='medico';
   // Handoff: el médico ve los SUYOS + los OFRECIDOS por otros ("Disponibles para tomar").
@@ -1948,10 +1966,7 @@ function banView(items){
   const cancelados=items.filter(e=>e.estado==='cancelado').sort((a,b)=>termTs(b)-termTs(a));
   const sec=(t,arr,empty)=>`<div class="ch" style="margin:.2rem 0 .4rem">${t} (${arr.length})</div>`+
     (arr.length?arr.map(banRow).join(''):`<div style="font-size:.78rem;color:var(--ink3);margin-bottom:.5rem">${empty}</div>`);
-  const top=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.7rem">
-    <div style="display:flex;align-items:center;gap:.55rem"><b style="font-size:1.15rem;font-style:italic;font-weight:800;letter-spacing:-.01em">${esMedico?'Mis episodios':'Bandeja de episodios'}</b><span class="live-tag">en vivo</span></div>
-    <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="banReload()">↻ Actualizar</button>
-  </div>`;
+  const top=`<div style="display:flex;align-items:center;gap:.55rem;margin-bottom:.7rem"><b style="font-size:1.15rem;font-style:italic;font-weight:800;letter-spacing:-.01em">${esMedico?'Mis episodios':'Bandeja de episodios'}</b><span class="live-tag">en vivo</span></div>`;
   const nuevo=(S.user.rol==='despachante')?`<button class="btn-r" onclick="verBandejaNuevo()" style="margin-bottom:.8rem">+ Nuevo despacho</button>`:''; // crear: solo despachante
   const disp=esMedico?`<div class="card">${sec('🤝 Disponibles para tomar',disponibles,'No hay casos ofrecidos')}</div>`:'';
   return `${top}${nuevo}
