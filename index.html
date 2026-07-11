@@ -1299,6 +1299,37 @@ footer{background:#050505;padding:4rem 2.5rem 2rem;border-top:1px solid rgba(255
 <script>
 const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('in')})},{threshold:.07});
 document.querySelectorAll('.fade-up').forEach(el=>obs.observe(el));
+
+/* PLANES DESDE EL ABM (Tramo 5b): lee el espejo público planes_publicos por REST (sin SDK) y reemplaza las
+   tarjetas SOLO si resuelve. Timeout 2s. Si falla / vacío / Firestore no responde → quedan las 5 tarjetas
+   hardcodeadas de arriba (fallback obligatorio; la landing nunca queda sin planes). */
+(function(){
+  var API='https://firestore.googleapis.com/v1/projects/medicar-sistema/databases/(default)/documents/planes_publicos?key=AIzaSyCXCkuaFC_8qMPAEIUlBoQiv7hBgFDq1iw&pageSize=50';
+  var esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
+  var fv=function(f){ if(!f)return null; if('stringValue'in f)return f.stringValue; if('integerValue'in f)return Number(f.integerValue); if('doubleValue'in f)return f.doubleValue; if('booleanValue'in f)return f.booleanValue; if('arrayValue'in f)return (f.arrayValue.values||[]).map(fv); return null; };
+  var parseDoc=function(d){ var o={}, fl=d.fields||{}; for(var k in fl) o[k]=fv(fl[k]); return o; };
+  var card=function(p){
+    var items=(p.items||[]).map(function(i){return '<li>'+esc(i)+'</li>';}).join('');
+    var etiquetaTexto=(String(p.precioMostrado||'').replace(/[^0-9]/g,'').length<3); // "A medida" sin dígitos → font más chico
+    return '<div class="plan fade-up in'+(p.destacado?' hot':'')+'">'
+      +'<div class="p-nm">'+esc(p.nombre)+'</div>'
+      +'<div class="p-ds">'+esc(p.descripcion)+'</div>'
+      +'<div class="p-pr"><span class="amt"'+(etiquetaTexto?' style="font-size:1.6rem"':'')+'>'+esc(p.precioMostrado)+'</span><span style="font-size:.75rem;color:rgba(255,255,255,.45);display:block;margin-top:.2rem">'+esc(p.subtitulo)+'</span></div>'
+      +'<ul class="p-fl">'+items+'</ul>'
+      +'<a href="#contacto" class="p-btn" data-plan="'+esc(p.nombre)+'">'+esc(p.cta||'Quiero afiliarme')+'</a>'
+      +'</div>';
+  };
+  var ctrl=('AbortController'in window)?new AbortController():null;
+  var to=setTimeout(function(){ if(ctrl) ctrl.abort(); },2000);
+  fetch(API, ctrl?{signal:ctrl.signal}:{}).then(function(r){ clearTimeout(to); if(!r.ok) throw 0; return r.json(); }).then(function(j){
+    var docs=(j.documents||[]).map(parseDoc).filter(function(p){return p.nombre;});
+    if(!docs.length) return;                                   // sin planes públicos → fallback (tarjetas hardcodeadas)
+    docs.sort(function(a,b){return (a.orden||0)-(b.orden||0);});
+    var grid=document.querySelector('#planes .p3'); if(!grid) return;
+    grid.innerHTML=docs.map(card).join('');
+    grid.querySelectorAll('a.p-btn[data-plan]').forEach(function(a){ a.addEventListener('click',function(){ if(window.preselPlan) preselPlan(a.getAttribute('data-plan')); }); });
+  }).catch(function(){ clearTimeout(to); /* fallback: las 5 tarjetas hardcodeadas quedan intactas */ });
+})();
 </script>
 
 <div class="scroll-bar" id="scrollBar"></div>

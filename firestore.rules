@@ -366,6 +366,13 @@ service cloud.firestore {
     // Lectura (Etapa 32 — acceso por necesidad): SOLO los lectores reales del padrón (admin/superadmin,
     // gestionar_afiliados = panel Afiliados, configurar_sistema = abonos/estadísticas) + el afiliado sobre
     // SU propia persona. Se CIERRA a médico/despachante/chofer: ninguno lee /personas en la app (recon E32).
+    // planes_publicos/{id}: espejo público (curado) de planes para la LANDING (Tramo 5b). Lectura ANÓNIMA
+    // (la landing es estática, sin login). Solo campos de marketing; el catálogo interno vive en /planes.
+    match /planes_publicos/{id} {
+      allow read:  if true;
+      allow write: if isAdmin() || tienePermiso('configurar_sistema');
+    }
+
     match /personas/{id} {
       allow read:           if isAdmin() || esSuperadmin()
                                || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema')
