@@ -389,7 +389,8 @@ service cloud.firestore {
     match /socios/{id} {
       allow read:           if esDespachante() || isAdmin() || esSuperadmin()
                                || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema')
-                               || (isSignedIn() && miPersonaId() != null && resource.data.personaId == miPersonaId());
+                               || (isSignedIn() && miPersonaId() != null && resource.data.personaId == miPersonaId())
+                               || (isSignedIn() && miPersonaId() != null && resource.data.titularPersonaId == miPersonaId()); // F2: el TITULAR lee sus dependientes (titularPersonaId denorm en F1)
       allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
     }
 
@@ -434,7 +435,8 @@ service cloud.firestore {
     //  - Lectura Y escritura: SOLO admin/superadmin o configurar_sistema (NO esInterno).
     //  - Anulacion LOGICA via estado:'anulado'; NUNCA delete desde la app.
     match /abonos/{id} {
-      allow read:           if isAdmin() || tienePermiso('configurar_sistema');
+      allow read:           if isAdmin() || tienePermiso('configurar_sistema')
+                               || (isSignedIn() && resource.data.personaId != null && resource.data.personaId == miPersonaId()); // F2: el AFILIADO lee SOLO sus abonos (personaId = titular, ya está en el doc)
       allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
     }
 
