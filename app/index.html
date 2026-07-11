@@ -3508,6 +3508,26 @@ function planPrecioTotal(plan, integrantes){
   return base + Math.max(0,(Number(integrantes)||0)-baseInt)*extra;
 }
 function catModeloChange(v){ const g=document.getElementById('cat-l-grp-integrante'); if(g) g.style.display=(v==='por_integrante')?'':'none'; } // DOM puro, no borra inputs
+// Espejo público planes_publicos/{planId} (Tramo 5b) — lo que lee la landing. Solo campos curados de marketing.
+// Se sincroniza al guardar/dar-de-baja el plan: existe solo si mostrarEnLanding && activo; si no, se BORRA.
+async function planEspejoLanding(planId, plan){
+  try{
+    const visible = plan && plan.mostrarEnLanding===true && plan.activo!==false;
+    if(!visible){ await db.collection('planes_publicos').doc(planId).delete().catch(()=>{}); return; }
+    const precioMostrado = (plan.etiquetaPrecio && String(plan.etiquetaPrecio).trim())
+      ? String(plan.etiquetaPrecio).trim()
+      : (plan.modeloPrecio==='por_integrante' ? ('desde $'+(Number(plan.precio)||0).toLocaleString('es-AR')) : ('$'+(Number(plan.precio)||0).toLocaleString('es-AR')));
+    const subtitulo = (plan.etiquetaPrecio && String(plan.etiquetaPrecio).trim()) ? 'según acuerdo' : 'por mes';
+    await db.collection('planes_publicos').doc(planId).set({
+      nombre: plan.nombre||'', descripcion: plan.descripcion||'',
+      precioMostrado, subtitulo,
+      items: Array.isArray(plan.itemsLanding)?plan.itemsLanding:[],
+      destacado: !!plan.destacado, orden: Number(plan.ordenLanding)||0,
+      cta: (plan.ctaLanding && String(plan.ctaLanding).trim()) || 'Quiero afiliarme',
+      actualizadoEn: FV()
+    });
+  }catch(e){ console.warn('[planes_publicos] sync falló (la landing usa fallback):',e); }
+}
 function catPlanForm(){
   const isNew=S.cat.ledit==='new';
   const p=isNew?{}:((S.cat.planes||[]).find(x=>x.id===S.cat.ledit)||{});
@@ -3539,6 +3559,13 @@ function catPlanForm(){
     <div class="field"><label>Carencia (días)</label><input id="cat-l-carencia" type="number" min="0" step="1" value="${p.carenciaDias!=null?esc(p.carenciaDias):'0'}"></div>
     ${isNew?'':`<div class="field"><label>Estado de alta</label><select id="cat-l-activo"><option value="si" ${p.activo!==false?'selected':''}>Activo</option><option value="no" ${p.activo===false?'selected':''}>Baja lógica</option></select></div>`}
     <div class="field"><label>Coberturas (prestaciones)</label>${cobField}</div>
+    <div style="border-top:1px solid var(--border);margin:.4rem 0 .5rem;padding-top:.6rem;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)">Landing pública</div>
+    <div class="field"><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="cat-l-landing" ${p.mostrarEnLanding?'checked':''}>Mostrar este plan en la landing</label></div>
+    <div class="field"><label>Orden en la landing</label><input id="cat-l-orden" type="number" step="1" value="${p.ordenLanding!=null?esc(p.ordenLanding):'0'}"></div>
+    <div class="field"><label style="display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="cat-l-destacado" ${p.destacado?'checked':''}>Tarjeta destacada</label></div>
+    <div class="field"><label>Etiqueta de precio (opcional, pisa el precio — ej. "A medida")</label><input id="cat-l-etiqueta" value="${esc(p.etiquetaPrecio||'')}" placeholder="vacío = usa el precio real"></div>
+    <div class="field"><label>Texto del botón (opcional)</label><input id="cat-l-cta" value="${esc(p.ctaLanding||'')}" placeholder="Quiero afiliarme"></div>
+    <div class="field"><label>Qué incluye (uno por línea)</label><textarea id="cat-l-items" rows="5" placeholder="Cobertura individual&#10;Atención domiciliaria 24hs">${esc(Array.isArray(p.itemsLanding)?p.itemsLanding.join('\n'):'')}</textarea></div>
     <button class="btn-r" onclick="catPlanGuardar()">Guardar</button>
     <button class="btn-o" onclick="catPlanCancelar()">Cancelar</button>
   </div>`;
@@ -3561,14 +3588,23 @@ async function catPlanGuardar(){
   const modeloPrecio=document.getElementById('cat-l-modelo')?.value||'fijo';
   const precioExtraIntegrante = modeloPrecio==='por_integrante' ? Math.max(0, Number(document.getElementById('cat-l-extra')?.value||0)||0) : null;
   const integrantesBase = modeloPrecio==='por_integrante' ? Math.max(0, Math.round(Number(document.getElementById('cat-l-baseint')?.value||1)||1)) : null;
-  const data={ nombre, descripcion:(document.getElementById('cat-l-desc')?.value||'').trim(), precio, carenciaDias, coberturas:base, modeloPrecio, precioExtraIntegrante, integrantesBase };
+  // Campos de presentación de la landing (Tramo 5b). Compat: ausentes → el plan no aparece en la landing.
+  const mostrarEnLanding = !!document.getElementById('cat-l-landing')?.checked;
+  const ordenLanding = Math.round(Number(document.getElementById('cat-l-orden')?.value||0)||0);
+  const destacado = !!document.getElementById('cat-l-destacado')?.checked;
+  const etiquetaPrecio = (document.getElementById('cat-l-etiqueta')?.value||'').trim() || null;
+  const ctaLanding = (document.getElementById('cat-l-cta')?.value||'').trim() || null;
+  const itemsLanding = (document.getElementById('cat-l-items')?.value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const data={ nombre, descripcion:(document.getElementById('cat-l-desc')?.value||'').trim(), precio, carenciaDias, coberturas:base, modeloPrecio, precioExtraIntegrante, integrantesBase,
+               mostrarEnLanding, ordenLanding, destacado, etiquetaPrecio, ctaLanding, itemsLanding };
   try{
-    if(isNew){ data.activo=true; data.creadoEn=FV(); await db.collection('planes').add(data); audit('plan_creado','plan','',nombre); }
+    let planId;
+    if(isNew){ data.activo=true; data.creadoEn=FV(); const ref=await db.collection('planes').add(data); planId=ref.id; audit('plan_creado','plan','',nombre); }
     else{
       const old=(S.cat.planes||[]).find(x=>x.id===S.cat.ledit)||{};
       const cambioPrecio = (Number(old.precio)||0)!==precio || (old.modeloPrecio||'fijo')!==modeloPrecio || (Number(old.precioExtraIntegrante)||0)!==(Number(precioExtraIntegrante)||0);
       data.activo=(document.getElementById('cat-l-activo')?.value||'si')==='si'; data.actualizadoEn=FV();
-      await db.collection('planes').doc(S.cat.ledit).set(data,{merge:true});
+      await db.collection('planes').doc(S.cat.ledit).set(data,{merge:true}); planId=S.cat.ledit;
       // Historial de precios (Tramo 5a): solo si cambió precio/extra/modelo. Solo se escribe (sin UI de lectura acá).
       if(cambioPrecio){ try{ await db.collection('planes').doc(S.cat.ledit).collection('historialPrecios').add({
         precioAnterior:Number(old.precio)||0, precioNuevo:precio,
@@ -3576,13 +3612,20 @@ async function catPlanGuardar(){
         modeloAnterior:old.modeloPrecio||'fijo', modeloNuevo:modeloPrecio,
         cambiadoPor:S.user.uid, cambiadoEn:FV() }); }catch(e2){ console.warn('[historialPrecios] no se pudo escribir:',e2); } }
     }
+    // Espejo landing (Tramo 5b): crea/actualiza/borra planes_publicos según mostrarEnLanding && activo.
+    await planEspejoLanding(planId, data);
     S.cat.ledit=null; render();
   }catch(e){ catErr('No se pudo guardar: '+(e.message||e)); }
 }
 async function catPlanBaja(id,reactivar){
   if(!puedeConfig()) return;
   catErr('');
-  try{ await db.collection('planes').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
+  try{
+    await db.collection('planes').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true});
+    // Espejo landing (Tramo 5b): baja → se borra de planes_publicos; reactivación → se re-crea si mostrarEnLanding.
+    const pl=(S.cat.planes||[]).find(x=>x.id===id);
+    if(pl) await planEspejoLanding(id, { ...pl, activo:!!reactivar });
+  }
   catch(e){ catErr('No se pudo actualizar: '+(e.message||e)); }
 }
 
