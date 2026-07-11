@@ -1059,41 +1059,8 @@ function plan(){
   </div>`;
 
   let extras='';
-  if(u.plan==='Familiar'){
-    // Inicializar array de integrantes si no existe
-    if(!S.planExtras.integrantesDatos) S.planExtras.integrantesDatos=[];
-
-    const intRows=S.planExtras.integrantesDatos.map((ig,i)=>`
-      <div style="border:1px solid ${i===0?'var(--r)':'var(--border)'};border-radius:10px;padding:.75rem;margin-top:.65rem;background:var(--bg)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
-          <span style="font-size:.75rem;font-weight:700;color:${i===0?'var(--r)':'var(--ink2)'}">${i===0?'2.º integrante (obligatorio)':'Integrante '+(i+1)}</span>
-          ${i===0?'<span style="font-size:.65rem;color:var(--r)">requerido</span>':`<button onclick="S.planExtras.integrantesDatos.splice(${i},1);S.planExtras.integrantes--;render()" style="font-size:.68rem;color:var(--r);background:none;border:none;cursor:pointer">Eliminar</button>`}
-        </div>
-        <div class="field" style="margin-bottom:.4rem"><label>Nombre completo</label><input type="text" value="${ig.nombre||''}" placeholder="Nombre y apellido" oninput="S.planExtras.integrantesDatos[${i}].nombre=this.value"></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem">
-          <div class="field" style="margin-bottom:0"><label>DNI</label><input type="text" value="${ig.dni||''}" placeholder="XX.XXX.XXX" oninput="S.planExtras.integrantesDatos[${i}].dni=this.value"></div>
-          <div class="field" style="margin-bottom:0"><label>Fecha nac.</label><input type="date" value="${ig.fnac||''}" oninput="S.planExtras.integrantesDatos[${i}].fnac=this.value"></div>
-        </div>
-        <div class="field" style="margin-top:.4rem;margin-bottom:0"><label>Parentesco</label>
-          <select oninput="S.planExtras.integrantesDatos[${i}].parentesco=this.value" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.45rem .65rem;font-size:.8rem;color:var(--ink);width:100%">
-            <option value="">Seleccionar...</option>
-            ${['Cónyuge / Pareja','Hijo/a','Padre / Madre','Hermano/a','Otro familiar'].map(p=>`<option ${ig.parentesco===p?'selected':''}>${p}</option>`).join('')}
-          </select>
-        </div>
-      </div>`).join('');
-
-    extras=`
-    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
-        <div style="font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3)">Integrantes adicionales</div>
-        <span style="font-size:.75rem;font-weight:700;color:var(--ink)">${Math.max(0,(S.planExtras.integrantesDatos||[]).length-1)} persona${Math.max(0,(S.planExtras.integrantesDatos||[]).length-1)!==1?'s':''}</span>
-      </div>
-      ${intRows}
-      <button onclick="S.planExtras.integrantesDatos.push({nombre:'',dni:'',fnac:'',parentesco:''});S.planExtras.integrantes++;render()" style="width:100%;margin-top:.75rem;padding:.6rem;border-radius:10px;border:1.5px dashed var(--border);background:none;color:var(--ink2);font-size:.8rem;font-weight:600;cursor:pointer">+ Agregar integrante · $10.000/mes</button>
-      <div style="text-align:center;margin-top:.5rem;font-size:.72rem;color:var(--ink3)">${1+(S.planExtras.integrantesDatos||[]).length} personas cubiertas en total</div>
-      <button class="btn-r" style="margin-top:1rem;width:100%" onclick="alert('Integrantes guardados correctamente.')">Guardar integrantes</button>
-    </div>`;
-  }
+  // (Tramo 5a) Mock de integrantes del plan Familiar retirado — el precio por-integrante ahora vive en el
+  // modelo (planes.modeloPrecio/precioExtraIntegrante) y el conteo real se hace al facturar (generarAbonos).
 
   if(u.plan==='Area Protegida'){
     extras=`
@@ -3530,6 +3497,17 @@ function catPlanesView(){
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="catShowInact('planes',this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
   return `<button class="btn-r" onclick="catPlanNuevo()" style="margin-bottom:.7rem">+ Nuevo plan</button>${toggle}<div class="card">${rows}</div>`;
 }
+// Precio total del plan según su modelo (Tramo 5a). Compat: sin modeloPrecio o !='por_integrante' → precio fijo
+// (comportamiento actual). por_integrante: precio + max(0, integrantes - integrantesBase) * precioExtraIntegrante,
+// con integrantes = cantidad de DEPENDIENTES ACTIVOS del titular.
+function planPrecioTotal(plan, integrantes){
+  const base=Number(plan&&plan.precio)||0;
+  if(!plan || plan.modeloPrecio!=='por_integrante') return base;
+  const extra=Number(plan.precioExtraIntegrante)||0;
+  const baseInt=(plan.integrantesBase!=null)?Number(plan.integrantesBase):1;
+  return base + Math.max(0,(Number(integrantes)||0)-baseInt)*extra;
+}
+function catModeloChange(v){ const g=document.getElementById('cat-l-grp-integrante'); if(g) g.style.display=(v==='por_integrante')?'':'none'; } // DOM puro, no borra inputs
 function catPlanForm(){
   const isNew=S.cat.ledit==='new';
   const p=isNew?{}:((S.cat.planes||[]).find(x=>x.id===S.cat.ledit)||{});
@@ -3550,6 +3528,14 @@ function catPlanForm(){
     <div class="field"><label>Nombre</label><input id="cat-l-nombre" value="${esc(p.nombre||'')}" placeholder="Ej. Plan 01"></div>
     <div class="field"><label>Descripción</label><textarea id="cat-l-desc" rows="2" placeholder="opcional">${esc(p.descripcion||'')}</textarea></div>
     <div class="field"><label>Precio</label><input id="cat-l-precio" type="number" min="0" step="0.01" value="${p.precio!=null?esc(p.precio):'0'}"></div>
+    <div class="field"><label>Modelo de precio</label><select id="cat-l-modelo" onchange="catModeloChange(this.value)">
+      <option value="fijo" ${(p.modeloPrecio||'fijo')==='fijo'?'selected':''}>Fijo</option>
+      <option value="por_integrante" ${p.modeloPrecio==='por_integrante'?'selected':''}>Por integrante (familiar)</option></select></div>
+    <div id="cat-l-grp-integrante" style="display:${p.modeloPrecio==='por_integrante'?'':'none'}">
+      <div class="field"><label>Precio por integrante adicional</label><input id="cat-l-extra" type="number" min="0" step="0.01" value="${p.precioExtraIntegrante!=null?esc(p.precioExtraIntegrante):'0'}"></div>
+      <div class="field"><label>Dependientes incluidos en la base</label><input id="cat-l-baseint" type="number" min="0" step="1" value="${p.integrantesBase!=null?esc(p.integrantesBase):'1'}"></div>
+      <div style="font-size:.68rem;color:var(--ink3);margin:-.2rem 0 .5rem">Total = precio + max(0, dependientes activos − incluidos) × precio por integrante. Los dependientes se cuentan del grupo del titular al facturar.</div>
+    </div>
     <div class="field"><label>Carencia (días)</label><input id="cat-l-carencia" type="number" min="0" step="1" value="${p.carenciaDias!=null?esc(p.carenciaDias):'0'}"></div>
     ${isNew?'':`<div class="field"><label>Estado de alta</label><select id="cat-l-activo"><option value="si" ${p.activo!==false?'selected':''}>Activo</option><option value="no" ${p.activo===false?'selected':''}>Baja lógica</option></select></div>`}
     <div class="field"><label>Coberturas (prestaciones)</label>${cobField}</div>
@@ -3572,10 +3558,24 @@ async function catPlanGuardar(){
   // con el estado de los checkboxes de las prestaciones ACTIVAS. true/false por prestacionId.
   const base=isNew?{}:Object.assign({}, ((S.cat.planes||[]).find(x=>x.id===S.cat.ledit)||{}).coberturas||{});
   document.querySelectorAll('.cat-cob').forEach(c=>{ base[c.getAttribute('data-prest')]=!!c.checked; });
-  const data={ nombre, descripcion:(document.getElementById('cat-l-desc')?.value||'').trim(), precio, carenciaDias, coberturas:base };
+  const modeloPrecio=document.getElementById('cat-l-modelo')?.value||'fijo';
+  const precioExtraIntegrante = modeloPrecio==='por_integrante' ? Math.max(0, Number(document.getElementById('cat-l-extra')?.value||0)||0) : null;
+  const integrantesBase = modeloPrecio==='por_integrante' ? Math.max(0, Math.round(Number(document.getElementById('cat-l-baseint')?.value||1)||1)) : null;
+  const data={ nombre, descripcion:(document.getElementById('cat-l-desc')?.value||'').trim(), precio, carenciaDias, coberturas:base, modeloPrecio, precioExtraIntegrante, integrantesBase };
   try{
     if(isNew){ data.activo=true; data.creadoEn=FV(); await db.collection('planes').add(data); audit('plan_creado','plan','',nombre); }
-    else{ data.activo=(document.getElementById('cat-l-activo')?.value||'si')==='si'; data.actualizadoEn=FV(); await db.collection('planes').doc(S.cat.ledit).set(data,{merge:true}); }
+    else{
+      const old=(S.cat.planes||[]).find(x=>x.id===S.cat.ledit)||{};
+      const cambioPrecio = (Number(old.precio)||0)!==precio || (old.modeloPrecio||'fijo')!==modeloPrecio || (Number(old.precioExtraIntegrante)||0)!==(Number(precioExtraIntegrante)||0);
+      data.activo=(document.getElementById('cat-l-activo')?.value||'si')==='si'; data.actualizadoEn=FV();
+      await db.collection('planes').doc(S.cat.ledit).set(data,{merge:true});
+      // Historial de precios (Tramo 5a): solo si cambió precio/extra/modelo. Solo se escribe (sin UI de lectura acá).
+      if(cambioPrecio){ try{ await db.collection('planes').doc(S.cat.ledit).collection('historialPrecios').add({
+        precioAnterior:Number(old.precio)||0, precioNuevo:precio,
+        extraAnterior:(old.precioExtraIntegrante!=null?Number(old.precioExtraIntegrante):null), extraNuevo:precioExtraIntegrante,
+        modeloAnterior:old.modeloPrecio||'fijo', modeloNuevo:modeloPrecio,
+        cambiadoPor:S.user.uid, cambiadoEn:FV() }); }catch(e2){ console.warn('[historialPrecios] no se pudo escribir:',e2); } }
+    }
     S.cat.ledit=null; render();
   }catch(e){ catErr('No se pudo guardar: '+(e.message||e)); }
 }
@@ -3911,7 +3911,9 @@ async function generarAbonos(){
       if(socio.personaId){
         try{ const per=await db.collection('personas').doc(socio.personaId).get(); if(per.exists){ const p=per.data(); socioNombre=((p.apellido||'')+', '+(p.nombre||'')).replace(/^, /,'').replace(/, $/,'')||p.dni||''; } }catch(_){}
       }
-      const precio=Number(plan.precio)||0; // precio CONGELADO a la corrida (snapshot)
+      // por_integrante (Tramo 5a): cuenta dependientes ACTIVOS del titular EN MEMORIA (socSnap ya trae los activos) — sin queries extra en el loop.
+      const integrantes = (plan.modeloPrecio==='por_integrante') ? socSnap.docs.filter(x=>(x.data().titularSocioId)===socioId).length : 0;
+      const precio=planPrecioTotal(plan, integrantes); // precio CONGELADO a la corrida (snapshot)
       const abono={
         periodo, socioId, personaId:socio.personaId||null,
         socioNombre, numeroAfiliado:socio.numeroAfiliado||'',
@@ -3919,6 +3921,7 @@ async function generarAbonos(){
         precioSugerido:precio, precioFinal:precio, motivoAjuste:null,
         estado:'generado', generadoEn:FV(), generadoPor:S.user.uid
       };
+      if(plan.modeloPrecio==='por_integrante') abono.integrantesFacturados=integrantes;
       try{ await db.collection('abonos').add(abono); rep.generados++; }
       catch(e){ rep.errores++; console.warn('[generarAbonos] fallo',socioId,e); }
     }
@@ -4569,7 +4572,7 @@ function afFormEdit(){
     <div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div>
     <div class="field"><label>Persona</label><div style="font-size:.8rem;color:var(--ink3)">${afNombre(s.personaId)} (no se cambia acá)</div></div>
     <div class="field"><label>Dirección actual</label><div style="font-size:.78rem;color:var(--ink3)">${esc((afPersona(s.personaId)||{}).direccion||'—')}</div></div>
-    <details style="margin-bottom:.6rem"><summary style="font-size:.78rem;color:var(--r);cursor:pointer">Cambiar dirección (re-geocodifica)</summary>
+    <details style="margin-bottom:.6rem"><summary style="font-size:.78rem;color:var(--r);cursor:pointer">Cambiar dirección</summary>
       <div class="field" style="margin-top:.4rem"><label>Calle</label><input id="af-e-calle" list="af-calles-list" autocomplete="off" placeholder="dejar vacío = no cambia"><datalist id="af-calles-list">${afCallesOpts()}</datalist></div>
       <div class="field"><label>Altura</label><input id="af-e-altura" type="number" min="1"></div>
       <div class="field"><label>Piso / depto (opcional)</label><input id="af-e-piso"></div>
