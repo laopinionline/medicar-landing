@@ -6,7 +6,7 @@
  * pasada consistente. Mismo patrón y estructura que seed.js.
  *
  * Datos de JUGUETE: nombres "… Demo", sin DNI reales, afiliadoId/medicoId = null.
- * NO borra los demos viejos (afiliado@demo.com etc.).
+ * (Los demos viejos @demo.com se retiraron en el Tramo 7a: 4 borrados, 2 deshabilitados.)
  *
  * Requiere la service account key del proyecto medicar-sistema (misma que seed.js).
  * NUNCA se commitea (está en .gitignore). Ver README.md para generarla.
