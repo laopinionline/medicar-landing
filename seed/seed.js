@@ -26,20 +26,14 @@ const auth = admin.auth();
 const db = admin.firestore();
 
 const PASSWORD = '123456'; // Firebase Auth exige >= 6 caracteres
-const USERS = [
-  { email: 'afiliado@demo.com',    rol: 'afiliado',    nombre: 'Carlos Rodríguez' },
-  { email: 'medico@demo.com',      rol: 'medico',      nombre: 'Dra. Laura Gómez' },
-  { email: 'admin@demo.com',       rol: 'admin',       nombre: 'Victoriano Marino' },
-  { email: 'despachante@demo.com', rol: 'despachante', nombre: 'Despacho Central' }, // Etapa 2: rol de despacho
-  { email: 'medico2@demo.com',     rol: 'medico',      nombre: 'Dr. Martín Suárez', staffMedico: true }, // 2do médico (handoff); staff_medico con uid dinámico de Auth
-];
 
-// Etapa 2: colección staff_medico (selector de médicos para asignar en episodios).
-// doc id = uid de Auth del médico (mismo que usuarios/{uid}) -> las reglas de episodios
-// (medicoId == request.auth.uid) no cambian. set merge = idempotente.
-const STAFF_MEDICO = [
-  { uid: 'xBij3SzgZuVWog3aZltXE6i2noF3', nombre: 'Dra. Laura Gómez', activo: true },
-];
+// Tramo 7a — VACIADO deliberado: los demos viejos @demo.com se retiraron (el repo es PÚBLICO y
+// email+123456 eran credenciales de producción con roles elevados). Ya NO se siembran cuentas ni
+// staff_medico desde acá; los demos actuales (@medicaronline.ar) y el staff real se gestionan a mano
+// / desde el panel. La maquinaria idempotente de abajo queda por si en el futuro hiciera falta.
+// IMPORTANTE: no volver a hardcodear uids reales ni credenciales en este archivo (es público).
+const USERS = [];
+const STAFF_MEDICO = [];
 
 async function ensureStaffMedico(s) {
   await db.collection('staff_medico').doc(s.uid).set(
