@@ -1620,7 +1620,11 @@ function dspListaHTML(d){
   if(!r.length) return `<div style="font-size:.82rem;color:var(--ink3);margin-top:1rem">Sin resultados para «${esc(d.q||'')}». Si el paciente no está, dalo de alta con "Cargar sin DNI".</div>`;
   return `<div class="ch" style="margin:1rem 0 .4rem">Resultados (${r.length})</div>`+r.map(p=>{
     const edad=calcEdad(p.fechaNacimiento);
-    return `<div class="lr" style="cursor:pointer" onclick="dspElegirPaciente('${p.id}')"><div class="lrb"><div class="lrn">${esc(((p.apellido||'')+' '+(p.nombre||'')).trim()||'—')}</div><div class="lrs">DNI ${esc(p.dni||'—')} · ${edad} años</div></div><svg class="chev" width="9" height="11" viewBox="0 0 1794 2190" style="opacity:.5"><use href="#cmono"/></svg></div>`;
+    // Tramo 6: badge "Baja" si el socio está inactivo (espejo pacientes.activo===false). Solo presentación:
+    // el de baja SIGUE apareciendo en la búsqueda (en una emergencia el operador debe poder encontrarlo).
+    // activo ausente/true (p. ej. pacientes no-socios) → sin badge.
+    const bajaBadge=p.activo===false?` <span class="badge br" style="margin-left:.4rem;vertical-align:middle">Baja</span>`:'';
+    return `<div class="lr" style="cursor:pointer" onclick="dspElegirPaciente('${p.id}')"><div class="lrb"><div class="lrn">${esc(((p.apellido||'')+' '+(p.nombre||'')).trim()||'—')}${bajaBadge}</div><div class="lrs">DNI ${esc(p.dni||'—')} · ${edad} años</div></div><svg class="chev" width="9" height="11" viewBox="0 0 1794 2190" style="opacity:.5"><use href="#cmono"/></svg></div>`;
   }).join('');
 }
 
