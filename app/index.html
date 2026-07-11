@@ -592,7 +592,7 @@ const set=p=>{
 
 /* Estado de sesion limpio definido en UN solo lugar. resetSession() REASIGNA S a un
    baseline fresco: descarta TODO lo derivado del usuario (bandeja, ep, epView, dsp,
-   planExtras, fotoPerfilUrl, guardias, turno*, etc.) sin enumerarlo campo por campo.
+   afiliadoPlan, fotoPerfilUrl, guardias, turno*, etc.) sin enumerarlo campo por campo.
    Asi ningun dato de un usuario sobrevive al siguiente (higiene de sesion). */
 function cleanSession(){ return {user:null,tab:'home',sub:'directos',step:0}; }
 function resetSession(keepErr){
@@ -754,7 +754,6 @@ async function enterWithFbUser(fbUser){
     permisos:(data.permisos&&typeof data.permisos==='object'?data.permisos:{}) // capa de permisos del centro de mando (fail-closed: ausente = sin permiso)
   };
   resetSession(false); // cinturón y tiradores: arranque de sesión limpio aunque no se haya pasado por logout
-  S.planExtras={integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
   S.fotoPerfilUrl=null;
   S.user=u; // fijo el user; el rol ACTIVO lo resuelve entrarConRol / el selector
   if(roles.length<=1){
@@ -1018,84 +1017,89 @@ function hist(){
   ${HISTORIA.map(h=>`<div class="hcc"><div class="hcm"><span class="hcd">${h.fecha}</span><span class="badge ${h.tipo==='Emergencia'?'br':'ba'}">${h.tipo}</span></div><div class="hct">${h.motivo}</div><div class="hcdr">${h.medico} · Alta: ${h.alta}</div><div class="hcev">${h.evolucion}</div></div>`).join('')}`;
 }
 
-/* ── PLANES CONFIG ── */
-const PLANES_CONFIG={
-  'Joven':    {base:20000,extra:0,   desc:'Individual hasta 40 años',color:'#1D9E75'},
-  'Familiar': {base:40000,extra:10000,desc:'Siempre 2 personas base',color:'var(--r)'},
-  'Senior':   {base:60000,extra:0,   desc:'Individual adulto mayor',color:'#7B5EA7'},
-  'Area Protegida':{base:70000,extra:0,desc:'Por domicilio comercial + responsable',color:'#D97706'},
-  'Corporativo':{base:null,extra:0,  desc:'Precio definido por administración',color:'#374151'},
-};
+/* ── MI PLAN (afiliado) — Tramo 5c ──
+   Tarjeta READ-ONLY del modelo real. Lee el socio propio (socios.where personaId==miPersonaId,
+   permitido por reglas :389) y su plan (planes.doc, read:isSignedIn :350). Muestra nombre/desc/
+   precio-base (o "desde $X" si por_integrante)/tipo/número/estado/carencia. El cambio de plan es
+   administrativo: CTA de contacto al teléfono institucional. Sin autogestión, sin datos de otros,
+   sin tocar reglas. La cara-al-socio real es socio/index.html; el panel no expande esa superficie.
+   (Retirados: PLANES_CONFIG, planCosto, cambiarPlan, S.planExtras y el "próximo débito" fijo.) */
+const TEL_INST='443044';
 
-/* ── ESTADO EXTENDIDO ── */
-if(!S.planExtras) S.planExtras={integrantes:0,domicilioLocal:'',responsable:''};
+async function planLoad(){
+  S.afiliadoPlan={loading:true};
+  try{
+    const pid=S.user&&S.user.personaId;
+    if(!pid){ S.afiliadoPlan={estado:'sin-vinculo'}; render(); return; }
+    // Regla socios :392 deja leer SOLO los docs cuyo personaId == el mío → el where lo garantiza.
+    const snap=await db.collection('socios').where('personaId','==',pid).get();
+    const socios=snap.docs.map(d=>({id:d.id,...d.data()}));
+    const socio=socios.find(s=>s.activo!==false)||socios[0]||null; // prefiere la afiliación activa
+    if(!socio){ S.afiliadoPlan={estado:'sin-afiliacion'}; render(); return; }
+    let plan=null;
+    if(socio.planId){
+      try{ const pd=await db.collection('planes').doc(socio.planId).get(); if(pd.exists) plan={id:pd.id,...pd.data()}; }catch(_){}
+    }
+    S.afiliadoPlan={estado:'ok',socio,plan};
+  }catch(e){ S.afiliadoPlan={loading:false,err:(e&&e.message)||String(e)}; }
+  render();
+}
+function planReload(){ S.afiliadoPlan=null; render(); }
 
-function planCosto(){
-  const u=S.user;
-  const cfg=PLANES_CONFIG[u.plan];
-  if(!cfg||cfg.base===null) return null;
-  if(u.plan==='Familiar') return cfg.base + Math.max(0,(S.planExtras.integrantesDatos||[]).length - 1) * cfg.extra;
-  return cfg.base;
+function planTipoLbl(t){ return t==='corporativo'?'Corporativo':(t==='directo'?'Directo':(t||'—')); }
+function planCtaContacto(){
+  return `<div class="card">
+    <div class="ch">¿Querés cambiar de plan?</div>
+    <div style="font-size:.82rem;color:var(--ink3);margin:.4rem 0 .75rem">El cambio de plan lo gestiona MEDICAR. Contactanos y te asesoramos.</div>
+    <a href="tel:${TEL_INST}" style="display:block;text-align:center;background:var(--r);color:#fff;padding:.8rem;border-radius:10px;font-size:.9rem;font-weight:700;text-decoration:none">📞 Llamar ${TEL_INST}</a>
+  </div>`;
 }
 
 function plan(){
-  const u=S.user;
-  const cfg=PLANES_CONFIG[u.plan]||{base:null,extra:0,desc:'Plan especial',color:'#374151'};
-  const costo=planCosto();
-  const costoStr=costo!==null?`$${costo.toLocaleString('es-AR')}`:'A definir por admin';
+  const p=S.afiliadoPlan;
+  if(!p){ planLoad(); return `<div class="card">Cargando tu plan…</div>`; }
+  if(p.loading) return `<div class="card">Cargando tu plan…</div>`;
+  if(p.err) return `<div class="card"><div class="ch">Mi plan</div><div style="color:var(--ink3);font-size:.85rem;margin:.5rem 0">No pudimos cargar tu plan: ${esc(p.err)}</div><button class="btn-o" onclick="planReload()">Reintentar</button></div>`;
+  if(p.estado==='sin-vinculo') return `<div class="card"><div class="ch">Mi plan</div><div style="color:var(--ink3);font-size:.85rem;margin-top:.5rem">Todavía no asociamos tu cuenta con tu ficha de socio. Contactá a MEDICAR para completar la vinculación.</div></div>`+planCtaContacto();
+  if(p.estado==='sin-afiliacion') return `<div class="card"><div class="ch">Mi plan</div><div style="color:var(--ink3);font-size:.85rem;margin-top:.5rem">No encontramos una afiliación a tu nombre. Si creés que es un error, contactá a MEDICAR.</div></div>`+planCtaContacto();
 
-  const selectorPlanes=`
-  <div class="card" style="padding:.9rem 1rem">
-    <div class="ch" style="margin-bottom:.75rem">Tipo de plan</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
-      ${Object.entries(PLANES_CONFIG).map(([nombre,c])=>{
-        const sel=u.plan===nombre;
-        return`<button onclick="cambiarPlan('${nombre}')" style="padding:.65rem .5rem;border-radius:10px;border:${sel?'2px solid '+c.color:'1.5px solid var(--border)'};background:${sel?'rgba(0,0,0,.04)':'var(--card)'};text-align:left;cursor:pointer">
-          <div style="font-size:.78rem;font-weight:700;color:${sel?c.color:'var(--ink)'}">${nombre}</div>
-          <div style="font-size:.65rem;color:var(--ink3);margin-top:.15rem">${c.base?'$'+c.base.toLocaleString('es-AR'):'Admin'}</div>
-        </button>`;
-      }).join('')}
-    </div>
-  </div>`;
-
-  let extras='';
-  // (Tramo 5a) Mock de integrantes del plan Familiar retirado — el precio por-integrante ahora vive en el
-  // modelo (planes.modeloPrecio/precioExtraIntegrante) y el conteo real se hace al facturar (generarAbonos).
-
-  if(u.plan==='Area Protegida'){
-    extras=`
-    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)">
-      <div class="field" style="margin-bottom:.65rem">
-        <label>Domicilio del local</label>
-        <input type="text" id="inp-dom" value="${S.planExtras.domicilioLocal}" placeholder="Calle, número, localidad" oninput="S.planExtras.domicilioLocal=this.value">
-      </div>
-      <div class="field">
-        <label>Responsable</label>
-        <input type="text" id="inp-resp" value="${S.planExtras.responsable}" placeholder="Nombre del responsable cubierto" oninput="S.planExtras.responsable=this.value">
-      </div>
-    </div>`;
+  const s=p.socio, pl=p.plan;
+  const activo=s.activo!==false;
+  const nombrePlan=pl?(pl.nombre||'—'):'—';
+  const desc=pl?(pl.descripcion||''):'';
+  const color=activo?'var(--r)':'var(--ink3)';
+  let precioStr='A definir por administración';
+  if(pl){
+    const base=Number(pl.precio)||0;
+    precioStr=(pl.modeloPrecio==='por_integrante')?('desde $'+base.toLocaleString('es-AR')):('$'+base.toLocaleString('es-AR'));
   }
+  const carencia=(pl&&pl.carenciaDias!=null&&Number(pl.carenciaDias)>0)?Number(pl.carenciaDias):null;
+  // "Qué incluye": reusa plan.itemsLanding (misma lista curada de la landing, legible por isSignedIn → cero
+  // reglas nuevas). Sin items o vacío → recién ahí el fallback de texto.
+  const items=(pl&&Array.isArray(pl.itemsLanding))?pl.itemsLanding.map(x=>String(x||'').trim()).filter(Boolean):[];
+  const coberturas=items.length
+    ? `<div class="card"><div class="ch">Qué incluye tu plan</div>${items.map(it=>`<div class="lr"><div class="lrb"><div class="lrn">${esc(it)}</div></div><span style="color:#0F6E56;width:18px;height:18px">${IC.check}</span></div>`).join('')}</div>`
+    : `<div class="card"><div class="ch">Coberturas</div><div style="font-size:.82rem;color:var(--ink3);margin-top:.4rem">Consultá el detalle de coberturas de tu plan con MEDICAR.</div></div>`;
 
   return`
-  ${selectorPlanes}
   <div class="card">
     <div class="ch">Cobertura activa</div>
     <div style="text-align:center;padding:1rem 0 .5rem">
-      <div style="font-size:2.3rem;font-style:italic;font-weight:800;color:${cfg.color};letter-spacing:-.02em;line-height:1">Plan ${u.plan||'—'}</div>
-      <div style="font-size:.8rem;color:var(--ink3);margin-top:.3rem">${cfg.desc}</div>
-      <div style="margin-top:.75rem"><span class="badge bg">Activo · Al día</span></div>
+      <div style="font-size:2.1rem;font-style:italic;font-weight:800;color:${color};letter-spacing:-.02em;line-height:1.05">${/^plan\b/i.test(nombrePlan)?'':'Plan '}${esc(nombrePlan)}</div>
+      ${desc?`<div style="font-size:.8rem;color:var(--ink3);margin-top:.35rem">${esc(desc)}</div>`:''}
+      <div style="margin-top:.75rem"><span class="badge ${activo?'bg':'br'}">${activo?'Activo':'Baja'}</span></div>
     </div>
-    ${extras}
     <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:.8rem;color:var(--ink3)">Cuota mensual</span>
-      <span style="font-size:1.5rem;font-weight:800;font-style:italic;color:${cfg.color}">${costoStr}</span>
+      <span style="font-size:1.4rem;font-weight:800;font-style:italic;color:${color}">${precioStr}</span>
     </div>
-    <div class="ir" style="margin-top:.5rem"><span class="il">Próximo débito</span><span class="iv">01/04/2026</span></div>
+    ${pl&&pl.modeloPrecio==='por_integrante'?`<div style="font-size:.7rem;color:var(--ink3);text-align:right;margin-top:.15rem">El valor final depende de los integrantes de tu grupo.</div>`:''}
+    <div class="ir" style="margin-top:.75rem"><span class="il">N° de afiliado</span><span class="iv">${esc(s.numeroAfiliado||'—')}</span></div>
+    <div class="ir"><span class="il">Tipo</span><span class="iv">${esc(planTipoLbl(s.tipoAfiliado))}</span></div>
+    ${carencia!=null?`<div class="ir"><span class="il">Carencia</span><span class="iv">${carencia} días</span></div>`:''}
   </div>
-  <div class="card">
-    <div class="ch">Coberturas incluidas</div>
-    ${['Atención domiciliaria 24hs','Médico de guardia permanente','Traslados de emergencia','Atención pediátrica','Atención geriátrica','Guardia pasiva domiciliaria'].map(c=>`<div class="lr"><div class="lrb"><div class="lrn">${c}</div></div><span style="color:#0F6E56;width:18px;height:18px">${IC.check}</span></div>`).join('')}
-  </div>`;
+  ${coberturas}
+  ${planCtaContacto()}`;
 }
 
 function perfilA(){
@@ -1260,14 +1264,6 @@ function perfilM(){
     <div class="ir"><span class="il">Unidad</span><span class="iv">${u.unidad||'—'}</span></div>
   </div>
   <button class="btn-o" onclick="doLogout()">Cerrar sesión</button>`;
-}
-
-function cambiarPlan(nombre){
-  S.user.plan=nombre;
-  S.planExtras=nombre==='Familiar'
-    ? {integrantes:1,integrantesDatos:[{nombre:'',dni:'',fnac:'',parentesco:''}],domicilioLocal:'',responsable:''}
-    : {integrantes:0,integrantesDatos:[],domicilioLocal:'',responsable:''};
-  render();
 }
 
 /* ADMIN */
