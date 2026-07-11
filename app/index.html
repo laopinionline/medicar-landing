@@ -631,6 +631,7 @@ function navDesc(){
   if(S.sp && S.sp.creating){ d.open='spNew'; }                            // alta de personal (F2b)
   else if(S.sp && S.sp.edit){ d.open='sp'; d.openId=String(S.sp.edit); }  // ficha de personal (F2b — caso Lucas)
   else if(S.epView){ d.open='ep'; d.openId=String(S.epView); }
+  else if(S.af && S.af.emp){ d.open='emp'; }                              // ABM de empresas (Tramo 2a)
   else if(S.af && S.af.edit){ d.open='af'; d.openId=String(S.af.edit); }
   else if(S.fac && S.fac.fedit){ d.open='fac'; d.openId=String(S.fac.fedit); }
   else if(S.tab==='despacho' && S.dsp && S.dsp.stage){ d.stage=S.dsp.stage; } // despacho: 'buscar'/'form'/'creado' son entries apilados
@@ -654,13 +655,15 @@ function navRestore(desc){
     // CERRAR lo que no corresponde al descriptor (dirección "atrás") — por las funciones existentes
     if(S.sp && (S.sp.edit||S.sp.creating) && desc.open!=='sp' && desc.open!=='spNew') spBack(); // ficha/alta de personal -> lista (back)
     if(S.epView && desc.open!=='ep') closeEp();
-    if(S.af && S.af.edit && desc.open!=='af') afCancelar();
+    if(S.af && S.af.emp && desc.open!=='emp') empCerrar();          // ABM empresas (Tramo 2a)
+    if(S.af && S.af.edit && desc.open!=='af' && desc.open!=='emp') afCancelar();
     if(S.fac && S.fac.fedit && desc.open!=='fac') facFacturaCerrar();
     if(S.tab==='despacho' && S.dsp && S.dsp.stage && S.dsp.stage!=='buscar' && (desc.stage||'buscar')==='buscar') dspReset(); // form/creado -> buscar (back)
     // ABRIR lo que pide el descriptor (dirección "adelante"). GRACIA: solo si el id sigue en la data
     // cargada; si no existe / la data no está -> NO se abre (queda la base, sin error card).
     const existe=(arr,id)=>Array.isArray(arr)&&arr.some(x=>x.id===id);
-    if(desc.open==='sp' && desc.openId && S.sp && S.sp.edit!==desc.openId){ spOpenEdit(desc.openId); } // spEditView cae a la lista si el uid no existe (gracia)
+    if(desc.open==='emp' && S.af && !S.af.emp){ empSet({view:'list'}); }   // re-abrir el ABM (a la lista) adelante
+    else if(desc.open==='sp' && desc.openId && S.sp && S.sp.edit!==desc.openId){ spOpenEdit(desc.openId); } // spEditView cae a la lista si el uid no existe (gracia)
     else if(desc.open==='spNew' && S.sp && !S.sp.creating){ spOpenCreate(); }
     else if(desc.open==='ep' && desc.openId && S.epView!==desc.openId){
       if(S.bandeja && existe(S.bandeja.items,desc.openId)) openEp(desc.openId);
@@ -4109,14 +4112,15 @@ async function facFacturaAnular(id){
      - socios/{id}: personaId (ref), tipoAfiliado, numeroAfiliado, planId (ref a planes|null), vigenteDesde,
        carenciaHasta, activo (baja lógica), creadoEn.
    Alta = buscar la persona por DNI; si no existe se crea persona + socio juntos. NO toca pacientes ni episodios. */
-function afFormOpen(){ return !!(S.af && S.af.edit!=null); }
+function afFormOpen(){ return !!(S.af && (S.af.edit!=null || (S.af.emp && S.af.emp.view!=='list'))); }
 function afAttach(){
   if(S.afUnsub) return;
   const upd=()=>{ if(!afFormOpen()) render(); };
   S.afUnsub=[
     db.collection('socios').onSnapshot(s=>{ if(!S.af) return; S.af.socios=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.af){ S.af.err=(e.message||String(e)); render(); } }),
     db.collection('personas').onSnapshot(s=>{ if(!S.af) return; S.af.personas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.af){ S.af.err=(e.message||String(e)); render(); } }),
-    db.collection('planes').where('activo','==',true).onSnapshot(s=>{ if(!S.af) return; S.af.planes=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.af) S.af.planes=[]; })
+    db.collection('planes').where('activo','==',true).onSnapshot(s=>{ if(!S.af) return; S.af.planes=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.af) S.af.planes=[]; }),
+    db.collection('empresas').onSnapshot(s=>{ if(!S.af) return; S.af.empresas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.af) S.af.empresas=[]; })
   ];
 }
 function afDetach(){ if(S.afUnsub){ S.afUnsub.forEach(u=>{ try{u();}catch(_){} }); S.afUnsub=null; } }
@@ -4131,9 +4135,10 @@ function afTsToInput(ts){ const ms=afMs(ts); if(ms==null) return ''; const d=new
 
 function afPanel(){
   if(!puedeAfil()) return `<div class="card"><div class="ch">Afiliados</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para gestionar afiliados.</div></div>`;
-  if(!S.af){ S.af={socios:null,personas:null,planes:null,edit:null,showInact:false,err:'',lk:null}; afAttach(); }
+  if(!S.af){ S.af={socios:null,personas:null,planes:null,empresas:null,edit:null,emp:null,altaDraft:null,showInact:false,err:'',lk:null}; afAttach(); }
   if(S.convOpenAlta){ S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.convOpenAlta=false; } // conversión de lead en curso: abre el alta
   if(S.af.err) return `<div class="card">No se pudo cargar afiliados: ${esc(S.af.err)}</div>`;
+  if(S.af.emp) return empPanel();      // ABM de empresas (vista apilada)
   if(S.af.edit!=null) return afForm();
   if(S.af.socios===null||S.af.personas===null) return `<div class="card">Cargando afiliados…</div>`;
   const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
@@ -4148,7 +4153,7 @@ function afPanel(){
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin socios${showInact?'':' activos'}</div>`;
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="afShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
   const head=`<div class="panel-h"><b>Afiliados</b><span class="live-tag">en vivo</span></div>`;
-  return `${head}<button class="btn-r" onclick="afNuevo()" style="margin-bottom:.7rem">+ Nuevo socio</button>${toggle}<div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div><div class="card">${rows}</div>`;
+  return `${head}<div style="display:flex;gap:.5rem;margin-bottom:.7rem"><button class="btn-r" onclick="afNuevo()" style="flex:1;margin:0">+ Nuevo socio</button><button class="btn-o" onclick="empAbrir()" style="width:auto;margin:0;padding:.5rem .8rem">Empresas</button></div>${toggle}<div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div><div class="card">${rows}</div>`;
 }
 function afShowInact(on){ if(!S.af) return; S.af.showInact=!!on; render(); }
 /* ===================== NUMERACIÓN DE SOCIOS — Fase 1 (modelo + numeración transaccional) =====================
@@ -4194,15 +4199,16 @@ async function asignarSufijo(raizRef, targetRef, buildDoc){
     return { sufijo, numeroAfiliado };
   });
 }
-function afNuevo(){ if(!puedeAfil())return; S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; render(); navPush(); }
+function afNuevo(){ if(!puedeAfil())return; S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.af.altaDraft={tipo:'directo',empresaId:null}; render(); navPush(); }
 function afEditar(id){ if(!puedeAfil())return; S.af.edit=id; S.af.lk=null; render(); navPush(); }
-function afCancelar(){ if(S.af){ S.af.edit=null; S.af.lk=null; } S.convLeadId=null; S.convPrefill=null; S.convOpenAlta=false; render(); } // cancelar conversión: el lead queda como estaba
+function afCancelar(){ if(S.af){ S.af.edit=null; S.af.lk=null; S.af.altaDraft=null; } S.convLeadId=null; S.convPrefill=null; S.convOpenAlta=false; render(); } // cancelar conversión: el lead queda como estaba
 function afForm(){ return S.af.edit==='new' ? afFormNew() : afFormEdit(); }
 
 function afFormNew(){
   const lk=S.af.lk||{dni:'',searched:false,persona:null};
   const planOpts=`<option value="">— Sin plan —</option>`+(S.af.planes||[]).map(p=>`<option value="${p.id}">${esc(p.nombre||p.id)}</option>`).join('');
   // Conversión de lead: banner + pre-carga (nombre/teléfono) del form de persona nueva. Sin lead → pf vacío = igual que antes.
+  const draft=S.af.altaDraft||{}; const dp=draft.persona||{};   // draft: sobrevive el detour al ABM de empresas
   const conv=!!S.convLeadId, pf=S.convPrefill||{};
   const convBanner=conv?`<div style="background:var(--g,#1D9E75);color:#fff;border-radius:8px;padding:.5rem .65rem;font-size:.78rem;font-weight:600;margin-bottom:.5rem">Convirtiendo lead${pf.nombre?(': '+esc(pf.nombre)):''} — buscá el DNI para reusar o crear la persona.</div>`:'';
   const dniBlock=`<div class="field"><label>DNI</label><div style="display:flex;gap:.5rem"><input id="af-dni" value="${esc(lk.dni||'')}" placeholder="Sin puntos" style="flex:1"><button class="btn-o" style="width:auto;margin-top:0;padding:.4rem .8rem" onclick="afBuscarPersona()">Buscar</button></div></div>`;
@@ -4211,19 +4217,33 @@ function afFormNew(){
     personaBlock = lk.persona
       ? `<div class="card" style="background:var(--bg)"><div style="font-size:.82rem"><b>Persona encontrada:</b> ${afNombre(lk.persona.id)}</div><div style="font-size:.72rem;color:var(--ink3)">DNI ${esc(lk.persona.dni||'—')} · se usa esta persona (id ${esc(lk.persona.id)})</div></div>`
       : `<div class="card" style="background:var(--bg)"><div style="font-size:.78rem;color:var(--ink3);margin-bottom:.4rem">No existe una persona con ese DNI. Completá sus datos para crearla junto con el socio:</div>
-          <div class="field"><label>Apellido</label><input id="af-p-apellido" placeholder="Apellido"></div>
-          <div class="field"><label>Nombre</label><input id="af-p-nombre" value="${esc(pf.nombre||'')}" placeholder="Nombre"></div>
-          <div class="field"><label>Sexo</label><select id="af-p-sexo"><option value="">—</option><option value="F">F</option><option value="M">M</option><option value="X">X</option></select></div>
-          <div class="field"><label>Fecha de nacimiento</label><input id="af-p-fnac" type="date"></div>
-          <div class="field"><label>Teléfono</label><input id="af-p-tel" value="${esc(pf.telefono||'')}" placeholder="opcional"></div>
-          <div class="field"><label>Dirección</label><input id="af-p-dir" placeholder="opcional"></div></div>`;
+          <div class="field"><label>Apellido</label><input id="af-p-apellido" value="${esc(dp.apellido||'')}" placeholder="Apellido"></div>
+          <div class="field"><label>Nombre</label><input id="af-p-nombre" value="${esc(dp.nombre||pf.nombre||'')}" placeholder="Nombre"></div>
+          <div class="field"><label>Sexo</label><select id="af-p-sexo"><option value="">—</option><option value="F" ${dp.sexo==='F'?'selected':''}>F</option><option value="M" ${dp.sexo==='M'?'selected':''}>M</option><option value="X" ${dp.sexo==='X'?'selected':''}>X</option></select></div>
+          <div class="field"><label>Fecha de nacimiento</label><input id="af-p-fnac" type="date" value="${esc(dp.fnac||'')}"></div>
+          <div class="field"><label>Teléfono</label><input id="af-p-tel" value="${esc(dp.tel||pf.telefono||'')}" placeholder="opcional"></div>
+          <div class="field"><label>Dirección</label><input id="af-p-dir" value="${esc(dp.dir||'')}" placeholder="opcional"></div></div>`;
   }
+  const tipoSel=draft.tipo||'directo';
+  const empresasDe=(t)=>(S.af.empresas||[]).filter(e=>e.tipo===t && e.activo!==false);
+  const empOpts=(t)=>{ const ls=empresasDe(t); return ls.length ? ls.map(e=>`<option value="${e.id}" ${draft.empresaId===e.id?'selected':''}>${esc(e.razonSocial||'—')} (N° ${esc(e.numeroConvenio||'—')})</option>`).join('') : '<option value="">— sin empresas de este tipo —</option>'; };
   const socioBlock = lk.searched ? `
-    <div class="field"><label>Tipo de afiliado</label><select id="af-tipo"><option value="directo">Directo</option><option value="corporativo">Corporativo</option></select></div>
-    <div class="field"><label>N° de afiliado</label><input id="af-num" placeholder="Ej. 20789"></div>
-    <div class="field"><label>Plan</label><select id="af-planid">${planOpts}</select></div>
-    <div class="field"><label>Vigente desde</label><input id="af-vig" type="date" value="${afTsToInput(firebase.firestore.Timestamp.now())}"></div>
-    <div class="field"><label>Carencia hasta (opcional)</label><input id="af-car" type="date"></div>
+    <div class="field"><label>Tipo de afiliado</label><select id="af-tipo" onchange="afTipoChange(this.value)">
+      <option value="directo" ${tipoSel==='directo'?'selected':''}>Directo</option>
+      <option value="corporativo" ${tipoSel==='corporativo'?'selected':''}>Corporativo</option>
+      <option value="area_protegida" ${tipoSel==='area_protegida'?'selected':''}>Área protegida</option></select></div>
+    <div id="af-grp-directo" style="display:${tipoSel==='directo'?'':'none'}">
+      <div class="field"><label>N° de afiliado</label><input id="af-num" value="${esc(draft.numero||'')}" placeholder="Ej. 20789"></div>
+      <div class="field"><label>Plan</label><select id="af-planid">${planOpts}</select></div>
+    </div>
+    <div id="af-grp-emp" style="display:${tipoSel!=='directo'?'':'none'}">
+      <div class="field"><label>Empresa</label>
+        <div style="display:flex;gap:.5rem"><select id="af-empresa" style="flex:1">${tipoSel!=='directo'?empOpts(tipoSel):''}</select><button class="btn-o" style="width:auto;margin-top:0;padding:.4rem .6rem" onclick="empNuevo(true)">Nueva</button></div>
+        <div style="font-size:.68rem;color:var(--ink3);margin-top:.25rem">El N° se asigna automático (convenio-NN) y el plan lo define la empresa.</div>
+      </div>
+    </div>
+    <div class="field"><label>Vigente desde</label><input id="af-vig" type="date" value="${esc(draft.vig||afTsToInput(firebase.firestore.Timestamp.now()))}"></div>
+    <div class="field"><label>Carencia hasta (opcional)</label><input id="af-car" type="date" value="${esc(draft.car||'')}"></div>
     <button class="btn-r" onclick="afGuardarNuevo()">Guardar socio</button>` : '';
   return `<div class="card"><div class="ch">Nuevo socio</div>
     ${convBanner}<div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div>
@@ -4247,14 +4267,23 @@ async function afGuardarNuevo(){
   afErr('');
   const lk=S.af.lk||{};
   if(!lk.searched){ afErr('Primero buscá la persona por DNI.'); return; }
-  const numero=(document.getElementById('af-num')?.value||'').trim();
-  if(!numero){ afErr('El N° de afiliado es requerido.'); return; }
-  if((S.af.socios||[]).some(s=>String(s.numeroAfiliado)===numero)){ afErr('Ya existe un socio con el N° '+numero+'.'); return; }
-  const tipoAfiliado=document.getElementById('af-tipo')?.value||'directo';
-  const planId=document.getElementById('af-planid')?.value||null;
+  const tipo=document.getElementById('af-tipo')?.value||'directo';
   const vig=afFechaToTs(document.getElementById('af-vig')?.value||'');
   const car=afFechaToTs(document.getElementById('af-car')?.value||'');
+  // Validaciones específicas por tipo (antes de crear nada).
+  let numero='', empresa=null;
+  if(tipo==='directo'){                                              // === camino directo: EXACTAMENTE como hoy (N° a mano) ===
+    numero=(document.getElementById('af-num')?.value||'').trim();
+    if(!numero){ afErr('El N° de afiliado es requerido.'); return; }
+    if((S.af.socios||[]).some(s=>String(s.numeroAfiliado)===numero)){ afErr('Ya existe un socio con el N° '+numero+'.'); return; }
+  } else {                                                           // === corporativo / área protegida: N° automático por sufijo ===
+    const empresaId=document.getElementById('af-empresa')?.value||'';
+    if(!empresaId){ afErr('Elegí una empresa (o creá una nueva).'); return; }
+    empresa=(S.af.empresas||[]).find(e=>e.id===empresaId);
+    if(!empresa){ afErr('Empresa no encontrada.'); return; }
+  }
   try{
+    // Persona: se crea ANTES de la transacción si no existe (patrón acordado).
     let personaId;
     if(lk.persona){ personaId=lk.persona.id; }
     else{
@@ -4265,18 +4294,135 @@ async function afGuardarNuevo(){
       const ref=await db.collection('personas').add(pdata);
       personaId=ref.id;
     }
-    const sref=await db.collection('socios').add({ personaId, tipoAfiliado, numeroAfiliado:numero, planId:planId||null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV() });
+    let socioId, numeroFinal;
+    if(tipo==='directo'){
+      const planId=document.getElementById('af-planid')?.value||null;
+      const sref=await db.collection('socios').add({ personaId, tipoAfiliado:'directo', numeroAfiliado:numero, planId:planId||null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV() });
+      socioId=sref.id; numeroFinal=numero;
+    } else {
+      // Sufijo -NN sobre la empresa, socio creado en la MISMA transacción (primitiva de Fase 1).
+      const grupoTipo=(tipo==='area_protegida')?'area_protegida':'corporativo';
+      const socioRef=db.collection('socios').doc();
+      const r=await asignarSufijo(db.collection('empresas').doc(empresa.id), socioRef, (numeroAfiliado)=>({
+        personaId, tipoAfiliado:'corporativo', grupoTipo, empresaId:empresa.id, esResponsablePago:false,
+        numeroAfiliado, planId: empresa.planIdDefault||null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV()
+      }));
+      socioId=socioRef.id; numeroFinal=r.numeroAfiliado;
+    }
     // Conversión de lead (callback): al guardar OK en modo conversión, marca el lead convertido + vínculo.
     if(S.convLeadId){
-      try{ await db.collection('leads').doc(S.convLeadId).set({ estado:'convertido', personaId, socioId:sref.id, actualizadoEn:FV() },{merge:true}); audit('lead_convertido','lead',S.convLeadId,'socio '+sref.id); }
+      try{ await db.collection('leads').doc(S.convLeadId).set({ estado:'convertido', personaId, socioId, actualizadoEn:FV() },{merge:true}); audit('lead_convertido','lead',S.convLeadId,'socio '+socioId); }
       catch(e2){ console.warn('[conversión] socio creado OK, pero no se pudo marcar el lead:',e2); }
       S.convLeadId=null; S.convPrefill=null;
     }
-    audit('socio_alta','socio',personaId,'N° '+numero);
-    S.af.edit=null; S.af.lk=null; render();
+    audit('socio_alta','socio',personaId,'N° '+numeroFinal);
+    S.af.edit=null; S.af.lk=null; S.af.altaDraft=null; render();
   }catch(e){ afErr('No se pudo guardar: '+(e.message||e)); }
 }
 
+/* ===================== ABM de EMPRESAS (Tramo 2a) — raíz corporativa / área protegida =====================
+   Vista apilada dentro del panel de afiliados (S.af.emp). La lista/new/edit son sub-estado; el ABM entra y sale
+   como UN entry de History (open='emp'): abrir* pushea, navBack cierra; el sub-nav interno usa empSet (puro). */
+function empErr(t){ const e=document.getElementById('emp-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function empSet(emp){ if(S.af){ S.af.emp=emp; } render(); }                 // setter puro (lo usa navRestore y el sub-nav interno)
+function empAbrir(){ if(!puedeAfil())return; empSet({view:'list'}); navPush(); }   // desde el panel de afiliados
+function empNuevo(fromAlta){ if(!puedeAfil())return; if(fromAlta) afSnapshotDraft(); empSet({view:'new'}); navPush(); }
+function empEditar(id){ if(!puedeAfil())return; empSet({view:'edit',id}); navPush(); }
+function empCerrar(){ if(S.af) S.af.emp=null; render(); }                   // puro (lo llama navRestore al hacer atrás)
+function empPanel(){
+  const emp=S.af.emp||{view:'list'};
+  if(emp.view==='new') return empFormNew();
+  if(emp.view==='edit') return empFormEdit(emp.id);
+  const btn='btn-o" style="width:auto;padding:.3rem .6rem;margin-top:0';
+  const list=(S.af.empresas||[]);
+  const rows = list.length ? list.map(e=>{
+    const n=(S.af.socios||[]).filter(s=>s.empresaId===e.id).length;
+    const tl=(e.tipo==='area_protegida')?'Área protegida':'Corporativo';
+    const inact=e.activo===false;
+    return `<div class="lr"${inact?' style="opacity:.5"':''}><div class="lrb"><div class="lrn">${esc(e.razonSocial||'—')}</div><div class="lrs">N° ${esc(e.numeroConvenio||'—')} · ${tl} · ${n} integrante${n===1?'':'s'}${inact?' · inactiva':''}</div></div><button class="${btn}" onclick="empEditar('${e.id}')">Editar</button></div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin empresas todavía.</div>`;
+  return `<div class="panel-h"><b>Empresas / convenios</b><span class="live-tag">en vivo</span></div>
+    <button class="btn-r" onclick="empNuevo(false)" style="margin-bottom:.7rem">+ Nueva empresa</button>
+    <div id="emp-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <div class="card">${rows}</div>
+    <button class="btn-o" onclick="navBack()" style="margin-top:.6rem">Volver a afiliados</button>`;
+}
+function empPlanOpts(sel){ return `<option value="">— Sin plan por defecto —</option>`+(S.af.planes||[]).map(p=>`<option value="${p.id}" ${sel===p.id?'selected':''}>${esc(p.nombre||p.id)}</option>`).join(''); }
+function empFormNew(){
+  return `<div class="card"><div class="ch">Nueva empresa / convenio</div>
+    <div id="emp-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <div class="field"><label>Razón social</label><input id="emp-razon" placeholder="Nombre de la empresa"></div>
+    <div class="field"><label>Tipo</label><select id="emp-tipo"><option value="corporativo">Corporativo</option><option value="area_protegida">Área protegida</option></select></div>
+    <div class="field"><label>CUIT (opcional)</label><input id="emp-cuit" placeholder="XX-XXXXXXXX-X"></div>
+    <div class="field"><label>Contacto (opcional)</label><input id="emp-contacto"></div>
+    <div class="field"><label>Teléfono (opcional)</label><input id="emp-tel"></div>
+    <div class="field"><label>Email (opcional)</label><input id="emp-email"></div>
+    <div class="field"><label>Plan por defecto (opcional)</label><select id="emp-plan">${empPlanOpts('')}</select></div>
+    <div style="font-size:.68rem;color:var(--ink3);margin:-.2rem 0 .55rem">El N° de convenio se asigna automático (serie 30xxx corporativo / 40xxx área).</div>
+    <button class="btn-r" onclick="empGuardarNuevo()">Crear empresa</button>
+    <button class="btn-o" onclick="empSet({view:'list'})">Cancelar</button></div>`;
+}
+function empFormEdit(id){
+  const e=(S.af.empresas||[]).find(x=>x.id===id)||{};
+  const tl=(e.tipo==='area_protegida')?'Área protegida':'Corporativo';
+  return `<div class="card"><div class="ch">Editar empresa</div>
+    <div id="emp-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <div style="font-size:.78rem;color:var(--ink3);margin-bottom:.5rem">N° convenio <b>${esc(e.numeroConvenio||'—')}</b> · ${tl} (no editables)</div>
+    <div class="field"><label>Razón social</label><input id="emp-razon" value="${esc(e.razonSocial||'')}"></div>
+    <div class="field"><label>CUIT</label><input id="emp-cuit" value="${esc(e.cuit||'')}"></div>
+    <div class="field"><label>Contacto</label><input id="emp-contacto" value="${esc(e.contacto||'')}"></div>
+    <div class="field"><label>Teléfono</label><input id="emp-tel" value="${esc(e.telefono||'')}"></div>
+    <div class="field"><label>Email</label><input id="emp-email" value="${esc(e.email||'')}"></div>
+    <div class="field"><label>Plan por defecto</label><select id="emp-plan">${empPlanOpts(e.planIdDefault)}</select></div>
+    <div class="field"><label>Estado</label><select id="emp-activo"><option value="si" ${e.activo!==false?'selected':''}>Activa</option><option value="no" ${e.activo===false?'selected':''}>Inactiva</option></select></div>
+    <button class="btn-r" onclick="empGuardarEdit('${id}')">Guardar cambios</button>
+    <button class="btn-o" onclick="empSet({view:'list'})">Cancelar</button></div>`;
+}
+async function empGuardarNuevo(){
+  if(!puedeAfil()) return; empErr('');
+  const razonSocial=(document.getElementById('emp-razon')?.value||'').trim();
+  if(!razonSocial){ empErr('La razón social es requerida.'); return; }
+  const tipo=document.getElementById('emp-tipo')?.value||'corporativo';
+  const serie=(tipo==='area_protegida')?'area':'corp';
+  const empData={ razonSocial, cuit:(document.getElementById('emp-cuit')?.value||'').trim(), contacto:(document.getElementById('emp-contacto')?.value||'').trim(), telefono:(document.getElementById('emp-tel')?.value||'').trim(), email:(document.getElementById('emp-email')?.value||'').trim(), tipo, planIdDefault:document.getElementById('emp-plan')?.value||null, activo:true, creadoEn:FV() };
+  try{
+    const ref=db.collection('empresas').doc();
+    const r=await asignarNumeroRaiz(serie, ref, (correlativo)=>({ ...empData, numeroConvenio:correlativo, ultimoSufijo:0 }));
+    audit('empresa_alta','empresa',ref.id,'convenio '+r.correlativo+' '+tipo);
+    if(S.af.altaDraft){ S.af.altaDraft.empresaId=ref.id; S.af.altaDraft.tipo=tipo; }   // si venía del alta, dejarla pre-seleccionada
+    empSet({view:'list'});
+  }catch(e){ empErr('No se pudo crear la empresa: '+(e.message||e)); }
+}
+async function empGuardarEdit(id){
+  if(!puedeAfil()) return; empErr('');
+  const razonSocial=(document.getElementById('emp-razon')?.value||'').trim();
+  if(!razonSocial){ empErr('La razón social es requerida.'); return; }
+  try{
+    await db.collection('empresas').doc(id).set({ razonSocial, cuit:(document.getElementById('emp-cuit')?.value||'').trim(), contacto:(document.getElementById('emp-contacto')?.value||'').trim(), telefono:(document.getElementById('emp-tel')?.value||'').trim(), email:(document.getElementById('emp-email')?.value||'').trim(), planIdDefault:document.getElementById('emp-plan')?.value||null, activo:(document.getElementById('emp-activo')?.value||'si')==='si', actualizadoEn:FV() }, { merge:true });
+    audit('empresa_editada','empresa',id,razonSocial);
+    empSet({view:'list'});
+  }catch(e){ empErr('No se pudo guardar: '+(e.message||e)); }
+}
+// Muestra/oculta los grupos del alta según el tipo (DOM puro, sin render → no borra lo tipeado).
+function afTipoChange(v){
+  const corp=(v!=='directo');
+  const gd=document.getElementById('af-grp-directo'), ge=document.getElementById('af-grp-emp');
+  if(gd) gd.style.display=corp?'none':'';
+  if(ge) ge.style.display=corp?'':'none';
+  if(corp){ const sel=document.getElementById('af-empresa'); if(sel){ const ls=(S.af.empresas||[]).filter(e=>e.tipo===v && e.activo!==false); sel.innerHTML=ls.length?ls.map(e=>`<option value="${e.id}">${esc(e.razonSocial||'—')} (N° ${esc(e.numeroConvenio||'—')})</option>`).join(''):'<option value="">— sin empresas de este tipo —</option>'; } }
+  if(S.af.altaDraft) S.af.altaDraft.tipo=v;
+}
+// Snapshot del form de alta antes de irse al ABM (para restaurar al volver).
+function afSnapshotDraft(){
+  const d=S.af.altaDraft||(S.af.altaDraft={});
+  d.tipo=document.getElementById('af-tipo')?.value||d.tipo||'directo';
+  d.empresaId=document.getElementById('af-empresa')?.value||d.empresaId||null;
+  d.numero=document.getElementById('af-num')?.value||'';
+  d.vig=document.getElementById('af-vig')?.value||'';
+  d.car=document.getElementById('af-car')?.value||'';
+  const pa=document.getElementById('af-p-apellido');
+  if(pa){ d.persona={ apellido:pa.value, nombre:document.getElementById('af-p-nombre')?.value||'', sexo:document.getElementById('af-p-sexo')?.value||'', fnac:document.getElementById('af-p-fnac')?.value||'', tel:document.getElementById('af-p-tel')?.value||'', dir:document.getElementById('af-p-dir')?.value||'' }; }
+}
 function afFormEdit(){
   const s=(S.af.socios||[]).find(x=>x.id===S.af.edit)||{};
   const planOpts=`<option value="">— Sin plan —</option>`+(S.af.planes||[]).map(p=>`<option value="${p.id}" ${s.planId===p.id?'selected':''}>${esc(p.nombre||p.id)}</option>`).join('');
