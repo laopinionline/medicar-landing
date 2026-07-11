@@ -350,6 +350,12 @@ service cloud.firestore {
     match /planes/{id} {
       allow read:           if isSignedIn();
       allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+      // historialPrecios (Tramo 5a): append-only. Lo escribe quien edita planes; no se actualiza ni borra.
+      match /historialPrecios/{hid} {
+        allow read:   if isSignedIn();
+        allow create: if isAdmin() || tienePermiso('configurar_sistema');
+        allow update, delete: if false;
+      }
     }
 
     // personas/{id}: identidad del nucleo (Estructura 3, Admin). Si proviene de un paciente, id == pacienteId
