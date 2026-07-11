@@ -4235,6 +4235,26 @@ async function afGeocodePersona(personaId, direccion, sindir){
   try{ await db.collection('personas').doc(personaId).set(upd,{merge:true}); }catch(_){}
   return upd;
 }
+/* ---- Espejo eager pacientes/{personaId} (Tramo 4). Hace al socio BUSCABLE en el despacho SIN tocar dspBuscarQ.
+   merge:true → NUNCA pisa antecedentesCronicos/antecedentesOtros (fuente clínica = paciente, la escribe epClinicaCard).
+   normNombre(:1810) = misma normalización que el backfill de pacientes. Va FUERA de la tx de numeración; si falla,
+   avisa por consola y NO rompe el alta (lo recupera el backfill). ---- */
+async function afEspejoPaciente(personaId, per, socio){
+  per=per||{}; socio=socio||{};
+  const esp={
+    apellido: per.apellido||'', nombre: per.nombre||'', dni: per.dni||'',
+    fechaNacimiento: per.fechaNacimiento||'', sexo: per.sexo||'',
+    telefono: per.telefono||'', direccion: per.direccion||'',
+    apellidoNorm: normNombre(per.apellido||''), nombreNorm: normNombre(per.nombre||''),
+    tipoAfiliado: socio.tipoAfiliado||'directo',
+    activo: socio.activo!==false,
+    espejoDe: personaId, espejoActualizadoEn: FV()
+  };
+  if(socio.numeroAfiliado) esp.numeroAfiliado=socio.numeroAfiliado;
+  if(socio.codigoCorporativo) esp.codigoCorporativo=socio.codigoCorporativo; // solo legacy
+  try{ await db.collection('pacientes').doc(personaId).set(esp,{merge:true}); }
+  catch(e){ console.warn('[espejo] no se pudo escribir pacientes/'+personaId+' (lo recupera el backfill):',e); }
+}
 function afFormNew(){
   const lk=S.af.lk||{dni:'',searched:false,persona:null};
   const planOpts=`<option value="">— Sin plan —</option>`+(S.af.planes||[]).map(p=>`<option value="${p.id}">${esc(p.nombre||p.id)}</option>`).join('');
@@ -4339,7 +4359,8 @@ async function afGuardarNuevo(){
       numero=(document.getElementById('af-num')?.value||'').trim();
       if(!numero){ afErr('Ingresá el N° manual.'); return; }
       if((S.af.socios||[]).some(s=>String(s.numeroAfiliado)===numero)){ afErr('Ya existe un socio con el N° '+numero+'.'); return; }
-      try{ const pex=await db.collection('pacientes').where('numeroAfiliado','==',numero).limit(1).get(); if(!pex.empty){ afErr('Ya existe un paciente con el N° '+numero+'.'); return; } }
+      // pacientes: excluye el espejo propio (id === personaId de la persona en curso) — no bloquea contra sí mismo.
+      try{ const pex=await db.collection('pacientes').where('numeroAfiliado','==',numero).limit(1).get(); if(!pex.empty && pex.docs[0].id!==(lk.persona&&lk.persona.id)){ afErr('Ya existe un paciente/socio con el N° '+numero+'.'); return; } }
       catch(eq){ afErr('No se pudo validar el N°: '+(eq.message||eq)); return; }
     }
     // individual/titular sin override: N° automático (asignarNumeroRaiz) — nada que validar acá.
@@ -4351,9 +4372,9 @@ async function afGuardarNuevo(){
   }
   try{
     // Persona: se crea ANTES de la transacción si no existe (patrón acordado). Teléfono + dirección OBLIGATORIOS (email opcional).
-    let personaId, geoParams=null;
+    let personaId, geoParams=null, perData=null;
     if(lk.persona){
-      personaId=lk.persona.id;
+      personaId=lk.persona.id; perData=lk.persona;
       // persona existente sin coords → geocodificar su dirección actual también (fuera de la tx).
       if(lk.persona.geoLat==null){ geoParams={ personaId, direccion:lk.persona.direccion||'', sindir:false }; }
     } else {
@@ -4373,7 +4394,7 @@ async function afGuardarNuevo(){
       const direccion = sindir ? calle : afComponerDir(calle,altura,piso);   // string compuesto = compat total
       const pdata={ dni:lk.dni, apellido, nombre, sexo:document.getElementById('af-p-sexo')?.value||'', fechaNacimiento:(document.getElementById('af-p-fnac')?.value||''), telefono, email:(document.getElementById('af-p-email')?.value||'').trim(), direccion, antecedentesCronicos:[], antecedentesOtros:'', creadoEn:FV() };
       const ref=await db.collection('personas').add(pdata);
-      personaId=ref.id;
+      personaId=ref.id; perData=pdata;
       geoParams={ personaId, direccion, sindir };
     }
     let socioId, numeroFinal;
@@ -4410,6 +4431,8 @@ async function afGuardarNuevo(){
     }
     // Geocode-on-save: FUERA de la transacción de numeración (la tx no espera red). No bloquea el alta.
     if(geoParams){ try{ await afGeocodePersona(geoParams.personaId, geoParams.direccion, geoParams.sindir); }catch(_){} }
+    // Espejo eager pacientes/{personaId} (Tramo 4): hace al socio BUSCABLE en el despacho. FUERA de la tx.
+    try{ await afEspejoPaciente(personaId, perData, { tipoAfiliado:(tipo==='directo'?'directo':'corporativo'), numeroAfiliado:numeroFinal, activo:true }); }catch(_){}
     // Conversión de lead (callback): al guardar OK en modo conversión, marca el lead convertido + vínculo.
     if(S.convLeadId){
       try{ await db.collection('leads').doc(S.convLeadId).set({ estado:'convertido', personaId, socioId, actualizadoEn:FV() },{merge:true}); audit('lead_convertido','lead',S.convLeadId,'socio '+socioId); }
@@ -4580,14 +4603,21 @@ async function afGuardarEdit(id){
   };
   try{
     await db.collection('socios').doc(id).set(data,{merge:true});
-    // Punto 3: si se cargó una dirección nueva, actualizar personas.direccion + re-geocodificar (misma lógica).
+    // Punto 3 (Tramo 3): si se cargó una dirección nueva, actualizar personas.direccion + re-geocodificar.
+    let nDir=null;
     const nCalle=(document.getElementById('af-e-calle')?.value||'').trim();
     const nSindir=!!document.getElementById('af-e-sindir')?.checked;
     if((nCalle || nSindir) && s.personaId){
       const nAltura=(document.getElementById('af-e-altura')?.value||'').trim();
       const nPiso=(document.getElementById('af-e-piso')?.value||'').trim();
-      const nDir = nSindir ? nCalle : afComponerDir(nCalle,nAltura,nPiso);
+      nDir = nSindir ? nCalle : afComponerDir(nCalle,nAltura,nPiso);
       if(nDir){ try{ await db.collection('personas').doc(s.personaId).set({direccion:nDir},{merge:true}); await afGeocodePersona(s.personaId,nDir,nSindir); }catch(_){} }
+    }
+    // Espejo (Tramo 4): re-sincroniza los campos buscables/mostrables (N°, tipo, estado, dirección). merge → NO pisa antecedentes.
+    if(s.personaId){
+      const per={ ...(afPersona(s.personaId)||{}) };
+      if(nDir) per.direccion=nDir;
+      try{ await afEspejoPaciente(s.personaId, per, { tipoAfiliado:data.tipoAfiliado, numeroAfiliado:data.numeroAfiliado, activo:data.activo }); }catch(_){}
     }
     S.af.edit=null; render();
   }
@@ -4596,7 +4626,13 @@ async function afGuardarEdit(id){
 async function afBaja(id,reactivar){
   if(!puedeAfil()) return;
   afErr('');
-  try{ await db.collection('socios').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); audit(reactivar?'socio_reactivado':'socio_baja','socio',id,''); }
+  try{
+    await db.collection('socios').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); audit(reactivar?'socio_reactivado':'socio_baja','socio',id,'');
+    // Espejo (Tramo 4): reflejar el estado escribiendo el espejo COMPLETO (nunca parcial: si no existe lo crea
+    // entero desde la persona; si existe, actualiza. merge → no pisa antecedentes).
+    const soc=(S.af.socios||[]).find(x=>x.id===id);
+    if(soc && soc.personaId){ try{ await afEspejoPaciente(soc.personaId, afPersona(soc.personaId), { tipoAfiliado:soc.tipoAfiliado, numeroAfiliado:soc.numeroAfiliado, codigoCorporativo:soc.codigoCorporativo, activo:!!reactivar }); }catch(_){} }
+  }
   catch(e){ afErr('No se pudo actualizar: '+(e.message||e)); }
 }
 
