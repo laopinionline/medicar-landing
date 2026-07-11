@@ -4382,6 +4382,9 @@ async function afBuscarPersona(){
     render();
   }catch(e){ afErr('No se pudo buscar: '+(e.message||e)); }
 }
+// F1 (denorm afiliado): nombre de vista para dependientes — MISMO formato que generarAbonos.socioNombre.
+function socioNombreDe(per){ const p=per||{}; return (((p.apellido||'')+', '+(p.nombre||'')).replace(/^, /,'').replace(/, $/,'')) || p.dni || ''; }
+
 async function afGuardarNuevo(){
   if(!puedeAfil()) return; // la regla es la defensa real
   afErr('');
@@ -4456,6 +4459,7 @@ async function afGuardarNuevo(){
       const socioRef=db.collection('socios').doc();
       const r=await asignarSufijo(db.collection('socios').doc(titular.id), socioRef, (numeroAfiliado)=>({
         personaId, tipoAfiliado:'directo', grupoTipo:'familiar', titularSocioId:titular.id, esResponsablePago:false,
+        titularPersonaId: titular.personaId||null, nombreVista: socioNombreDe(perData), // F1: llave de scoping (F2) + nombre denorm
         numeroAfiliado, planId:null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV()
       }));
       socioId=socioRef.id; numeroFinal=r.numeroAfiliado;
@@ -4664,6 +4668,8 @@ async function afGuardarEdit(id){
       const per={ ...(afPersona(s.personaId)||{}) };
       if(nDir) per.direccion=nDir;
       try{ await afEspejoPaciente(s.personaId, per, { tipoAfiliado:data.tipoAfiliado, numeroAfiliado:data.numeroAfiliado, activo:data.activo }); }catch(_){}
+      // F1: si el socio es dependiente, re-derivar nombreVista desde la persona (sync en edición). merge → no pisa nada más.
+      if(s.titularSocioId){ try{ await db.collection('socios').doc(id).set({ nombreVista: socioNombreDe(per) }, { merge:true }); }catch(_){} }
     }
     S.af.edit=null; render();
   }
