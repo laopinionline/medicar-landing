@@ -601,6 +601,15 @@ function nombreDe(per, u){
 }
 function fmtDni(d){ const s=String(d||'').replace(/\D/g,''); if(!s) return '—'; return s.replace(/\B(?=(\d{3})+(?!\d))/g,'.'); }
 function tipoLbl(t){ return t==='corporativo'?'Corporativo':(t==='directo'?'Directo':(t||'—')); }
+// F3: cuota — MISMA fórmula que app/index.html planPrecioTotal (base + max(0,integrantes-base)*extra).
+function socioMoney(n){ const v=Number(n)||0; return '$'+v.toLocaleString('es-AR'); }
+function planPrecioTotal(plan, integrantes){
+  const base=Number(plan&&plan.precio)||0;
+  if(!plan || plan.modeloPrecio!=='por_integrante') return base;
+  const extra=Number(plan.precioExtraIntegrante)||0;
+  const baseInt=(plan.integrantesBase!=null)?Number(plan.integrantesBase):1;
+  return base + Math.max(0,(Number(integrantes)||0)-baseInt)*extra;
+}
 
 /* ---------- Monitoreo N1: fechas y estado del chequeo semanal ---------- */
 function tsMs(t){ if(!t) return null; if(t.toMillis) return t.toMillis(); if(t.seconds!=null) return t.seconds*1000; if(typeof t==='number') return t; return null; }
@@ -703,10 +712,16 @@ async function cargarCredencial(uid){
     }
   }catch(_){}
 
-  // Plan (catálogo)
-  let planNombre = '';
+  // Plan (catálogo) — objeto completo (para la cuota) + nombre.
+  let plan = null, planNombre = '';
   if(socio && socio.planId){
-    try{ const pl = await db.collection('planes').doc(socio.planId).get(); if(pl.exists) planNombre = pl.data().nombre || ''; }catch(_){}
+    try{ const pl = await db.collection('planes').doc(socio.planId).get(); if(pl.exists){ plan = pl.data(); planNombre = plan.nombre || ''; } }catch(_){}
+  }
+
+  // F3: grupo familiar — dependientes cuyo titular es esta persona (F2 habilita la lectura por titularPersonaId).
+  let dependientes = [];
+  if(personaId){
+    try{ const dep = await db.collection('socios').where('titularPersonaId','==',personaId).get(); dependientes = dep.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
   }
 
   // Monitoreo N1: cuestionario ACTIVO (si hay varios, el más reciente) + última respuesta de esta persona.
@@ -741,7 +756,7 @@ async function cargarCredencial(uid){
     sintomas = sc.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>((a.orden||0)-(b.orden||0)));
   }catch(_){}
 
-  return { estado:'ok', u, per, socio, planNombre, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
+  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
 }
 
 /* ---------- Auth flow ---------- */
@@ -850,7 +865,8 @@ function homeView(){
   const nombre=nombreDe(per,u);
   const activo = socio ? (socio.activo!==false) : false;
   const numero = socio && socio.numeroAfiliado ? socio.numeroAfiliado : '—';
-  const plan = c.planNombre || '—';
+  const esDependiente = !!(socio && socio.titularSocioId);
+  const plan = esDependiente ? 'Cobertura familiar' : (c.planNombre || '—'); // F3: el dependiente no tiene plan propio (planId:null)
   const tipo = socio ? tipoLbl(socio.tipoAfiliado) : '—';
   const estadoLinea = socio
     ? (activo ? `<div class="est">● Afiliado activo</div>` : `<div class="est off">● Inactivo</div>`)
@@ -875,6 +891,30 @@ function homeView(){
   }
 
   const sinAfilNota = socio ? '' : `<div class="foot-note" style="color:var(--o)">No encontramos tu ficha de afiliación. Contactá a MEDICAR para regularizarla.</div>`;
+
+  // F3 — Cuota vigente (estimada) + Mi grupo familiar. Conteo por titularSocioId (criterio EXACTO de generarAbonos).
+  const depsDeMiSocio = (socio ? (c.dependientes||[]).filter(d=>d.titularSocioId===socio.id) : []);
+  let cuotaSec = '';
+  if(socio && socio.planId && c.plan){
+    const activos = depsDeMiSocio.filter(d=>d.activo!==false).length;
+    const porInt = c.plan.modeloPrecio==='por_integrante';
+    const monto = socioMoney(planPrecioTotal(c.plan, activos));
+    cuotaSec = `<div class="sec">
+      <div class="sec-h">${porInt?'Cuota vigente (estimada)':'Cuota mensual'}</div>
+      <div class="card">
+        <div class="row"><span class="rl">${esc(c.planNombre||'—')}</span><span class="rv">${monto}</span></div>
+        ${porInt?`<div style="padding:.75rem 1rem;font-size:.72rem;color:var(--gris);line-height:1.45">El valor final lo confirma tu factura mensual; puede variar según los integrantes activos al momento de facturar.</div>`:''}
+      </div>
+    </div>`;
+  }
+  let grupoSec = '';
+  if(depsDeMiSocio.length){
+    const rows = depsDeMiSocio.slice().sort((a,b)=>String(a.numeroAfiliado||'').localeCompare(String(b.numeroAfiliado||''))).map(d=>{
+      const baja = d.activo===false;
+      return `<div class="row"><span class="rl" style="color:var(--tinta);font-weight:700">${esc(d.nombreVista||'—')}${baja?` <span style="font-size:.58rem;color:var(--rojo);font-weight:800;letter-spacing:.08em">BAJA</span>`:''}</span><span class="rv" style="color:var(--gris);font-weight:600">N° ${esc(d.numeroAfiliado||'—')}</span></div>`;
+    }).join('');
+    grupoSec = `<div class="sec"><div class="sec-h">Mi grupo familiar</div><div class="card">${rows}</div></div>`;
+  }
 
   return `<div class="home">
     <div class="topbar">
@@ -901,6 +941,9 @@ function homeView(){
       </div>
     </div>
     ${sinAfilNota}
+
+    ${cuotaSec}
+    ${grupoSec}
 
     ${homeReporteBlock(c)}
 
