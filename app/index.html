@@ -4200,11 +4200,41 @@ async function asignarSufijo(raizRef, targetRef, buildDoc){
     return { sufijo, numeroAfiliado };
   });
 }
-function afNuevo(){ if(!puedeAfil())return; S.af.flash=null; S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.af.altaDraft={tipo:'directo',empresaId:null,modo:'individual'}; render(); navPush(); }
-function afEditar(id){ if(!puedeAfil())return; S.af.edit=id; S.af.lk=null; render(); navPush(); }
+function afNuevo(){ if(!puedeAfil())return; S.af.flash=null; S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.af.altaDraft={tipo:'directo',empresaId:null,modo:'individual'}; afEnsureCalles(); render(); navPush(); }
+function afEditar(id){ if(!puedeAfil())return; S.af.edit=id; S.af.lk=null; afEnsureCalles(); render(); navPush(); }
 function afCancelar(){ if(S.af){ S.af.edit=null; S.af.lk=null; S.af.altaDraft=null; } S.convLeadId=null; S.convPrefill=null; S.convOpenAlta=false; render(); } // cancelar conversión: el lead queda como estaba
 function afForm(){ return S.af.edit==='new' ? afFormNew() : afFormEdit(); }
 
+/* ---- Callejero (datalist offline) + geocode-on-save (Tramo 3). REUSA el motor geo de episodios. ---- */
+function afCallesOpts(){ return (S.callesPergamino||[]).map(c=>`<option value="${esc(c)}"></option>`).join(''); }
+function afInjectCalles(){ const dl=document.getElementById('af-calles-list'); if(dl && S.callesPergamino && dl.childElementCount!==S.callesPergamino.length){ dl.innerHTML=afCallesOpts(); } }
+function afEnsureCalles(){ // lazy-load una sola vez del callejero (589 nombres); no bloquea el render
+  if(S.callesPergamino){ afInjectCalles(); return Promise.resolve(S.callesPergamino); }
+  if(S._callesP) return S._callesP;
+  S._callesP=fetch('calles-pergamino.json').then(r=>r.ok?r.json():[]).then(a=>{ S.callesPergamino=Array.isArray(a)?a:[]; afInjectCalles(); return S.callesPergamino; }).catch(()=>{ S.callesPergamino=[]; return []; });
+  return S._callesP;
+}
+function afSinDirChange(on){ const a=document.getElementById('af-p-altura'); if(a){ a.disabled=!!on; if(a.parentElement) a.parentElement.style.opacity=on?'.45':''; } } // "sin domicilio" desactiva la altura
+// Compone el string direccion (compat con TODO lo que hoy lee personas.direccion).
+function afComponerDir(calle,altura,piso){ let s=[calle,altura].filter(Boolean).join(' ').trim(); if(piso) s+=(s?', ':'')+piso; return s.trim(); }
+// Geocodifica una persona (MÁXIMO 1 request a Nominatim) y mergea coords/barrio. Nunca lanza; sin_ubicar si falla/rural.
+async function afGeocodePersona(personaId, direccion, sindir){
+  let upd;
+  if(sindir){ upd={ geoPrecision:'sin_ubicar', geoResueltoEn:FV() }; }
+  else{
+    try{
+      const nd=normalizarDireccion(direccion||'');                 // misma normalización que episodios (geoNormStreet)
+      if(nd.isRural || !nd.calle || !nd.altura){ upd={ geoPrecision:'sin_ubicar', geoResueltoEn:FV() }; }
+      else{
+        const hit=await geoNominatim(nd.calle, nd.altura);         // <-- ÚNICA request a Nominatim por alta
+        if(!hit){ upd={ geoPrecision:'sin_ubicar', geoResueltoEn:FV() }; }
+        else{ let barrio=null; try{ barrio=await geoBarrioDeCoord(hit.lon,hit.lat); }catch(_){} upd={ geoLat:hit.lat, geoLng:hit.lon, barrio, geoPrecision: hit.exact?'geo_exacto':'geo_aprox', geoResueltoEn:FV() }; }
+      }
+    }catch(_){ upd={ geoPrecision:'sin_ubicar', geoResueltoEn:FV() }; } // Nominatim caído / red → NO bloquea el alta
+  }
+  try{ await db.collection('personas').doc(personaId).set(upd,{merge:true}); }catch(_){}
+  return upd;
+}
 function afFormNew(){
   const lk=S.af.lk||{dni:'',searched:false,persona:null};
   const planOpts=`<option value="">— Sin plan —</option>`+(S.af.planes||[]).map(p=>`<option value="${p.id}">${esc(p.nombre||p.id)}</option>`).join('');
@@ -4224,7 +4254,11 @@ function afFormNew(){
           <div class="field"><label>Fecha de nacimiento</label><input id="af-p-fnac" type="date" value="${esc(dp.fnac||'')}"></div>
           <div class="field"><label>Teléfono <span style="color:var(--r)">*</span></label><input id="af-p-tel" value="${esc(dp.tel||pf.telefono||'')}" placeholder="Obligatorio"></div>
           <div class="field"><label>Email (opcional)</label><input id="af-p-email" type="email" value="${esc(dp.email||'')}" placeholder="para avisos / marketing"></div>
-          <div class="field"><label>Dirección</label><input id="af-p-dir" value="${esc(dp.dir||'')}" placeholder="opcional"></div></div>`;
+          <div class="field"><label>Calle <span style="color:var(--r)">*</span></label><input id="af-p-calle" list="af-calles-list" autocomplete="off" value="${esc(dp.calle||'')}" placeholder="Empezá a escribir…"><datalist id="af-calles-list">${afCallesOpts()}</datalist></div>
+          <div class="field"><label>Altura <span style="color:var(--r)">*</span></label><input id="af-p-altura" type="number" min="1" value="${esc(dp.altura||'')}" placeholder="N°"${dp.sindir?' disabled':''}></div>
+          <div class="field"><label>Piso / depto (opcional)</label><input id="af-p-piso" value="${esc(dp.piso||'')}" placeholder="ej. 3º B — no se geocodifica"></div>
+          <label style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--ink3);margin-bottom:.3rem;cursor:pointer"><input type="checkbox" id="af-p-sindir" ${dp.sindir?'checked':''} onchange="afSinDirChange(this.checked)">Sin domicilio exacto / zona rural</label>
+        </div>`;
   }
   const tipoSel=draft.tipo||'directo';
   const empresasDe=(t)=>(S.af.empresas||[]).filter(e=>e.tipo===t && e.activo!==false);
@@ -4316,18 +4350,31 @@ async function afGuardarNuevo(){
     if(!empresa){ afErr('Empresa no encontrada.'); return; }
   }
   try{
-    // Persona: se crea ANTES de la transacción si no existe (patrón acordado). Teléfono OBLIGATORIO; email opcional.
-    let personaId;
-    if(lk.persona){ personaId=lk.persona.id; }
-    else{
+    // Persona: se crea ANTES de la transacción si no existe (patrón acordado). Teléfono + dirección OBLIGATORIOS (email opcional).
+    let personaId, geoParams=null;
+    if(lk.persona){
+      personaId=lk.persona.id;
+      // persona existente sin coords → geocodificar su dirección actual también (fuera de la tx).
+      if(lk.persona.geoLat==null){ geoParams={ personaId, direccion:lk.persona.direccion||'', sindir:false }; }
+    } else {
       const apellido=(document.getElementById('af-p-apellido')?.value||'').trim();
       const nombre=(document.getElementById('af-p-nombre')?.value||'').trim();
       if(!apellido && !nombre){ afErr('Completá al menos apellido o nombre de la persona.'); return; }
       const telefono=(document.getElementById('af-p-tel')?.value||'').trim();
       if(!telefono){ afErr('El teléfono es obligatorio.'); return; }
-      const pdata={ dni:lk.dni, apellido, nombre, sexo:document.getElementById('af-p-sexo')?.value||'', fechaNacimiento:(document.getElementById('af-p-fnac')?.value||''), telefono, email:(document.getElementById('af-p-email')?.value||'').trim(), direccion:(document.getElementById('af-p-dir')?.value||'').trim(), antecedentesCronicos:[], antecedentesOtros:'', creadoEn:FV() };
+      const sindir=!!document.getElementById('af-p-sindir')?.checked;
+      const calle=(document.getElementById('af-p-calle')?.value||'').trim();
+      const altura=(document.getElementById('af-p-altura')?.value||'').trim();
+      const piso=(document.getElementById('af-p-piso')?.value||'').trim();
+      if(!sindir){
+        if(!calle){ afErr('Ingresá la calle (o marcá "sin domicilio exacto / zona rural").'); return; }
+        if(!altura){ afErr('Ingresá la altura (o marcá "sin domicilio exacto / zona rural").'); return; }
+      }
+      const direccion = sindir ? calle : afComponerDir(calle,altura,piso);   // string compuesto = compat total
+      const pdata={ dni:lk.dni, apellido, nombre, sexo:document.getElementById('af-p-sexo')?.value||'', fechaNacimiento:(document.getElementById('af-p-fnac')?.value||''), telefono, email:(document.getElementById('af-p-email')?.value||'').trim(), direccion, antecedentesCronicos:[], antecedentesOtros:'', creadoEn:FV() };
       const ref=await db.collection('personas').add(pdata);
       personaId=ref.id;
+      geoParams={ personaId, direccion, sindir };
     }
     let socioId, numeroFinal;
     if(tipo!=='directo'){                                            // corporativo / área (Tramo 2a, intacto)
@@ -4361,6 +4408,8 @@ async function afGuardarNuevo(){
       }));
       socioId=socioRef.id; numeroFinal=r.correlativo;
     }
+    // Geocode-on-save: FUERA de la transacción de numeración (la tx no espera red). No bloquea el alta.
+    if(geoParams){ try{ await afGeocodePersona(geoParams.personaId, geoParams.direccion, geoParams.sindir); }catch(_){} }
     // Conversión de lead (callback): al guardar OK en modo conversión, marca el lead convertido + vínculo.
     if(S.convLeadId){
       try{ await db.collection('leads').doc(S.convLeadId).set({ estado:'convertido', personaId, socioId, actualizadoEn:FV() },{merge:true}); audit('lead_convertido','lead',S.convLeadId,'socio '+socioId); }
@@ -4487,7 +4536,7 @@ function afSnapshotDraft(){
   d.vig=document.getElementById('af-vig')?.value||'';
   d.car=document.getElementById('af-car')?.value||'';
   const pa=document.getElementById('af-p-apellido');
-  if(pa){ d.persona={ apellido:pa.value, nombre:document.getElementById('af-p-nombre')?.value||'', sexo:document.getElementById('af-p-sexo')?.value||'', fnac:document.getElementById('af-p-fnac')?.value||'', tel:document.getElementById('af-p-tel')?.value||'', email:document.getElementById('af-p-email')?.value||'', dir:document.getElementById('af-p-dir')?.value||'' }; }
+  if(pa){ d.persona={ apellido:pa.value, nombre:document.getElementById('af-p-nombre')?.value||'', sexo:document.getElementById('af-p-sexo')?.value||'', fnac:document.getElementById('af-p-fnac')?.value||'', tel:document.getElementById('af-p-tel')?.value||'', email:document.getElementById('af-p-email')?.value||'', calle:document.getElementById('af-p-calle')?.value||'', altura:document.getElementById('af-p-altura')?.value||'', piso:document.getElementById('af-p-piso')?.value||'', sindir:!!document.getElementById('af-p-sindir')?.checked }; }
 }
 function afFormEdit(){
   const s=(S.af.socios||[]).find(x=>x.id===S.af.edit)||{};
@@ -4496,6 +4545,13 @@ function afFormEdit(){
   return `<div class="card"><div class="ch">Editar socio</div>
     <div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div>
     <div class="field"><label>Persona</label><div style="font-size:.8rem;color:var(--ink3)">${afNombre(s.personaId)} (no se cambia acá)</div></div>
+    <div class="field"><label>Dirección actual</label><div style="font-size:.78rem;color:var(--ink3)">${esc((afPersona(s.personaId)||{}).direccion||'—')}</div></div>
+    <details style="margin-bottom:.6rem"><summary style="font-size:.78rem;color:var(--r);cursor:pointer">Cambiar dirección (re-geocodifica)</summary>
+      <div class="field" style="margin-top:.4rem"><label>Calle</label><input id="af-e-calle" list="af-calles-list" autocomplete="off" placeholder="dejar vacío = no cambia"><datalist id="af-calles-list">${afCallesOpts()}</datalist></div>
+      <div class="field"><label>Altura</label><input id="af-e-altura" type="number" min="1"></div>
+      <div class="field"><label>Piso / depto (opcional)</label><input id="af-e-piso"></div>
+      <label style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--ink3);cursor:pointer"><input type="checkbox" id="af-e-sindir">Sin domicilio exacto / zona rural</label>
+    </details>
     <div class="field"><label>Tipo de afiliado</label><select id="af-e-tipo"><option value="directo" ${s.tipoAfiliado==='directo'?'selected':''}>Directo</option><option value="corporativo" ${s.tipoAfiliado==='corporativo'?'selected':''}>Corporativo</option></select></div>
     <div class="field"><label>N° de afiliado</label><input id="af-e-num" value="${esc(s.numeroAfiliado||'')}"></div>
     <div class="field"><label>Plan</label><select id="af-e-planid">${planOpts}${extraPlan}</select></div>
@@ -4509,6 +4565,7 @@ function afFormEdit(){
 async function afGuardarEdit(id){
   if(!puedeAfil()) return;
   afErr('');
+  const s=(S.af.socios||[]).find(x=>x.id===id)||{};
   const numero=(document.getElementById('af-e-num')?.value||'').trim();
   if(!numero){ afErr('El N° de afiliado es requerido.'); return; }
   if((S.af.socios||[]).some(s=>s.id!==id && String(s.numeroAfiliado)===numero)){ afErr('Ya existe otro socio con el N° '+numero+'.'); return; }
@@ -4521,7 +4578,19 @@ async function afGuardarEdit(id){
     activo:(document.getElementById('af-e-activo')?.value||'si')==='si',
     actualizadoEn:FV()
   };
-  try{ await db.collection('socios').doc(id).set(data,{merge:true}); S.af.edit=null; render(); }
+  try{
+    await db.collection('socios').doc(id).set(data,{merge:true});
+    // Punto 3: si se cargó una dirección nueva, actualizar personas.direccion + re-geocodificar (misma lógica).
+    const nCalle=(document.getElementById('af-e-calle')?.value||'').trim();
+    const nSindir=!!document.getElementById('af-e-sindir')?.checked;
+    if((nCalle || nSindir) && s.personaId){
+      const nAltura=(document.getElementById('af-e-altura')?.value||'').trim();
+      const nPiso=(document.getElementById('af-e-piso')?.value||'').trim();
+      const nDir = nSindir ? nCalle : afComponerDir(nCalle,nAltura,nPiso);
+      if(nDir){ try{ await db.collection('personas').doc(s.personaId).set({direccion:nDir},{merge:true}); await afGeocodePersona(s.personaId,nDir,nSindir); }catch(_){} }
+    }
+    S.af.edit=null; render();
+  }
   catch(e){ afErr('No se pudo guardar: '+(e.message||e)); }
 }
 async function afBaja(id,reactivar){
