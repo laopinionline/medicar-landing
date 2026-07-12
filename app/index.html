@@ -603,8 +603,11 @@ function resetSession(keepErr){
   if(typeof cronoDetach==='function') cronoDetach(); // ídem cronograma de guardias
   if(typeof agtDetach==='function') agtDetach(); // ídem agenda de turnos (T-A.2)
   if(typeof medTurnosDetach==='function') medTurnosDetach(); // ídem "turnos de hoy" del médico (T-C)
+  if(typeof medHomeDetach==='function') medHomeDetach(); // ídem métricas del home del médico (D-1)
   if(typeof monDetach==='function') monDetach(); // ídem monitoreo (cuestionarios/respuestas)
   if(typeof banDetach==='function') banDetach(); // ídem escucha en vivo de la bandeja (despachante/médico)
+  if(typeof pedDetach==='function') pedDetach(); // ídem pedidos de atención (D-3.2)
+  if(typeof pedLimpiarVinculo==='function') pedLimpiarVinculo(); // invariante: sin reporteId colgado tras logout
   if(S.mapaVivo){ try{S.mapaVivo.remove();}catch(_){} S.mapaVivo=null; } // mapa vivo Leaflet
   S=cleanSession();
   if(err) S.loginErr=err; // preserva el mensaje de login (ej. "cuenta sin rol")
@@ -872,7 +875,7 @@ function getTabs(rol){
   const estTab = puedeConfig() ? [{id:'estadisticas',icon:'chart',lbl:'Estadísticas'}] : [];
   const monTab = puedeConfig() ? [{id:'monitoreo',icon:'register',lbl:'Monitoreo'}] : [];
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}]; // D-1: 'despacho'/'registro' retirados del nav (desp()/reg() quedan como banco de pruebas)
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
@@ -882,9 +885,13 @@ function getTabs(rol){
 
 function pg(){
   const r=S.user.rol,t=S.tab;
+  // D-3.2 (FALLA 2): invariante central. S.pedidoReporteId SOLO sobrevive dentro del flujo de nuevo despacho
+  // (despachante + tab 'despacho', cualquier etapa). Cualquier render de otra vista lo limpia — el nav real es
+  // goTab→set→render→pg, que NO pasa por verBandeja. Sin este guard, un reporteId rancio vincularía un episodio ajeno.
+  if(S.pedidoReporteId && !(r==='despachante' && t==='despacho')) pedLimpiarVinculo();
   if(t!=='bandeja'&&t!=='episodios') S.epView=null; // salir de la bandeja cierra el detalle abierto
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
-  if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='perfil')return miPerfil();}
+  if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='home')return mHome();if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='perfil')return miPerfil();} // D-1: dispatch de 'despacho'/'registro' retirado (desp()/reg() siguen definidos, no ruteados)
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
   if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
@@ -1167,15 +1174,46 @@ function medTurnosAttach(){
 }
 function medTurnosDetach(){ if(S.medTurnosUnsub){ try{S.medTurnosUnsub();}catch(_){} S.medTurnosUnsub=null; } S.medTurnos=null; }
 
+// D-1: episodios propios del médico para el HOME (métricas reales). onSnapshot medicoId==uid (regla lo permite).
+// Reusa esHoy/tms/codEmoji. Render solo en el tab home (no pisa clinForm en Episodios). Detach en resetSession.
+function medHomeAttach(){
+  if(S.medHomeUnsub) return;
+  const uid=S.user&&S.user.uid; if(!uid){ S.medHomeEps=[]; return; }
+  S.medHomeUnsub=db.collection('episodios').where('medicoId','==',uid).onSnapshot(s=>{
+    if(!S.user) return;
+    S.medHomeEps=s.docs.map(d=>({id:d.id,...d.data()}));
+    if(S.tab==='home') render();
+  }, ()=>{ S.medHomeEps=[]; if(S.tab==='home') render(); });
+}
+function medHomeDetach(){ if(S.medHomeUnsub){ try{S.medHomeUnsub();}catch(_){} S.medHomeUnsub=null; } S.medHomeEps=null; }
+
 function mHome(){
   const u=S.user;
   const sub=[u.unidad,u.esp].filter(Boolean).join(' · ');
   if(!S.medTurnosUnsub) medTurnosAttach();
+  if(!S.medHomeUnsub) medHomeAttach();
   const tHoy=S.medTurnos;
   const turnosCard=`<div class="card"><div class="ch">Turnos de hoy</div>${
     tHoy==null ? `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Cargando…</div>`
     : (tHoy.length ? tHoy.map(t=>`<div class="lr"><div class="lrb"><div class="lrn">${esc(t.hora)} · ${esc(t.nombreVista||'—')}</div><div class="lrs">Videollamada · Reservado</div></div></div>`).join('')
        : `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Sin turnos hoy.</div>`)
+  }</div>`;
+  // D-1 métricas reales del médico
+  const eps=S.medHomeEps; const ACT=['despacho','en_camino','arribo','atencion'];
+  const atencionesHoy = eps==null?'…':eps.filter(e=>e.estado==='cerrado' && esHoy(e.transiciones&&e.transiciones.cerrado)).length;
+  const activosMios = eps==null?[]:eps.filter(e=>ACT.includes(e.estado)).sort((a,b)=>(tms(b.creadoEn)||0)-(tms(a.creadoEn)||0));
+  const nActivos = eps==null?'…':activosMios.length;
+  const da = activosMios[0]||null;
+  const ultimas = eps==null?[]:eps.filter(e=>e.estado==='cerrado').sort((a,b)=>(tms(b.transiciones&&b.transiciones.cerrado)||0)-(tms(a.transiciones&&a.transiciones.cerrado)||0)).slice(0,3);
+  const despachoCard=`<div class="card"><div class="ch">Despacho activo</div>${
+    eps==null ? `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Cargando…</div>`
+    : (da ? `<div class="lr"><div class="lrb"><div class="lrn">${codEmoji(da.codigoPresuntivo)} ${esc((da.pac&&da.pac.nombre)||'—')}</div><div class="lrs">${esc(da.motivoLlamado||da.codigoPresuntivo||'—')} · ${esc(da.domicilio||'—')}</div><div style="margin-top:.3rem"><span class="badge br bp">● ${esc(da.estado||'')}</span></div></div><button onclick="goTab('episodios')" style="color:var(--rojo);display:flex;align-items:center" aria-label="Ir a episodios"><svg class="chev" width="13" height="16" viewBox="0 0 1794 2190"><use href="#cm"/></svg></button></div>`
+       : `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Sin despacho activo.</div>`)
+  }</div>`;
+  const ultimasCard=`<div class="card"><div class="ch">Últimas atenciones</div>${
+    eps==null ? `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Cargando…</div>`
+    : (ultimas.length ? ultimas.map(e=>`<div class="lr"><div class="lrb"><div class="lrn">${codEmoji(e.codigoPresuntivo)} ${esc((e.pac&&e.pac.nombre)||'—')}</div><div class="lrs">${esc(e.motivoLlamado||'—')}</div></div><span class="badge bg">Cerrada</span></div>`).join('')
+       : `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Sin atenciones cerradas aún.</div>`)
   }</div>`;
   return`
   <div class="card card-dk">
@@ -1185,22 +1223,12 @@ function mHome(){
     </div>
   </div>
   <div class="srow">
-    <div class="stat red"><div class="sn">5</div><div class="sl">Atenciones hoy</div></div>
-    <div class="stat"><div class="sn">2</div><div class="sl">Este turno</div></div>
+    <div class="stat red"><div class="sn">${atencionesHoy}</div><div class="sl">Atenciones hoy</div></div>
+    <div class="stat"><div class="sn">${nActivos}</div><div class="sl">Activos asignados a mí</div></div>
   </div>
   ${turnosCard}
-  <div class="card">
-    <div class="ch">Despacho activo</div>
-    <div class="lr">
-      <div class="lrb"><div class="lrn">Lucía Pereyra</div><div class="lrs">Convulsión febril · Belgrano 845</div><div style="margin-top:.3rem"><span class="badge br bp">● En curso</span></div></div>
-      <button onclick="goTab('despacho')" style="color:var(--rojo);display:flex;align-items:center" aria-label="Ir al despacho"><svg class="chev" width="13" height="16" viewBox="0 0 1794 2190"><use href="#cm"/></svg></button>
-    </div>
-  </div>
-  <div class="card">
-    <div class="ch">Últimas atenciones</div>
-    ${ATENC.slice(0,3).map(a=>`<div class="lr"><div class="lrb"><div class="lrn">${a.afiliado}</div><div class="lrs">${a.fecha} · ${a.motivo}</div></div><span class="badge ${a.estado==='en_curso'?'br':'bg'}">${a.estado==='en_curso'?'Activa':'Cerrada'}</span></div>`).join('')}
-  </div>
-  <button class="btn-r" onclick="set({tab:'registro',step:0})" style="display:flex;align-items:center;justify-content:center;gap:.5rem">+ Registrar nueva atención<svg class="chev chev-adv" width="12" height="15" viewBox="0 0 1794 2190"><use href="#cw"/></svg></button>`;
+  ${despachoCard}
+  ${ultimasCard}`;
 }
 
 function desp(){
@@ -1487,16 +1515,52 @@ function adGuardias(){
   </div>`;
 }
 
+// D-1: adHome real. GET al entrar (glance, no live; el vivo real es el dashboard superadmin). Fetch acotado a
+// episodios con creadoEn >= (inicio de mes TZ AR − 7 días): el −7d captura episodios que CRUZAN el límite de mes
+// (p.ej. creado en junio, cerrado en julio). Los conteos filtran fino: "hoy" por creadoEn; "mes" por
+// transiciones.cerrado DENTRO del mes; activos por estado.
+// LIMITACIÓN ACEPTADA: episodios con creadoEn anterior a (inicio de mes − 7d) NO entran al fetch — reabiertos muy
+// viejos o episodios abiertos >7 días que crucen el mes no cuentan en estas métricas; el dashboard superadmin es
+// la fuente exacta. Sin onSnapshot, sin índice compuesto (rango single-field).
+async function loadAdHome(){
+  S.adHome={loading:true};
+  try{
+    const hoyAR=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Buenos_Aires'}).format(new Date());
+    const inicioMes=new Date(hoyAR.slice(0,7)+'-01T00:00:00-03:00'); // 1° del mes, 00:00 Argentina (UTC-3)
+    const ventana=new Date(inicioMes.getTime()-7*86400000);          // −7 días: captura cruces de límite de mes
+    const [epsSnap, movSnap]=await Promise.all([
+      db.collection('episodios').where('creadoEn','>=',ventana).get(),
+      db.collection('moviles').where('activo','==',true).get()
+    ]);
+    let afilN; try{ afilN=(await db.collection('socios').where('activo','==',true).count().get()).data().count; }
+    catch(_){ afilN=(await db.collection('socios').where('activo','==',true).get()).size; }
+    S.adHome={loading:false, eps:epsSnap.docs.map(d=>d.data()), moviles:movSnap.docs.map(d=>d.data()), afilN, inicioMesMs:inicioMes.getTime()};
+  }catch(e){ S.adHome={loading:false, err:(e.message||String(e))}; }
+  render();
+}
 function adHome(){
+  if(!S.adHome) loadAdHome();
+  const d=S.adHome;
+  if(!d || d.loading) return `<div class="card">Cargando métricas…</div>`;
+  if(d.err) return `<div class="card">No se pudieron cargar las métricas: ${esc(d.err)}</div>`;
+  const ACT=['despacho','en_camino','arribo','atencion']; const eps=d.eps||[];
+  const hoyEps=eps.filter(e=>esHoy(e.creadoEn));
+  const hoy=hoyEps.length;
+  const mes=eps.filter(e=>e.estado==='cerrado' && (tms(e.transiciones&&e.transiciones.cerrado)||0)>=(d.inicioMesMs||0)).length; // cerrados DENTRO del mes (por fecha de cierre)
+  const activos=eps.filter(e=>ACT.includes(e.estado)).sort((a,b)=>(tms(b.creadoEn)||0)-(tms(a.creadoEn)||0));
+  const unidades=(d.moviles||[]).length;
+  const afil=(d.afilN==null)?'…':d.afilN;
+  const horaAR=t=>{ const ms=tms(t); return ms?new Date(ms).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Buenos_Aires'}):'—'; };
+  const card=(n,l)=>`<div class="stat"><div class="sn">${n}</div><div class="sl">${l}</div></div>`;
+  const dist=[['rojo','Emergencias','var(--r)'],['amarillo','Urgencias','var(--o)'],['verde','Atención','#1D9E75'],['traslado','Traslados','var(--ink3)']]
+    .map(([cod,lbl,c])=>[lbl,hoyEps.filter(e=>e.codigoPresuntivo===cod).length,c]).filter(x=>x[1]>0);
+  const distHTML=dist.length? dist.map(([l,n,c])=>`<div class="lr"><div class="lrb"><div class="lrn">${l}</div></div><div style="display:flex;align-items:center;gap:.55rem"><div style="height:4px;width:${Math.min(n*28,160)}px;background:${c};border-radius:2px"></div><span style="font-weight:700;font-size:.9rem">${n}</span></div></div>`).join('') : `<div style="font-size:.8rem;color:var(--ink3);padding:.3rem 0">Sin episodios hoy.</div>`;
+  const enCursoHTML=activos.length? activos.slice(0,5).map(e=>`<div class="lr"><div class="lrb"><div class="lrn">${codEmoji(e.codigoPresuntivo)} ${esc((e.pac&&e.pac.nombre)||'—')}</div><div class="lrs">${esc(e.movilNombre||'sin móvil')} · ${esc(e.medicoNombre||'sin médico')} · ${horaAR(e.creadoEn)}</div></div><span class="badge br bp">● ${esc(e.estado||'')}</span></div>`).join('') : `<div style="font-size:.8rem;color:var(--ink3);padding:.3rem 0">Sin episodios en curso.</div>`;
   return`
-  <div class="srow"><div class="stat red"><div class="sn">5</div><div class="sl">Atenciones hoy</div></div><div class="stat"><div class="sn">4</div><div class="sl">Unidades activas</div></div></div>
-  <div class="srow"><div class="stat"><div class="sn">1.842</div><div class="sl">Afiliados activos</div></div><div class="stat"><div class="sn">127</div><div class="sl">Atenciones mes</div></div></div>
-  <div class="card"><div class="ch">Distribución hoy</div>
-    ${[['Emergencias',2,'var(--r)'],['Urgencias',2,'var(--o)'],['Traslados',1,'var(--ink3)']].map(([l,n,c])=>`<div class="lr"><div class="lrb"><div class="lrn">${l}</div></div><div style="display:flex;align-items:center;gap:.55rem"><div style="height:4px;width:${n*28}px;background:${c};border-radius:2px"></div><span style="font-weight:700;font-size:.9rem">${n}</span></div></div>`).join('')}
-  </div>
-  <div class="card"><div class="ch">En curso ahora</div>
-    <div class="lr"><div class="lrb"><div class="lrn">Lucía Pereyra</div><div class="lrs">Unidad 05 · Dra. Laura Gómez · 11:05</div></div><span class="badge br bp">En curso</span></div>
-  </div>`;
+  <div class="srow"><div class="stat red"><div class="sn">${hoy}</div><div class="sl">Atenciones hoy</div></div>${card(unidades,'Unidades activas')}</div>
+  <div class="srow">${card(afil,'Afiliados activos')}${card(mes,'Atenciones mes')}</div>
+  <div class="card"><div class="ch">Distribución hoy</div>${distHTML}</div>
+  <div class="card"><div class="ch">En curso ahora</div>${enCursoHTML}</div>`;
 }
 
 function adAtenc(){
@@ -1580,9 +1644,70 @@ function dDesp(){
   return dDespBuscar(d);
 }
 
+/* ===================== D-3.2 — Puente bandera roja → despacho (superficie del despachante) =====================
+   Card "Pedidos de atención": reportes_sintomas con banderaRoja PENDIENTES (sin estadoPedido o 'nuevo').
+   "Despachar" reusa dspIrAlPaciente (NO modifica dspCrear/bandeja) + arma S.pedidoReporteId (TOP-LEVEL, porque
+   dspCrear reemplaza S.dsp entero :1982 → un reporteId en S.dsp se perdería). Al crearse el episodio, un hook
+   aditivo en la etapa 'creado' vincula el reporte (estadoPedido:'despachado'+episodioId). INVARIANTE: S.pedidoReporteId
+   se limpia al vincular, al salir a bandeja, y en resetSession — un reporteId colgado vincularía el episodio equivocado. */
+function pedAttach(){
+  if(S.pedUnsub) return;
+  S.pedUnsub=db.collection('reportes_sintomas').where('tieneBanderaRoja','==',true).onSnapshot(s=>{
+    if(!S.user) return;
+    S.pedidos=s.docs.map(d=>({id:d.id,...d.data()}))
+      .filter(r=>!r.estadoPedido || r.estadoPedido==='nuevo')
+      .sort((a,b)=>(tms(b.creadoEn)||0)-(tms(a.creadoEn)||0));
+    if(S.user.rol==='despachante' && S.tab==='despacho' && (!S.dsp || S.dsp.stage==='buscar')) render();
+  }, ()=>{ S.pedidos=[]; });
+}
+function pedDetach(){ if(S.pedUnsub){ try{S.pedUnsub();}catch(_){} S.pedUnsub=null; } S.pedidos=null; }
+function pedLimpiarVinculo(){ S.pedidoReporteId=null; S.pedidoVinc=false; S.pedAviso=null; } // invariante: limpiar el reporteId armado (+ aviso espejo-ausente)
+function pedHace(t){ const ms=tms(t); if(ms==null) return '—'; const s=Math.max(0,Math.round((Date.now()-ms)/1000)); if(s<60) return 'hace instantes'; const m=Math.floor(s/60); if(m<60) return 'hace '+m+' min'; const h=Math.floor(m/60); if(h<24) return 'hace '+h+'h'; return 'hace '+Math.floor(h/24)+'d'; }
+function pedidosCard(){
+  const list=S.pedidos;
+  if(!list || !list.length) return '';
+  const rows=list.map(r=>{
+    const sint=(r.sintomas||[]).map(s=>esc(s.nombre||'')).filter(Boolean).join(', ');
+    const tel=r.personaTelefono?(' · 📞 '+esc(r.personaTelefono)):'';
+    return `<div class="lr" style="flex-wrap:wrap"><div class="lrb" style="flex:1 1 100%"><div class="lrn" style="color:var(--r)">🔴 ${esc(r.personaNombre||'—')}</div><div class="lrs">${pedHace(r.creadoEn)} · ${sint||'—'}${tel}</div></div><div style="display:flex;gap:.4rem;margin-top:.35rem"><button class="btn-r" style="width:auto;padding:.35rem .75rem;margin-top:0" onclick="pedDespachar('${esc(r.id)}','${esc(r.personaId||'')}')">Despachar</button><button class="btn-o" style="width:auto;padding:.35rem .75rem;margin-top:0" onclick="pedDescartar('${esc(r.id)}')">Descartar</button></div></div>`;
+  }).join('');
+  return `<div class="card" style="border:1.5px solid var(--r)"><div class="st" style="color:var(--r)">🚨 Pedidos de atención (${list.length})</div>${rows}</div>`;
+}
+async function pedDespachar(reporteId, personaId){
+  S.pedidoReporteId=reporteId; S.pedidoVinc=false; S.pedAviso=null; // armo el vínculo (top-level, sobrevive a dspCrear) + limpio aviso previo
+  // Espejo-ausente (FALLA 1): NO uso dspMsg (transitorio, lo pisa render()/pedAttach). Persisto en S.pedAviso,
+  // que dDespBuscar renderiza fijo mientras el despachante busca a mano — con el reporteId ARMADO, así al dar de
+  // alta manual el episodio, vincularPedido sigue enganchando el pedido correcto.
+  if(!personaId){ S.pedAviso='Este pedido no trae paciente vinculable. Buscalo a mano por DNI o apellido — el pedido queda enganchado al despacho que crees.'; render(); return; }
+  try{
+    const p=await db.collection('pacientes').doc(personaId).get();
+    if(p.exists){ dspIrAlPaciente({id:p.id,...p.data()}); }       // REUSO: no modifica dspCrear/dspIrAlPaciente
+    else { S.pedAviso='El paciente no está en el padrón de despacho. Buscalo a mano por DNI o apellido — el pedido queda enganchado al despacho que crees.'; render(); }
+  }catch(e){ dspMsg('No se pudo cargar el paciente: '+(e.message||e)); render(); }
+}
+async function pedDescartar(reporteId){
+  const motivo=(prompt('Motivo del descarte (ej. falsa alarma, lo atendió el médico):')||'').trim();
+  if(!motivo) return;
+  try{ await db.collection('reportes_sintomas').doc(reporteId).set({ estadoPedido:'descartado', notaGestion:motivo.slice(0,200), gestionadoPor:S.user.uid, gestionadoEn:FV() },{merge:true}); }
+  catch(e){ dspMsg('No se pudo descartar: '+(e.message||e)); }
+}
+// Hook aditivo (etapa 'creado'): vincula el reporte al episodio recién creado, buscándolo por nroIncidente.
+async function vincularPedido(nro){
+  const rid=S.pedidoReporteId; if(!rid){ S.pedidoVinc=false; return; }
+  try{
+    const ep=await db.collection('episodios').where('nroIncidente','==',nro).limit(1).get();
+    const epId=ep.empty?null:ep.docs[0].id;
+    await db.collection('reportes_sintomas').doc(rid).set({ estadoPedido:'despachado', episodioId:epId, gestionadoPor:S.user.uid, gestionadoEn:FV() },{merge:true});
+  }catch(_){}
+  pedLimpiarVinculo();
+}
+
 function dDespBuscar(){
   const d=dspState();
+  if(!S.pedUnsub) pedAttach();
   return `
+  ${pedidosCard()}
+  ${S.pedAviso?`<div class="card" style="border:1.5px solid var(--r);background:#fff5f5"><div class="lrn" style="color:var(--r)">⚠️ ${esc(S.pedAviso)}</div></div>`:''}
   <div class="card">
     <div class="st">Nuevo despacho</div>
     <p style="font-size:.8rem;color:var(--ink3);margin:.2rem 0 .8rem">Identificá al paciente por DNI, N° de afiliado o apellido/nombre. Escribí y aparecen sugerencias. Si no está, lo das de alta.</p>
@@ -1930,6 +2055,7 @@ async function dspCrear(){
 }
 
 function dDespCreado(d){
+  if(S.pedidoReporteId && !S.pedidoVinc){ S.pedidoVinc=true; vincularPedido(d.creado.nro); } // D-3.2: vincula el pedido al episodio recién creado
   return `
   <div class="card card-dk" style="text-align:center;padding:1.5rem 1rem">
     <div style="font-size:2rem">✅</div>
@@ -2072,8 +2198,8 @@ function banRow(e){
   </div>`;
 }
 
-function verBandeja(){ S.dsp=null; S.bandeja=null; set({tab:'bandeja'}); }
-function verBandejaNuevo(){ S.dsp=null; set({tab:'despacho'}); navPush(); } // apila el entry 'buscar' sobre bandeja
+function verBandeja(){ S.dsp=null; S.bandeja=null; pedLimpiarVinculo(); set({tab:'bandeja'}); } // D-3.2: limpia el reporteId armado al salir
+function verBandejaNuevo(){ S.dsp=null; pedLimpiarVinculo(); set({tab:'despacho'}); navPush(); } // apila el entry 'buscar' sobre bandeja
 
 /* ---- DETALLE ---- */
 function openEp(id){ S.epView=id; S.ep={loading:true}; S.recFlash=null; render(); navPush(); epLoad(id); } // limpia feedback de recursos de otro episodio
