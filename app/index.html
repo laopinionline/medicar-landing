@@ -606,6 +606,8 @@ function resetSession(keepErr){
   if(typeof medHomeDetach==='function') medHomeDetach(); // ídem métricas del home del médico (D-1)
   if(typeof monDetach==='function') monDetach(); // ídem monitoreo (cuestionarios/respuestas)
   if(typeof banDetach==='function') banDetach(); // ídem escucha en vivo de la bandeja (despachante/médico)
+  if(typeof pedDetach==='function') pedDetach(); // ídem pedidos de atención (D-3.2)
+  if(typeof pedLimpiarVinculo==='function') pedLimpiarVinculo(); // invariante: sin reporteId colgado tras logout
   if(S.mapaVivo){ try{S.mapaVivo.remove();}catch(_){} S.mapaVivo=null; } // mapa vivo Leaflet
   S=cleanSession();
   if(err) S.loginErr=err; // preserva el mensaje de login (ej. "cuenta sin rol")
@@ -883,6 +885,10 @@ function getTabs(rol){
 
 function pg(){
   const r=S.user.rol,t=S.tab;
+  // D-3.2 (FALLA 2): invariante central. S.pedidoReporteId SOLO sobrevive dentro del flujo de nuevo despacho
+  // (despachante + tab 'despacho', cualquier etapa). Cualquier render de otra vista lo limpia — el nav real es
+  // goTab→set→render→pg, que NO pasa por verBandeja. Sin este guard, un reporteId rancio vincularía un episodio ajeno.
+  if(S.pedidoReporteId && !(r==='despachante' && t==='despacho')) pedLimpiarVinculo();
   if(t!=='bandeja'&&t!=='episodios') S.epView=null; // salir de la bandeja cierra el detalle abierto
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='home')return mHome();if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='perfil')return miPerfil();} // D-1: dispatch de 'despacho'/'registro' retirado (desp()/reg() siguen definidos, no ruteados)
@@ -1638,9 +1644,70 @@ function dDesp(){
   return dDespBuscar(d);
 }
 
+/* ===================== D-3.2 — Puente bandera roja → despacho (superficie del despachante) =====================
+   Card "Pedidos de atención": reportes_sintomas con banderaRoja PENDIENTES (sin estadoPedido o 'nuevo').
+   "Despachar" reusa dspIrAlPaciente (NO modifica dspCrear/bandeja) + arma S.pedidoReporteId (TOP-LEVEL, porque
+   dspCrear reemplaza S.dsp entero :1982 → un reporteId en S.dsp se perdería). Al crearse el episodio, un hook
+   aditivo en la etapa 'creado' vincula el reporte (estadoPedido:'despachado'+episodioId). INVARIANTE: S.pedidoReporteId
+   se limpia al vincular, al salir a bandeja, y en resetSession — un reporteId colgado vincularía el episodio equivocado. */
+function pedAttach(){
+  if(S.pedUnsub) return;
+  S.pedUnsub=db.collection('reportes_sintomas').where('tieneBanderaRoja','==',true).onSnapshot(s=>{
+    if(!S.user) return;
+    S.pedidos=s.docs.map(d=>({id:d.id,...d.data()}))
+      .filter(r=>!r.estadoPedido || r.estadoPedido==='nuevo')
+      .sort((a,b)=>(tms(b.creadoEn)||0)-(tms(a.creadoEn)||0));
+    if(S.user.rol==='despachante' && S.tab==='despacho' && (!S.dsp || S.dsp.stage==='buscar')) render();
+  }, ()=>{ S.pedidos=[]; });
+}
+function pedDetach(){ if(S.pedUnsub){ try{S.pedUnsub();}catch(_){} S.pedUnsub=null; } S.pedidos=null; }
+function pedLimpiarVinculo(){ S.pedidoReporteId=null; S.pedidoVinc=false; S.pedAviso=null; } // invariante: limpiar el reporteId armado (+ aviso espejo-ausente)
+function pedHace(t){ const ms=tms(t); if(ms==null) return '—'; const s=Math.max(0,Math.round((Date.now()-ms)/1000)); if(s<60) return 'hace instantes'; const m=Math.floor(s/60); if(m<60) return 'hace '+m+' min'; const h=Math.floor(m/60); if(h<24) return 'hace '+h+'h'; return 'hace '+Math.floor(h/24)+'d'; }
+function pedidosCard(){
+  const list=S.pedidos;
+  if(!list || !list.length) return '';
+  const rows=list.map(r=>{
+    const sint=(r.sintomas||[]).map(s=>esc(s.nombre||'')).filter(Boolean).join(', ');
+    const tel=r.personaTelefono?(' · 📞 '+esc(r.personaTelefono)):'';
+    return `<div class="lr" style="flex-wrap:wrap"><div class="lrb" style="flex:1 1 100%"><div class="lrn" style="color:var(--r)">🔴 ${esc(r.personaNombre||'—')}</div><div class="lrs">${pedHace(r.creadoEn)} · ${sint||'—'}${tel}</div></div><div style="display:flex;gap:.4rem;margin-top:.35rem"><button class="btn-r" style="width:auto;padding:.35rem .75rem;margin-top:0" onclick="pedDespachar('${esc(r.id)}','${esc(r.personaId||'')}')">Despachar</button><button class="btn-o" style="width:auto;padding:.35rem .75rem;margin-top:0" onclick="pedDescartar('${esc(r.id)}')">Descartar</button></div></div>`;
+  }).join('');
+  return `<div class="card" style="border:1.5px solid var(--r)"><div class="st" style="color:var(--r)">🚨 Pedidos de atención (${list.length})</div>${rows}</div>`;
+}
+async function pedDespachar(reporteId, personaId){
+  S.pedidoReporteId=reporteId; S.pedidoVinc=false; S.pedAviso=null; // armo el vínculo (top-level, sobrevive a dspCrear) + limpio aviso previo
+  // Espejo-ausente (FALLA 1): NO uso dspMsg (transitorio, lo pisa render()/pedAttach). Persisto en S.pedAviso,
+  // que dDespBuscar renderiza fijo mientras el despachante busca a mano — con el reporteId ARMADO, así al dar de
+  // alta manual el episodio, vincularPedido sigue enganchando el pedido correcto.
+  if(!personaId){ S.pedAviso='Este pedido no trae paciente vinculable. Buscalo a mano por DNI o apellido — el pedido queda enganchado al despacho que crees.'; render(); return; }
+  try{
+    const p=await db.collection('pacientes').doc(personaId).get();
+    if(p.exists){ dspIrAlPaciente({id:p.id,...p.data()}); }       // REUSO: no modifica dspCrear/dspIrAlPaciente
+    else { S.pedAviso='El paciente no está en el padrón de despacho. Buscalo a mano por DNI o apellido — el pedido queda enganchado al despacho que crees.'; render(); }
+  }catch(e){ dspMsg('No se pudo cargar el paciente: '+(e.message||e)); render(); }
+}
+async function pedDescartar(reporteId){
+  const motivo=(prompt('Motivo del descarte (ej. falsa alarma, lo atendió el médico):')||'').trim();
+  if(!motivo) return;
+  try{ await db.collection('reportes_sintomas').doc(reporteId).set({ estadoPedido:'descartado', notaGestion:motivo.slice(0,200), gestionadoPor:S.user.uid, gestionadoEn:FV() },{merge:true}); }
+  catch(e){ dspMsg('No se pudo descartar: '+(e.message||e)); }
+}
+// Hook aditivo (etapa 'creado'): vincula el reporte al episodio recién creado, buscándolo por nroIncidente.
+async function vincularPedido(nro){
+  const rid=S.pedidoReporteId; if(!rid){ S.pedidoVinc=false; return; }
+  try{
+    const ep=await db.collection('episodios').where('nroIncidente','==',nro).limit(1).get();
+    const epId=ep.empty?null:ep.docs[0].id;
+    await db.collection('reportes_sintomas').doc(rid).set({ estadoPedido:'despachado', episodioId:epId, gestionadoPor:S.user.uid, gestionadoEn:FV() },{merge:true});
+  }catch(_){}
+  pedLimpiarVinculo();
+}
+
 function dDespBuscar(){
   const d=dspState();
+  if(!S.pedUnsub) pedAttach();
   return `
+  ${pedidosCard()}
+  ${S.pedAviso?`<div class="card" style="border:1.5px solid var(--r);background:#fff5f5"><div class="lrn" style="color:var(--r)">⚠️ ${esc(S.pedAviso)}</div></div>`:''}
   <div class="card">
     <div class="st">Nuevo despacho</div>
     <p style="font-size:.8rem;color:var(--ink3);margin:.2rem 0 .8rem">Identificá al paciente por DNI, N° de afiliado o apellido/nombre. Escribí y aparecen sugerencias. Si no está, lo das de alta.</p>
@@ -1988,6 +2055,7 @@ async function dspCrear(){
 }
 
 function dDespCreado(d){
+  if(S.pedidoReporteId && !S.pedidoVinc){ S.pedidoVinc=true; vincularPedido(d.creado.nro); } // D-3.2: vincula el pedido al episodio recién creado
   return `
   <div class="card card-dk" style="text-align:center;padding:1.5rem 1rem">
     <div style="font-size:2rem">✅</div>
@@ -2130,8 +2198,8 @@ function banRow(e){
   </div>`;
 }
 
-function verBandeja(){ S.dsp=null; S.bandeja=null; set({tab:'bandeja'}); }
-function verBandejaNuevo(){ S.dsp=null; set({tab:'despacho'}); navPush(); } // apila el entry 'buscar' sobre bandeja
+function verBandeja(){ S.dsp=null; S.bandeja=null; pedLimpiarVinculo(); set({tab:'bandeja'}); } // D-3.2: limpia el reporteId armado al salir
+function verBandejaNuevo(){ S.dsp=null; pedLimpiarVinculo(); set({tab:'despacho'}); navPush(); } // apila el entry 'buscar' sobre bandeja
 
 /* ---- DETALLE ---- */
 function openEp(id){ S.epView=id; S.ep={loading:true}; S.recFlash=null; render(); navPush(); epLoad(id); } // limpia feedback de recursos de otro episodio
