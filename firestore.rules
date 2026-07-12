@@ -579,6 +579,11 @@ service cloud.firestore {
                             && request.resource.data.personaId == miPersonaId()
                             && request.resource.data.keys().hasOnly(['personaId','personaNombre','personaTelefono','sintomas','texto','tieneBanderaRoja','creadoEn']) );
       allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId());
+      // D-3: puente bandera roja → despacho. SOLO el operativo gestiona el pedido (el socio NO toca el estado).
+      // Whitelist por acción (calca episodios) + estadoPedido con valor válido. El create del socio queda intacto.
+      allow update: if esOperativo()
+                       && tocadas().hasOnly(['estadoPedido','episodioId','notaGestion','gestionadoPor','gestionadoEn'])
+                       && request.resource.data.get('estadoPedido','nuevo') in ['nuevo','despachado','descartado'];
     }
 
     // chequeos_parametros/{id}: chequeo voluntario de signos medidos del socio (Etapa 34, N3). INMUTABLE,
