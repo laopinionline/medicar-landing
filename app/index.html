@@ -602,6 +602,7 @@ function resetSession(keepErr){
   if(typeof movDetach==='function') movDetach(); // ídem sección móviles
   if(typeof cronoDetach==='function') cronoDetach(); // ídem cronograma de guardias
   if(typeof agtDetach==='function') agtDetach(); // ídem agenda de turnos (T-A.2)
+  if(typeof medTurnosDetach==='function') medTurnosDetach(); // ídem "turnos de hoy" del médico (T-C)
   if(typeof monDetach==='function') monDetach(); // ídem monitoreo (cuestionarios/respuestas)
   if(typeof banDetach==='function') banDetach(); // ídem escucha en vivo de la bandeja (despachante/médico)
   if(S.mapaVivo){ try{S.mapaVivo.remove();}catch(_){} S.mapaVivo=null; } // mapa vivo Leaflet
@@ -1152,9 +1153,30 @@ function perfilA(){
 }
 
 /* MÉDICO */
+// T-C: "Turnos de hoy" del médico (videollamada). onSnapshot por medicoId==uid; filtra hoy(TZ AR)+creado
+// en memoria (evita índice compuesto). Solo lectura. Read permitido por reglas (esOperativo).
+function medTurnosAttach(){
+  if(S.medTurnosUnsub) return;
+  const uid=S.user&&S.user.uid; if(!uid){ S.medTurnos=[]; return; }
+  S.medTurnosUnsub=db.collection('turnos').where('medicoId','==',uid).onSnapshot(s=>{
+    if(!S.user) return;
+    const hoy=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Buenos_Aires'}).format(new Date());
+    S.medTurnos=s.docs.map(d=>({id:d.id,...d.data()})).filter(t=>t.estado==='creado' && t.fecha===hoy).sort((a,b)=>String(a.hora||'').localeCompare(String(b.hora||'')));
+    render();
+  }, ()=>{ S.medTurnos=[]; render(); });
+}
+function medTurnosDetach(){ if(S.medTurnosUnsub){ try{S.medTurnosUnsub();}catch(_){} S.medTurnosUnsub=null; } S.medTurnos=null; }
+
 function mHome(){
   const u=S.user;
   const sub=[u.unidad,u.esp].filter(Boolean).join(' · ');
+  if(!S.medTurnosUnsub) medTurnosAttach();
+  const tHoy=S.medTurnos;
+  const turnosCard=`<div class="card"><div class="ch">Turnos de hoy</div>${
+    tHoy==null ? `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Cargando…</div>`
+    : (tHoy.length ? tHoy.map(t=>`<div class="lr"><div class="lrb"><div class="lrn">${esc(t.hora)} · ${esc(t.nombreVista||'—')}</div><div class="lrs">Videollamada · Reservado</div></div></div>`).join('')
+       : `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Sin turnos hoy.</div>`)
+  }</div>`;
   return`
   <div class="card card-dk">
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -1166,6 +1188,7 @@ function mHome(){
     <div class="stat red"><div class="sn">5</div><div class="sl">Atenciones hoy</div></div>
     <div class="stat"><div class="sn">2</div><div class="sl">Este turno</div></div>
   </div>
+  ${turnosCard}
   <div class="card">
     <div class="ch">Despacho activo</div>
     <div class="lr">
