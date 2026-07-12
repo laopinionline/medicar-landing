@@ -601,6 +601,8 @@ function resetSession(keepErr){
   if(typeof dashDetach==='function') dashDetach(); // ídem dashboard del superadmin
   if(typeof movDetach==='function') movDetach(); // ídem sección móviles
   if(typeof cronoDetach==='function') cronoDetach(); // ídem cronograma de guardias
+  if(typeof agtDetach==='function') agtDetach(); // ídem agenda de turnos (T-A.2)
+  if(typeof medTurnosDetach==='function') medTurnosDetach(); // ídem "turnos de hoy" del médico (T-C)
   if(typeof monDetach==='function') monDetach(); // ídem monitoreo (cuestionarios/respuestas)
   if(typeof banDetach==='function') banDetach(); // ídem escucha en vivo de la bandeja (despachante/médico)
   if(S.mapaVivo){ try{S.mapaVivo.remove();}catch(_){} S.mapaVivo=null; } // mapa vivo Leaflet
@@ -849,7 +851,8 @@ const CAPS=[
   ['ver_auditoria','Ver auditoría'],
   ['gestionar_afiliados','Gestionar afiliados'],
   ['configurar_sistema','Configurar sistema'],
-  ['gestionar_guardias','Gestionar guardias']
+  ['gestionar_guardias','Gestionar guardias'],
+  ['gestionar_agenda_turnos','Gestionar agenda de turnos']
 ];
 function puede(cap){ return !!(S.user && (S.user.rol==='superadmin' || (S.user.permisos && S.user.permisos[cap]===true))); }
 // Acceso al catálogo (prestaciones/planes, Estructura 3). Roles admin/superadmin, o capacidad configurar_sistema.
@@ -861,6 +864,7 @@ function getTabs(rol){
   // Tabs para operativos NO-superadmin que tengan el permiso (consumo de la capa de permisos).
   const movTab = puede('gestionar_moviles') ? [{id:'moviles',icon:'dispatch',lbl:'Móviles'}] : [];
   const cronoTab = puede('gestionar_guardias') ? [{id:'cronograma',icon:'history',lbl:'Cronograma'}] : [];
+  const agendaTab = puede('gestionar_agenda_turnos') ? [{id:'agendaturnos',icon:'history',lbl:'Agenda turnos'}] : [];
   const catTab = puedeConfig() ? [{id:'catalogo',icon:'plan',lbl:'Catálogo'}] : [];
   const factTab = puedeConfig() ? [{id:'facturacion',icon:'chart',lbl:'Facturación'}] : [];
   const mktTab = puedeAfil() ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : [];
@@ -868,21 +872,21 @@ function getTabs(rol){
   const estTab = puedeConfig() ? [{id:'estadisticas',icon:'chart',lbl:'Estadísticas'}] : [];
   const monTab = puedeConfig() ? [{id:'monitoreo',icon:'register',lbl:'Monitoreo'}] : [];
   if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
-  if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'despacho',icon:'dispatch',lbl:'Despacho'},{id:'registro',icon:'register',lbl:'Registrar'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...catTab,...factTab,...mktTab,...audTab,...estTab,...monTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...mktTab,...audTab,...estTab,...monTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
   const r=S.user.rol,t=S.tab;
   if(t!=='bandeja'&&t!=='episodios') S.epView=null; // salir de la bandeja cierra el detalle abierto
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
-  if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='perfil')return miPerfil();}
-  if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='home')return mHome();if(t==='despacho')return desp();if(t==='registro')return reg();if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='perfil')return miPerfil();}
+  if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
@@ -1149,9 +1153,30 @@ function perfilA(){
 }
 
 /* MÉDICO */
+// T-C: "Turnos de hoy" del médico (videollamada). onSnapshot por medicoId==uid; filtra hoy(TZ AR)+creado
+// en memoria (evita índice compuesto). Solo lectura. Read permitido por reglas (esOperativo).
+function medTurnosAttach(){
+  if(S.medTurnosUnsub) return;
+  const uid=S.user&&S.user.uid; if(!uid){ S.medTurnos=[]; return; }
+  S.medTurnosUnsub=db.collection('turnos').where('medicoId','==',uid).onSnapshot(s=>{
+    if(!S.user) return;
+    const hoy=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Buenos_Aires'}).format(new Date());
+    S.medTurnos=s.docs.map(d=>({id:d.id,...d.data()})).filter(t=>t.estado==='creado' && t.fecha===hoy).sort((a,b)=>String(a.hora||'').localeCompare(String(b.hora||'')));
+    render();
+  }, ()=>{ S.medTurnos=[]; render(); });
+}
+function medTurnosDetach(){ if(S.medTurnosUnsub){ try{S.medTurnosUnsub();}catch(_){} S.medTurnosUnsub=null; } S.medTurnos=null; }
+
 function mHome(){
   const u=S.user;
   const sub=[u.unidad,u.esp].filter(Boolean).join(' · ');
+  if(!S.medTurnosUnsub) medTurnosAttach();
+  const tHoy=S.medTurnos;
+  const turnosCard=`<div class="card"><div class="ch">Turnos de hoy</div>${
+    tHoy==null ? `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Cargando…</div>`
+    : (tHoy.length ? tHoy.map(t=>`<div class="lr"><div class="lrb"><div class="lrn">${esc(t.hora)} · ${esc(t.nombreVista||'—')}</div><div class="lrs">Videollamada · Reservado</div></div></div>`).join('')
+       : `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Sin turnos hoy.</div>`)
+  }</div>`;
   return`
   <div class="card card-dk">
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -1163,6 +1188,7 @@ function mHome(){
     <div class="stat red"><div class="sn">5</div><div class="sl">Atenciones hoy</div></div>
     <div class="stat"><div class="sn">2</div><div class="sl">Este turno</div></div>
   </div>
+  ${turnosCard}
   <div class="card">
     <div class="ch">Despacho activo</div>
     <div class="lr">
@@ -3627,6 +3653,123 @@ async function catPlanBaja(id,reactivar){
     if(pl) await planEspejoLanding(id, { ...pl, activo:!!reactivar });
   }
   catch(e){ catErr('No se pudo actualizar: '+(e.message||e)); }
+}
+
+/* ===================== AGENDA DE TURNOS (Tramo Turnos T-A.2) =====================
+   ABM de franjas de disponibilidad (videollamada). Lo cargan los DIRECTORES (cap
+   gestionar_agenda_turnos). Calca el patrón de planes (list+form+baja lógica activa:false).
+   Escribe agenda_turnos/{id} con el shape de T-A.1; slotsTomados[] NUNCA se pisa en edición
+   (lo mueve la Cloud Function de reserva en T-B). Solape del mismo médico: bloqueo client-side
+   (best-effort; las reglas no lo enforcan). Hint de guardia pasiva: informativo, nunca bloquea. */
+function agtFormOpen(){ return !!(S.agt && S.agt.edit!=null); }
+function agtAttach(){
+  if(S.agtUnsub) return;
+  S.agtUnsub=[ db.collection('agenda_turnos').onSnapshot(s=>{ if(!S.agt) return; S.agt.franjas=s.docs.map(d=>({id:d.id,...d.data()})); if(!agtFormOpen()) render(); }, e=>{ if(S.agt){ S.agt.err=(e.message||String(e)); render(); } }) ];
+}
+function agtDetach(){ if(S.agtUnsub){ S.agtUnsub.forEach(u=>{ try{u();}catch(_){} }); S.agtUnsub=null; } }
+function agtErr(t){ const e=document.getElementById('agt-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function agtShowInact(on){ if(S.agt){ S.agt.showInact=!!on; render(); } }
+function agtNuevo(){ if(!puede('gestionar_agenda_turnos'))return; S.agt.edit='new'; render(); }
+function agtEditar(id){ if(!puede('gestionar_agenda_turnos'))return; S.agt.edit=id; render(); }
+function agtCancelar(){ if(S.agt) S.agt.edit=null; render(); }
+// Solape client-side: misma fecha + mismo medicoId + rangos HH:mm pisados (borde que se toca NO cuenta).
+function agtSolape(medicoId,fecha,hini,hfin,excluirId){
+  return (S.agt.franjas||[]).find(f=> f.id!==excluirId && f.activa!==false && f.medicoId===medicoId && f.fecha===fecha && hini<f.horaFin && f.horaInicio<hfin) || null;
+}
+function agendaTurnosPanel(){
+  if(!puede('gestionar_agenda_turnos')) return `<div class="card"><div class="ch">Agenda de turnos</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para gestionar la agenda de turnos.</div></div>`;
+  if(!S.agt){ S.agt={franjas:null,edit:null,err:'',showInact:false}; agtAttach(); }
+  if(S.agt.err) return `<div class="card">No se pudo cargar la agenda: ${esc(S.agt.err)}</div>`;
+  if(S.agt.franjas===null) return `<div class="card">Cargando agenda…</div>`;
+  if(S.agt.edit!=null) return agendaForm();
+  const btn="btn-o\" style=\"width:auto;padding:.3rem .6rem;margin-top:0";
+  const showInact=!!S.agt.showInact;
+  const nInact=(S.agt.franjas||[]).filter(f=>f.activa===false).length;
+  const list=(S.agt.franjas||[]).filter(f=> showInact || f.activa!==false).slice().sort((a,b)=>(String(a.fecha)+a.horaInicio).localeCompare(String(b.fecha)+b.horaInicio));
+  const rows= list.length ? list.map(f=>{
+    const inact=f.activa===false;
+    const med=(S.staffMedico||[]).find(m=>m.uid===f.medicoId);
+    const nombreMed=esc(f.medicoNombre || (med?med.nombre:'') || f.medicoId || '—');
+    const reservas=(Array.isArray(f.slotsTomados)?f.slotsTomados.length:0);
+    const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="agtEditar('${f.id}')">Editar</button><button class="${btn}" onclick="agendaBaja('${f.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
+    return `<div class="lr"${inact?' style="opacity:.5"':''}><div class="lrb"><div class="lrn">${fechaDisplay(f.fecha)} · ${esc(f.horaInicio)}–${esc(f.horaFin)}</div><div class="lrs">${nombreMed} · slot ${esc(String(f.duracionSlotMin||'—'))}min · ${reservas} reserva${reservas===1?'':'s'}${inact?' · inactiva':''}</div></div>${acts}</div>`;
+  }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin franjas${showInact?'':' activas'}</div>`;
+  const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="agtShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivas${nInact?(' ('+nInact+')'):''}</label>`;
+  return `<div class="panel-h"><b>Agenda de turnos</b><span class="live-tag">en vivo</span></div>
+  <div id="agt-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+  <button class="btn-r" onclick="agtNuevo()" style="margin-bottom:.7rem">+ Nueva franja</button>${toggle}<div class="card">${rows}</div>`;
+}
+function agendaForm(){
+  const isNew=S.agt.edit==='new';
+  const f=isNew?{}:((S.agt.franjas||[]).find(x=>x.id===S.agt.edit)||{});
+  const meds=S.staffMedico||[];
+  return `<div class="card"><div class="ch">${isNew?'Nueva franja':'Editar franja'}</div>
+    <div class="field"><label>Fecha</label><input type="date" id="agt-fecha" value="${esc(f.fecha||'')}" onchange="agtHintPasiva()"></div>
+    <div style="display:flex;gap:.5rem">
+      <div class="field" style="flex:1"><label>Desde</label><input type="time" id="agt-hini" value="${esc(f.horaInicio||'09:00')}" onchange="agtHintPasiva()"></div>
+      <div class="field" style="flex:1"><label>Hasta</label><input type="time" id="agt-hfin" value="${esc(f.horaFin||'12:00')}" onchange="agtHintPasiva()"></div>
+    </div>
+    <div class="field"><label>Duración de cada turno (min)</label><input type="number" id="agt-dur" min="1" step="5" value="${esc(String(f.duracionSlotMin!=null?f.duracionSlotMin:15))}"></div>
+    <div class="field"><label>Médico</label>${meds.length
+      ?`<select id="agt-medico" onchange="agtHintPasiva()"><option value="">— Elegí un médico —</option>${meds.map(m=>`<option value="${esc(m.uid)}" ${f.medicoId===m.uid?'selected':''}>${esc(m.nombre)}</option>`).join('')}</select>`
+      :`<div style="font-size:.78rem;color:var(--r)">No hay médicos activos (staff_medico). Cargá personal primero.</div>`}</div>
+    <div id="agt-hint" style="font-size:.75rem;margin:-.2rem 0 .6rem"></div>
+    <button class="btn-r" onclick="agendaGuardar()">Guardar</button>
+    <button class="btn-o" onclick="agtCancelar()">Cancelar</button>
+  </div>`;
+}
+// Hint de guardia pasiva (informativo, NUNCA bloquea). Actualiza el div directo, sin render() (no pierde lo tipeado).
+async function agtHintPasiva(){
+  const el=document.getElementById('agt-hint'); if(!el) return;
+  const medicoId=(document.getElementById('agt-medico')?.value||'').trim();
+  const fecha=(document.getElementById('agt-fecha')?.value||'').trim();
+  const hini=(document.getElementById('agt-hini')?.value||'').trim();
+  const hfin=(document.getElementById('agt-hfin')?.value||'').trim();
+  if(!medicoId||!fecha||!hini||!hfin){ el.innerHTML=''; return; }
+  el.innerHTML='<span style="color:var(--ink3)">Comprobando guardia pasiva…</span>';
+  try{
+    const snap=await db.collection('guardias').where('personaId','==',medicoId).get();  // índice single-field default
+    const ini=new Date(fecha+'T'+hini).getTime(), fin=new Date(fecha+'T'+hfin).getTime();
+    const pasiva=snap.docs.map(d=>d.data()).some(g=> g.modalidad==='pasiva' && gSolapan(ini,fin,g.inicio,g.fin));
+    el.innerHTML= pasiva
+      ? '<span style="color:#0F6E56">✓ El médico figura de guardia pasiva en esa franja.</span>'
+      : '<span style="color:#B45309">⚠ El médico no figura de guardia pasiva en esa franja (informativo, no bloquea).</span>';
+  }catch(e){ el.innerHTML='<span style="color:var(--ink3)">No se pudo comprobar la guardia pasiva.</span>'; }
+}
+async function agendaGuardar(){
+  if(!puede('gestionar_agenda_turnos')) return; // la regla es la defensa real
+  agtErr('');
+  const isNew=S.agt.edit==='new';
+  const fecha=(document.getElementById('agt-fecha')?.value||'').trim();
+  const hini=(document.getElementById('agt-hini')?.value||'').trim();
+  const hfin=(document.getElementById('agt-hfin')?.value||'').trim();
+  const dur=parseInt(document.getElementById('agt-dur')?.value||'',10);
+  const medicoId=(document.getElementById('agt-medico')?.value||'').trim();
+  if(!fecha){ agtErr('Elegí una fecha.'); return; }
+  if(!hini||!hfin){ agtErr('Completá el horario.'); return; }
+  if(hini>=hfin){ agtErr('El horario de inicio debe ser anterior al fin.'); return; }
+  if(!(dur>0)){ agtErr('La duración de cada turno debe ser mayor a 0.'); return; }
+  if(!medicoId){ agtErr('Elegí un médico.'); return; }
+  const conf=agtSolape(medicoId,fecha,hini,hfin, isNew?null:S.agt.edit);
+  if(conf){ agtErr('Se pisa con otra franja de ese médico ese día ('+esc(conf.horaInicio)+'–'+esc(conf.horaFin)+').'); return; }
+  const med=(S.staffMedico||[]).find(m=>m.uid===medicoId);
+  const medicoNombre=(med&&med.nombre)||'';
+  try{
+    if(isNew){
+      await db.collection('agenda_turnos').add({ fecha, horaInicio:hini, horaFin:hfin, duracionSlotMin:dur, medicoId, medicoNombre, activa:true, slotsTomados:[], creadoEn:FV(), creadoPor:S.user.uid });
+    } else {
+      // NUNCA pisar slotsTomados / activa / creadoEn en edición (los mueve la baja / la CF de reserva).
+      await db.collection('agenda_turnos').doc(S.agt.edit).set({ fecha, horaInicio:hini, horaFin:hfin, duracionSlotMin:dur, medicoId, medicoNombre, actualizadoEn:FV() }, { merge:true });
+    }
+    S.agt.edit=null; render();
+  }catch(e){ agtErr('No se pudo guardar: '+(e.message||e)); }
+}
+async function agendaBaja(id,reactivar){
+  if(!puede('gestionar_agenda_turnos')) return;
+  if(!reactivar && !confirm('¿Dar de baja esta franja? No se podrá reservar en ella.')) return;
+  agtErr('');
+  try{ await db.collection('agenda_turnos').doc(id).set({activa:!!reactivar,actualizadoEn:FV()},{merge:true}); }
+  catch(e){ agtErr('No se pudo actualizar: '+(e.message||e)); }
 }
 
 /* ===================== FACTURACIÓN — Tarifas (Estructura 1, Contable) =====================
