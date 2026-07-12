@@ -610,6 +610,14 @@ function planPrecioTotal(plan, integrantes){
   const baseInt=(plan.integrantesBase!=null)?Number(plan.integrantesBase):1;
   return base + Math.max(0,(Number(integrantes)||0)-baseInt)*extra;
 }
+// F4: "2026-07" → "Julio 2026". Formato inválido → devuelve el crudo.
+function periodoLbl(p){
+  const m=String(p||'').match(/^(\d{4})-(\d{2})$/); if(!m) return String(p||'—');
+  const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const i=parseInt(m[2],10)-1; return (meses[i]||m[2])+' '+m[1];
+}
+// F4: estado de display del abono. Facturado = presencia de facturaId (no hay estado 'facturado').
+function abonoEstado(a){ if((a||{}).estado==='anulado') return 'anulado'; if((a||{}).facturaId) return 'facturado'; return 'emitido'; }
 
 /* ---------- Monitoreo N1: fechas y estado del chequeo semanal ---------- */
 function tsMs(t){ if(!t) return null; if(t.toMillis) return t.toMillis(); if(t.seconds!=null) return t.seconds*1000; if(typeof t==='number') return t; return null; }
@@ -724,6 +732,12 @@ async function cargarCredencial(uid){
     try{ const dep = await db.collection('socios').where('titularPersonaId','==',personaId).get(); dependientes = dep.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
   }
 
+  // F4: historial de abonos — el abono lleva el personaId del titular facturado (F2 habilita la lectura).
+  let abonos = [];
+  if(personaId){
+    try{ const ab = await db.collection('abonos').where('personaId','==',personaId).get(); abonos = ab.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
+  }
+
   // Monitoreo N1: cuestionario ACTIVO (si hay varios, el más reciente) + última respuesta de esta persona.
   let cuestionario = null;
   try{
@@ -756,7 +770,7 @@ async function cargarCredencial(uid){
     sintomas = sc.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>((a.orden||0)-(b.orden||0)));
   }catch(_){}
 
-  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
+  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, abonos, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
 }
 
 /* ---------- Auth flow ---------- */
@@ -916,6 +930,34 @@ function homeView(){
     grupoSec = `<div class="sec"><div class="sec-h">Mi grupo familiar</div><div class="card">${rows}</div></div>`;
   }
 
+  // F4 — Historial de abonos. El abono lleva el personaId del TITULAR: el dependiente ve una nota, no la lista.
+  let historialSec = '';
+  if(esDependiente){
+    historialSec = `<div class="sec"><div class="sec-h">Cuotas</div><div class="card"><div style="padding:.9rem 1rem;font-size:.78rem;color:var(--gris);line-height:1.45">La facturación de tu grupo la gestiona el titular.</div></div></div>`;
+  } else if(socio && socio.planId){ // titular/individual con plan → sección con historial o empty-state
+    const abonos = (c.abonos||[]).slice().sort((a,b)=>String(b.periodo||'').localeCompare(String(a.periodo||''))); // período desc
+    const CAP = 12; const mostrados = abonos.slice(0, CAP);
+    const badgeDe = (est) => est==='anulado'
+        ? `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--gris);text-decoration:line-through">ANULADO</span>`
+      : est==='facturado'
+        ? `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--verde)">FACTURADO</span>`
+        : `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--tinta)">EMITIDO</span>`;
+    let inner;
+    if(!abonos.length){
+      inner = `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">Todavía no hay cuotas emitidas.</div>`;
+    } else {
+      const rows = mostrados.map(a=>{
+        const est = abonoEstado(a); const tach = est==='anulado';
+        return `<div class="row"><span class="rl" style="color:var(--tinta);font-weight:700">${esc(periodoLbl(a.periodo))} ${badgeDe(est)}</span><span class="rv" style="${tach?'color:var(--gris);text-decoration:line-through':''}">${socioMoney(a.precioFinal)}</span></div>`;
+      }).join('');
+      const capNota = abonos.length>CAP ? `<div style="padding:.6rem 1rem;font-size:.7rem;color:var(--gris)">Mostrando las últimas ${CAP}.</div>` : '';
+      inner = rows + capNota;
+    }
+    historialSec = `<div class="sec"><div class="sec-h">Historial de cuotas</div><div class="card">${inner}
+      <div style="padding:.75rem 1rem;font-size:.7rem;color:var(--gris);line-height:1.45;border-top:1px solid var(--linea)">Historial de emisión de tus cuotas. El estado indica si la cuota fue emitida o facturada, no si está paga — los pagos se coordinan con MEDICAR.</div>
+    </div></div>`;
+  }
+
   return `<div class="home">
     <div class="topbar">
       <div class="brand">${chv(20)}<span class="word">medicar</span></div>
@@ -944,6 +986,7 @@ function homeView(){
 
     ${cuotaSec}
     ${grupoSec}
+    ${historialSec}
 
     ${homeReporteBlock(c)}
 
