@@ -28,9 +28,31 @@ const REGION = 'southamerica-east1';
 // functions('southamerica-east1').httpsCallable — si cambia, se rompe el alta de usuarios.
 setGlobalOptions({ region: REGION });
 
-// 'chofer': rol NO-operativo (sin acceso a clínica). Se versiona aquí para habilitar el alta;
-// el DEPLOY de esta Function lo hace Lucas aparte (este commit no la deploya).
+// 'chofer': rol NO-operativo (sin acceso a clínica). Se versiona aquí para habilitar el alta.
+// DEPLOY: lo hace Claude Code con `firebase deploy --only functions` (mandato de Lucas, Tramo Turnos
+// T-B.1; deroga la nota previa de que el deploy lo hacía Lucas aparte).
 const ROLES = ['superadmin', 'admin', 'despachante', 'medico', 'chofer', 'afiliado'];
+
+// ── Helpers Turnos (T-B.1) ──
+const FV = () => admin.firestore.FieldValue.serverTimestamp();
+const toMin = (s) => { const p = String(s || '').split(':'); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); };
+const nombreDe = (p) => (((((p && p.apellido) || '') + ', ' + ((p && p.nombre) || '')).replace(/^, /, '').replace(/, $/, '')) || (p && p.dni) || '');
+// "Hoy" y ventana de reserva en horario de Argentina (NO el reloj UTC del runtime): un socio a las 22hs
+// no debe caer del otro lado de la medianoche UTC. Devuelve strings 'YYYY-MM-DD' comparables.
+function ventanaBA() {
+  const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+  const d = new Date(hoy + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 7); // +7 días (fin de ventana inclusive)
+  const fin = new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(d);
+  return { hoy, fin };
+}
+// Caller autenticado con personaId vinculado. Devuelve su personaId. Errores tipados.
+async function assertAfiliado(request) {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const snap = await db.collection('usuarios').doc(request.auth.uid).get();
+  const personaId = snap.exists ? (snap.data() || {}).personaId : null;
+  if (!personaId) throw new HttpsError('failed-precondition', 'Tu cuenta no está vinculada a un socio.');
+  return personaId;
+}
 
 // Exige llamante autenticado y con rol superadmin. Devuelve su uid.
 async function assertSuperadmin(request) {
@@ -240,4 +262,105 @@ exports.crearLeadWeb = onRequest(async (req, res) => {
     console.error('[crearLeadWeb]', e);
     return res.status(500).json({ ok: false, error: 'Error interno.' }); // 500 genérico, sin detalles
   }
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * TURNOS (Tramo Turnos T-B.1) — reserva/cancelación de turnos de videollamada.
+ * El SOCIO no escribe agenda_turnos.slotsTomados ni turnos directo (las reglas no pueden acoplar
+ * la reserva al slot de forma segura). Estas CFs corren con Admin SDK (bypass de reglas) y hacen la
+ * TRANSACCIÓN atómica: validar slot libre / marcar-desmarcar slotsTomados / crear-cancelar el turno.
+ * Decisiones: (B) el titular opera para sí y sus dependientes; ventana hoy+7; máx 1 turno 'creado'
+ * a futuro POR PERSONA; cancelar hasta la hora del turno; cancelar en franja inactiva permitido.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+// Resuelve el personaId destino y su nombreVista. self → persona del caller; dependiente → validado
+// server-side (socios: personaId==destino && titularPersonaId==caller && activo) + nombreVista denorm (F1).
+async function resolverDestino(callerPersonaId, paraPersonaId) {
+  if (!paraPersonaId || paraPersonaId === callerPersonaId) {
+    const per = (await db.collection('personas').doc(callerPersonaId).get()).data() || {};
+    return { personaId: callerPersonaId, nombreVista: nombreDe(per) };
+  }
+  const q = await db.collection('socios')
+    .where('personaId', '==', paraPersonaId)
+    .where('titularPersonaId', '==', callerPersonaId).get();
+  const dep = q.docs.map((d) => d.data()).find((s) => s.activo !== false);
+  if (!dep) throw new HttpsError('permission-denied', 'Solo podés reservar/cancelar para vos o tus dependientes.');
+  let nombreVista = dep.nombreVista || '';
+  if (!nombreVista) { const per = (await db.collection('personas').doc(paraPersonaId).get()).data() || {}; nombreVista = nombreDe(per); }
+  return { personaId: paraPersonaId, nombreVista };
+}
+
+exports.reservarTurno = onCall(async (request) => {
+  const caller = await assertAfiliado(request);
+  const data = request.data || {};
+  const agendaId = String(data.agendaId || '').trim();
+  const hora = String(data.hora || '').trim();
+  const paraPersonaId = String(data.paraPersonaId || '').trim();
+  if (!agendaId || !hora) throw new HttpsError('invalid-argument', 'agendaId y hora son requeridos.');
+  if (!/^\d{2}:\d{2}$/.test(hora)) throw new HttpsError('invalid-argument', 'Hora inválida.');
+
+  // (2) destino (self o dependiente validado)
+  const destino = await resolverDestino(caller, paraPersonaId);
+
+  // (3) franja: existe + activa + fecha en [hoy, hoy+7] (horario Argentina)
+  const franjaRef = db.collection('agenda_turnos').doc(agendaId);
+  const franjaSnap = await franjaRef.get();
+  if (!franjaSnap.exists) throw new HttpsError('not-found', 'La franja no existe.');
+  const franja = franjaSnap.data() || {};
+  if (franja.activa === false) throw new HttpsError('failed-precondition', 'La franja no está disponible.');
+  const { hoy, fin } = ventanaBA();
+  if (!(franja.fecha >= hoy && franja.fecha <= fin)) throw new HttpsError('failed-precondition', 'La fecha está fuera de la ventana de reserva (próximos 7 días).');
+
+  // (4) hora dentro de [horaInicio, horaFin) + alineada a duracionSlotMin + el slot entra completo
+  const dur = Number(franja.duracionSlotMin) || 0;
+  if (dur <= 0) throw new HttpsError('failed-precondition', 'Franja mal configurada (duración).');
+  const iniMin = toMin(franja.horaInicio), finMin = toMin(franja.horaFin), hMin = toMin(hora);
+  if (!(hMin >= iniMin && hMin < finMin && (hMin - iniMin) % dur === 0 && hMin + dur <= finMin)) {
+    throw new HttpsError('invalid-argument', 'Ese horario no es un turno válido de la franja.');
+  }
+
+  // (5) TX atómica: slot libre + máx-1-activo del destino + escribir
+  const turnoRef = db.collection('turnos').doc();
+  await db.runTransaction(async (tx) => {
+    const fr = await tx.get(franjaRef);
+    const slots = (fr.data() || {}).slotsTomados || [];
+    if (slots.includes(hora)) throw new HttpsError('already-exists', 'Ese horario ya fue tomado.');
+    // máx 1 turno 'creado' a futuro POR PERSONA (dos equalities → sin índice compuesto; fecha se filtra en memoria)
+    const activosSnap = await tx.get(db.collection('turnos').where('personaId', '==', destino.personaId).where('estado', '==', 'creado'));
+    const activosFuturos = activosSnap.docs.map((d) => d.data()).filter((t) => String(t.fecha || '') >= hoy);
+    if (activosFuturos.length >= 1) throw new HttpsError('failed-precondition', 'Esa persona ya tiene un turno reservado a futuro. Cancelalo antes de sacar otro.');
+    tx.update(franjaRef, { slotsTomados: [...slots, hora] });
+    tx.set(turnoRef, {
+      fecha: franja.fecha, hora, agendaId,
+      personaId: destino.personaId, nombreVista: destino.nombreVista,
+      medicoId: franja.medicoId || '', medicoNombre: franja.medicoNombre || '',
+      estado: 'creado', creadoEn: FV(),
+    });
+  });
+  return { turnoId: turnoRef.id };
+});
+
+exports.cancelarTurno = onCall(async (request) => {
+  const caller = await assertAfiliado(request);
+  const turnoId = String((request.data || {}).turnoId || '').trim();
+  if (!turnoId) throw new HttpsError('invalid-argument', 'turnoId requerido.');
+  const turnoRef = db.collection('turnos').doc(turnoId);
+  const snap = await turnoRef.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'El turno no existe.');
+  const turno = snap.data() || {};
+  if (turno.estado !== 'creado') throw new HttpsError('failed-precondition', 'El turno no está activo (ya cancelado).');
+  // dueño: self o dependiente del caller
+  if (turno.personaId !== caller) {
+    const q = await db.collection('socios').where('personaId', '==', turno.personaId).where('titularPersonaId', '==', caller).limit(1).get();
+    if (q.empty) throw new HttpsError('permission-denied', 'No podés cancelar este turno.');
+  }
+  const franjaRef = db.collection('agenda_turnos').doc(turno.agendaId);
+  await db.runTransaction(async (tx) => {
+    const t = await tx.get(turnoRef);
+    if ((t.data() || {}).estado !== 'creado') throw new HttpsError('failed-precondition', 'El turno ya fue cancelado.');
+    const fr = await tx.get(franjaRef); // cancelar en franja inactiva o inexistente: permitido (solo libera)
+    if (fr.exists) { const slots = (fr.data() || {}).slotsTomados || []; tx.update(franjaRef, { slotsTomados: slots.filter((s) => s !== turno.hora) }); }
+    tx.update(turnoRef, { estado: 'cancelado', canceladoEn: FV() });
+  });
+  return { ok: true };
 });
