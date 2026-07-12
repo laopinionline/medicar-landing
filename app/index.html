@@ -849,7 +849,8 @@ const CAPS=[
   ['ver_auditoria','Ver auditoría'],
   ['gestionar_afiliados','Gestionar afiliados'],
   ['configurar_sistema','Configurar sistema'],
-  ['gestionar_guardias','Gestionar guardias']
+  ['gestionar_guardias','Gestionar guardias'],
+  ['gestionar_agenda_turnos','Gestionar agenda de turnos']
 ];
 function puede(cap){ return !!(S.user && (S.user.rol==='superadmin' || (S.user.permisos && S.user.permisos[cap]===true))); }
 // Acceso al catálogo (prestaciones/planes, Estructura 3). Roles admin/superadmin, o capacidad configurar_sistema.

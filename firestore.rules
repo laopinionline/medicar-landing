@@ -332,6 +332,53 @@ service cloud.firestore {
       allow delete:         if esOperativo() && tienePermiso('gestionar_guardias');
     }
 
+    // agenda_turnos/{id} — franjas de disponibilidad de turnos (videollamada), Tramo Turnos T-A.1.
+    // Las cargan los DIRECTORES (operativo + cap 'gestionar_agenda_turnos'). Baja = activa:false (sin delete).
+    //  - Lectura: cualquier AUTENTICADO (el socio ve la disponibilidad; médico + horarios no son sensibles).
+    //  - Escritura: operativo + cap + forma válida.
+    //  - NOTA T-A.1: NO hay rama de escritura del socio sobre slotsTomados. La actualización por reserva/
+    //    cancelación del socio se FRENÓ: no es expresable de forma segura en reglas puras (la regla no puede
+    //    acoplarse al turno creado en la misma tx, y un diff acotado igual dejaría liberar/ocupar slots ajenos
+    //    → doble-booking/DoS). El mecanismo de reserva (Cloud Function / per-slot doc / diff acotado) se
+    //    decide antes de T-B. Ver reporte T-A.1.
+    function agendaTurnoFormaOK(d) {
+      return d.fecha is string
+        && d.horaInicio is string && d.horaFin is string
+        && d.horaInicio < d.horaFin
+        && d.duracionSlotMin is int && d.duracionSlotMin > 0
+        && d.medicoId is string && d.medicoId.size() > 0
+        && d.activa is bool
+        && d.slotsTomados is list;
+    }
+    match /agenda_turnos/{id} {
+      allow read:           if isSignedIn();
+      allow create, update: if esOperativo()
+                               && tienePermiso('gestionar_agenda_turnos')
+                               && agendaTurnoFormaOK(request.resource.data);
+      allow delete:         if false;
+    }
+
+    // turnos/{id} — reserva de un turno de videollamada por el SOCIO. Calca el patrón crea-lo-suyo
+    // (respuestas_cuestionario) + cancela-lo-suyo (prefRecordatorio). Cancelación = cambio de estado, nunca delete.
+    //  - Create: interno, o el socio SU propio (personaId == miPersonaId, estado 'creado', whitelist exacta).
+    //  - Read:   operativo (todos), o el socio SOLO los suyos.
+    //  - Update: operativo, o el socio SOLO su propio y SOLO estado+canceladoEn con estado 'cancelado'.
+    match /turnos/{id} {
+      allow create: if esInterno()
+                       || ( isSignedIn()
+                            && request.resource.data.personaId == miPersonaId()
+                            && request.resource.data.estado == 'creado'
+                            && request.resource.data.keys().hasOnly(['fecha','hora','agendaId','personaId','nombreVista','medicoId','medicoNombre','estado','creadoEn']) );
+      allow read:   if esOperativo()
+                       || ( isSignedIn() && resource.data.personaId == miPersonaId() );
+      allow update: if esOperativo()
+                       || ( isSignedIn()
+                            && resource.data.personaId == miPersonaId()
+                            && tocadas().hasOnly(['estado','canceladoEn'])
+                            && request.resource.data.estado == 'cancelado' );
+      allow delete: if false;
+    }
+
     // prestaciones/{id}: catalogo base de prestaciones (Emergencias, Urgencias, ...). Estructura 3 (Admin).
     //  - Lectura: cualquier rol INTERNO (no afiliado), incluido chofer — el personal lo consulta.
     //  - Escritura (alta/edicion; baja LOGICA via campo 'activo'): admin/superadmin o configurar_sistema.
