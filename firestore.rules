@@ -531,14 +531,16 @@ service cloud.firestore {
     // facturas/{id}: cierre de Contable (Estructura 1). Agrupa abono + cargos por persona (items congelados).
     // DATA FINANCIERA. INMUTABLE tras emitir: items/total/personaId/socioId/periodo/numeroAfiliado.
     // Transiciones validas: emitida->pagada (facFacturaPagar) · emitida->anulada (facFacturaAnular). NUNCA delete.
+    // F-2: nroComprobante (FC-AAAA-NNNNNN) REQUERIDO al emitir e INMUTABLE despues (no aparece en ningun update).
     match /facturas/{id} {
       allow read:   if puedeFacturar();
-      // create: shape exacto de generarFacturas + estado inicial 'emitida' + total numerico >= 0.
+      // create: shape exacto de generarFacturas + estado inicial 'emitida' + total numerico >= 0 + nº de comprobante.
       allow create: if puedeFacturar()
-                       && request.resource.data.keys().hasOnly(['periodo','personaId','socioId','nombre','numeroAfiliado','items','total','estado','emitidaEn','emitidaPor'])
-                       && request.resource.data.keys().hasAll(['periodo','personaId','items','total','estado'])
+                       && request.resource.data.keys().hasOnly(['periodo','personaId','socioId','nombre','numeroAfiliado','items','total','estado','emitidaEn','emitidaPor','nroComprobante'])
+                       && request.resource.data.keys().hasAll(['periodo','personaId','items','total','estado','nroComprobante'])
                        && request.resource.data.estado == 'emitida'
                        && request.resource.data.total is number && request.resource.data.total >= 0
+                       && request.resource.data.nroComprobante is string && request.resource.data.nroComprobante.matches('^FC-[0-9]{4}-[0-9]{6}$')
                        && request.resource.data.periodo is string && request.resource.data.periodo.matches('^[0-9]{4}-[0-9]{2}$');
       // update — marcar pagada, SOLO emitida->pagada:
       allow update: if puedeFacturar() && resource.data.estado == 'emitida'

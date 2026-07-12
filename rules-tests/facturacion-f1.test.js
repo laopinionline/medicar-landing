@@ -18,7 +18,7 @@ let env;
 
 const ABONO = (over={}) => Object.assign({ periodo:'2099-01', socioId:'s1', personaId:'pA', socioNombre:'X', numeroAfiliado:'100', planId:'pl1', planNombre:'Plan', precioSugerido:1000, precioFinal:1000, motivoAjuste:null, estado:'generado', generadoEn:1, generadoPor:'cfg' }, over);
 const CARGO = (over={}) => Object.assign({ episodioId:'e1', nroIncidente:5, nroIncidenteFmt:'INC-5', personaId:'pA', socioId:'s1', pacNombre:'X', regla:'no_socio', tarifaId:'t1', tarifaNombre:'Tarifa', tipoCalculo:'fija', precioSugerido:500, valorPorKm:0, km:null, kmPendiente:false, precioFinal:500, motivoAjuste:null, estado:'generado', generadoEn:1, generadoPor:'cfg' }, over);
-const FACT = (over={}) => Object.assign({ periodo:'2099-01', personaId:'pA', socioId:'s1', nombre:'X', numeroAfiliado:'100', items:[{tipo:'abono',refId:'ab1',descripcion:'d',monto:1000}], total:1000, estado:'emitida', emitidaEn:1, emitidaPor:'cfg' }, over);
+const FACT = (over={}) => Object.assign({ periodo:'2099-01', personaId:'pA', socioId:'s1', nombre:'X', numeroAfiliado:'100', items:[{tipo:'abono',refId:'ab1',descripcion:'d',monto:1000}], total:1000, estado:'emitida', emitidaEn:1, emitidaPor:'cfg', nroComprobante:'FC-2099-000001' }, over);
 
 async function seed(env) {
   await env.withSecurityRulesDisabled(async (ctx) => {
@@ -84,6 +84,10 @@ describe('F-1 — FACTURAS', () => {
   it('✓ configurar_sistema crea factura emitida', async () => { await assertSucceeds(ctx('cfg').doc('facturas/nf1').set(FACT())); });
   it('✗ crea factura estado != emitida', async () => { await assertFails(ctx('cfg').doc('facturas/nf2').set(FACT({ estado:'pagada' }))); });
   it('✗ crea factura con total negativo', async () => { await assertFails(ctx('cfg').doc('facturas/nf3').set(FACT({ total:-5 }))); });
+  it('✗ crea factura SIN nroComprobante (F-2, requerido)', async () => { const f=FACT(); delete f.nroComprobante; await assertFails(ctx('cfg').doc('facturas/nf4').set(f)); });
+  it('✗ crea factura con nroComprobante no-string (F-2)', async () => { await assertFails(ctx('cfg').doc('facturas/nf5').set(FACT({ nroComprobante:1 }))); });
+  it('✗ crea factura con nroComprobante mal formado (F-2)', async () => { await assertFails(ctx('cfg').doc('facturas/nf6').set(FACT({ nroComprobante:'0001' }))); });
+  it('✗ toca nroComprobante post-emisión (F-2, inmutable)', async () => { await assertFails(ctx('cfg').doc('facturas/fEmit').set({ nroComprobante:'FC-2099-000999' }, { merge:true })); });
   it('✓ paga (emitida -> pagada)', async () => { await assertSucceeds(ctx('cfg').doc('facturas/fEmit').set({ estado:'pagada', pagadaEn:2, pagadaPor:'cfg' }, { merge:true })); });
   it('✓ anula (emitida -> anulada)', async () => { await assertSucceeds(ctx('cfg').doc('facturas/fEmit').set({ estado:'anulada', motivoAnulacion:'m', anuladaEn:2, anuladaPor:'cfg' }, { merge:true })); });
   it('✗ toca campo INMUTABLE (total)', async () => { await assertFails(ctx('cfg').doc('facturas/fEmit').set({ total:9999 }, { merge:true })); });
