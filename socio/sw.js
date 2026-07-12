@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v1';
+const CACHE = 'medicar-socio-v2'; // Turnos T-C: bump para que el shell nuevo (sección Turnos) reemplace al v1 cacheado
 const SHELL = [
   './',
   './index.html',
