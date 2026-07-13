@@ -256,11 +256,23 @@ service cloud.firestore {
       );
     }
 
-    // contadores/{id}: correlativo atomico (nroIncidente).
-    // Lectura/escritura dentro de la transaccion de alta (operativos). Borrado solo superadmin.
+    // contadores/{id}: correlativo atomico (nroIncidente/FC-/RC-/series de socios).
+    // C-1 (endurecimiento): antes era `write: if esOperativo()` — cualquier operativo podia PISAR o
+    // retroceder un contador (el `allow delete: superadmin` era redundante bajo ese write amplio). Ahora
+    // el update es SOLO incremento atomico +1, calco EXACTO de las 3 tx que existen (contadores/episodios
+    // app:2029, contadores/facturas app:4364, series de socios asignarNumeroRaiz app:4546) y de la nueva
+    // contadores/recibos. Ningun test toca contadores → sin regresion.
     match /contadores/{id} {
-      allow read, write: if esOperativo();
-      allow delete:      if esSuperadmin();
+      allow read:   if esOperativo();
+      // create: bootstrap de una serie nueva (ej. contadores/recibos la primera vez). ultimo numerico.
+      allow create: if esOperativo()
+                       && request.resource.data.keys().hasOnly(['ultimo','actualizadoEn'])
+                       && request.resource.data.ultimo is number && request.resource.data.ultimo >= 1;
+      // update: SOLO incremento +1 sobre el valor previo (0 si el doc no traia ultimo). Nunca retroceso ni pisada.
+      allow update: if esOperativo()
+                       && tocadas().hasOnly(['ultimo','actualizadoEn'])
+                       && request.resource.data.ultimo == resource.data.get('ultimo', 0) + 1;
+      allow delete: if esSuperadmin();
     }
 
     // staff_medico/{uid}: padron de medicos para asignacion (doc id = uid de Auth).
@@ -471,6 +483,12 @@ service cloud.firestore {
     // Gate financiero del carril (Contable): SOLO admin/superadmin o configurar_sistema (NO esInterno).
     function puedeFacturar() { return isAdmin() || tienePermiso('configurar_sistema'); }
 
+    // Gate de COBRANZA (C-1, Contable-cobros): registra pagos. admin/superadmin o la cap gestionar_cobranza.
+    // OJO — es un permiso DISTINTO de facturar: configurar_sistema NO hereda el cobro. Solo admin (isAdmin)
+    // y superadmin (cortocircuita tienePermiso) entran por sus bypasses normales; el contable puro necesita
+    // la cap explicita gestionar_cobranza. Calco exacto de puedeConfig()/puedeCobrar() del cliente (app).
+    function puedeCobrar() { return isAdmin() || tienePermiso('gestionar_cobranza'); }
+
     // cargos/{id}: cargos de facturacion generados por episodio (Estructura 1, Contable). DATA FINANCIERA.
     // F-1 (blindaje): la integridad pasa de candado-en-cliente a reglas. Whitelists calcadas al motor real
     // (generarCargos/facCargoGuardar/facCargoAnular + facturaId de generarFacturas/facFacturaAnular).
@@ -543,14 +561,50 @@ service cloud.firestore {
                        && request.resource.data.total is number && request.resource.data.total >= 0
                        && request.resource.data.nroComprobante is string && request.resource.data.nroComprobante.matches('^FC-[0-9]{4}-[0-9]{6}$')
                        && request.resource.data.periodo is string && request.resource.data.periodo.matches('^[0-9]{4}-[0-9]{2}$');
-      // update — marcar pagada, SOLO emitida->pagada:
-      allow update: if puedeFacturar() && resource.data.estado == 'emitida'
+      // update — flip DERIVADO emitida->pagada (C-1): acompaña Σpagos>=total. El facturador o el cobrador.
+      // El "Σpagos>=total" es invariante cross-doc client-side (rol confiable), misma clase que facturaId de F-1:
+      // la regla habilita la transicion; C-2 construye el flip. Antes era solo puedeFacturar(); se suma puedeCobrar().
+      allow update: if (puedeFacturar() || puedeCobrar()) && resource.data.estado == 'emitida'
                        && tocadas().hasOnly(['estado','pagadaEn','pagadaPor'])
                        && request.resource.data.estado == 'pagada';
-      // update — anular, SOLO emitida->anulada:
+      // update — flip INVERSO pagada->emitida (C-1): al anular el ULTIMO pago la factura vuelve a emitida
+      // (resuelve la contradiccion de app:4399). Mismos campos tocados. Facturador o cobrador.
+      allow update: if (puedeFacturar() || puedeCobrar()) && resource.data.estado == 'pagada'
+                       && tocadas().hasOnly(['estado','pagadaEn','pagadaPor'])
+                       && request.resource.data.estado == 'emitida';
+      // update — marca de migracion pagadaLegacy (C-1, la setea C-2 en las facturas pagadas PRE-cobranza):
+      // no altera estado, solo estampa el flag para excluirlas del calculo de saldo. Idempotente (true).
+      allow update: if puedeCobrar() && resource.data.estado == 'pagada'
+                       && tocadas().hasOnly(['pagadaLegacy'])
+                       && request.resource.data.pagadaLegacy == true;
+      // update — anular, SOLO emitida->anulada (del facturador):
       allow update: if puedeFacturar() && resource.data.estado == 'emitida'
                        && tocadas().hasOnly(['estado','motivoAnulacion','anuladaEn','anuladaPor'])
                        && request.resource.data.estado == 'anulada';
+    }
+
+    // pagos/{id}: registro de COBRANZA (C-1, Contable-cobros). Un pago = 1 factura (semantica pago-por-factura,
+    // parciales permitidos; saldo = factura.total - Σ pagos registrados, DERIVADO, no se guarda). pagadorId +
+    // pagadorTipo polimorfico persona|empresa desde v1 (empresa sin superficie hasta F-4). Numero RC-AAAA-NNNNNN
+    // (contador contadores/recibos, tx atomica pago+numero, calco de FC-). INMUTABLE: create + anulacion con motivo,
+    // NUNCA edicion. Read: cobrador o facturador (el que emite ve los cobros); el socio NO lee pagos en v1.
+    match /pagos/{id} {
+      allow read:   if puedeCobrar() || puedeFacturar();
+      // create: shape exacto + monto>0 + medio en enum + estado inicial 'registrado' + RC- bien formado + tipo en enum.
+      allow create: if puedeCobrar()
+                       && request.resource.data.keys().hasOnly(['pagadorId','pagadorTipo','facturaId','personaId','monto','fecha','medio','reciboNro','nota','estado','registradoEn','registradoPor'])
+                       && request.resource.data.keys().hasAll(['pagadorId','pagadorTipo','facturaId','monto','fecha','medio','reciboNro','estado'])
+                       && request.resource.data.pagadorTipo in ['persona','empresa']
+                       && request.resource.data.facturaId is string
+                       && request.resource.data.monto is number && request.resource.data.monto > 0
+                       && request.resource.data.medio in ['efectivo','transferencia','deposito']
+                       && request.resource.data.estado == 'registrado'
+                       && request.resource.data.reciboNro is string && request.resource.data.reciboNro.matches('^RC-[0-9]{4}-[0-9]{6}$');
+      // update — SOLO anulacion con motivo (registrado->anulado). Sin edicion de monto/medio/fecha (no hay otra rama).
+      allow update: if puedeCobrar() && resource.data.estado == 'registrado'
+                       && tocadas().hasOnly(['estado','motivoAnulacion','anuladoEn','anuladoPor'])
+                       && request.resource.data.estado == 'anulado';
+      // delete: nadie (default deny; los pagos se conservan como registro historico, la correccion es contra-asiento).
     }
 
     // leads/{id}: prospectos de captacion (Estructura 2, Marketing — Bloque 1). Datos personales de
@@ -668,10 +722,12 @@ service cloud.firestore {
     // match /usuarios (permisivas-only: cualquier match que permite, permite). Toda la administración de
     // usuarios del superadmin ya vive en /usuarios (read/create/delete/update completos, con la guarda
     // self-rol/activo ahora EFECTIVA). El create/delete real lo hace la CF por Admin SDK (bypassa reglas).
+    // C-1 — 'pagos' EXCLUIDA: ledger append-only de cobranza (delete: nadie, inmutable salvo anulacion logica
+    // via su match). Ni el superadmin lo borra/pisa por god-mode; su create/anular legitimos viven en /pagos.
     match /{coleccion}/{resto=**} {
       allow read:  if esSuperadmin();
       allow write: if esSuperadmin()
-                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios', 'reportes_sintomas', 'chequeos_parametros']);
+                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios', 'reportes_sintomas', 'chequeos_parametros', 'pagos']);
     }
   }
 }
