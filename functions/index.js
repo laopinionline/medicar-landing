@@ -16,12 +16,14 @@
  *   - change.before/after.data() -> event.data.before/after.data(); context.params -> event.params
  *   - functions.region(REGION) -> setGlobalOptions({ region: REGION })
  */
-const { setGlobalOptions } = require('firebase-functions/v2');
+const { setGlobalOptions, logger } = require('firebase-functions/v2');
 const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 admin.initializeApp();
 const db = admin.firestore();
+const { ingestarFeeds } = require('./feed-ingesta'); // PWA-2a: núcleo de la ingesta del feed (compartido con el runner manual)
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -364,3 +366,19 @@ exports.cancelarTurno = onCall(async (request) => {
   });
   return { ok: true };
 });
+
+/* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================
+   onSchedule (Cloud Scheduler auto-aprovisionado). TIMEZONE EXPLÍCITO: sin timeZone, '06:00' dispararía 03:00 AR.
+   Escribe feed_posts en estado:'pendiente' (Admin SDK saltea reglas). Nada se publica solo — cola de aprobación en el panel.
+   Núcleo en ./feed-ingesta (compartido con el runner manual). */
+exports.ingestarFeed = onSchedule(
+  { schedule: 'every day 06:00', timeZone: 'America/Argentina/Buenos_Aires' },
+  async () => {
+    const { resultados, retencion } = await ingestarFeeds(db);
+    for (const r of resultados) {
+      logger.info('[ingestarFeed] fuente', { fuente: r.fuente, cat: r.cat, leidos: r.leidos, nuevos: r.nuevos, yaExisten: r.yaExisten, autoDescartados: r.autoDescartados, error: r.error });
+    }
+    logger.info('[ingestarFeed] retención', retencion);
+    return null;
+  }
+);

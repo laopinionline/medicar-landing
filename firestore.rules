@@ -370,6 +370,17 @@ service cloud.firestore {
       allow delete:         if false;
     }
 
+    // feed_posts/{id} (PWA-2): novedades curadas del feed "Para vos". La CF de ingesta escribe con Admin SDK
+    // (SALTEA reglas) en estado 'pendiente' — NADA se publica solo. El socio autenticado lee SOLO publicados.
+    // La curaduría (aprobar/descartar/editar título-bajada, alta manual de 'interno') es de ROL admin (no un cap).
+    match /feed_posts/{id} {
+      // FIX PWA-2a: el admin lee TODO (necesita la cola de pendientes/descartados para curar). El socio NO-admin
+      // sigue viendo SOLO 'publicado' — nunca pendientes ni descartados (invariante que NO se relaja).
+      allow read:            if isAdmin() || (isSignedIn() && resource.data.estado == 'publicado');
+      allow create, update:  if isAdmin();
+      allow delete:          if isAdmin(); // el admin puede purgar; la retención automática la hace la CF (Admin SDK)
+    }
+
     // turnos/{id} — reserva de un turno de videollamada por el SOCIO. Calca el patrón crea-lo-suyo
     // (respuestas_cuestionario) + cancela-lo-suyo (prefRecordatorio). Cancelación = cambio de estado, nunca delete.
     //  - Create: interno, o el socio SU propio (personaId == miPersonaId, estado 'creado', whitelist exacta).

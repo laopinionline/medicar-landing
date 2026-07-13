@@ -876,6 +876,10 @@ function getTabs(rol){
   const catTab = puedeConfig() ? [{id:'catalogo',icon:'plan',lbl:'Catálogo'}] : [];
   const factTab = puedeConfig() ? [{id:'facturacion',icon:'chart',lbl:'Facturación'}] : [];
   const cobTab = puedeCobrar() ? [{id:'cobranza',icon:'register',lbl:'Cobranza'}] : []; // C-2: cap propia gestionar_cobranza (el contable puro entra por acá)
+  // PWA-2a: Novedades (curaduría del feed) — gate por ROL admin/superadmin, NO por cap. Badge con pendientes por curar.
+  const esAdminRol = !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin'));
+  if(esAdminRol) novBadgeAttach();
+  const novTab = esAdminRol ? [{id:'novedades',icon:'history',lbl:'Novedades'+(S.novPendCount?(' ('+S.novPendCount+')'):'')}] : [];
   const mktTab = puedeAfil() ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : [];
   const audTab = puedeConfig() ? [{id:'auditoria',icon:'history',lbl:'Auditoría'}] : [];
   const estTab = puedeConfig() ? [{id:'estadisticas',icon:'chart',lbl:'Estadísticas'}] : [];
@@ -886,7 +890,7 @@ function getTabs(rol){
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...cobTab,...mktTab,...audTab,...estTab,...monTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...cobTab,...novTab,...mktTab,...audTab,...estTab,...monTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
@@ -899,7 +903,7 @@ function pg(){
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='home')return mHome();if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='perfil')return miPerfil();} // D-1: dispatch de 'despacho'/'registro' retirado (desp()/reg() siguen definidos, no ruteados)
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='cobranza')return cobPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='cobranza')return cobPanel();if(t==='novedades')return novPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
@@ -3136,7 +3140,7 @@ function perfilSuper(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['cobranza','Cobranza',true],['marketing','Marketing',true],['estadisticas','Estadísticas',true],['auditoria','Auditoría',true],['monitoreo','Monitoreo',true]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['cobranza','Cobranza',true],['novedades','Novedades',true],['marketing','Marketing',true],['estadisticas','Estadísticas',true],['auditoria','Auditoría',true],['monitoreo','Monitoreo',true]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -3161,6 +3165,7 @@ function superView(){
   else if(sec==='afiliados') body=afPanel();
   else if(sec==='facturacion') body=facPanel();
   else if(sec==='cobranza') body=cobPanel();
+  else if(sec==='novedades') body=novPanel();
   else if(sec==='marketing') body=mktPanel();
   else if(sec==='auditoria') body=audPanel();
   else if(sec==='estadisticas') body=estPanel();
@@ -3179,6 +3184,7 @@ function superNav(sec){
   if(S.superSec==='afiliados'){ afDetach(); S.af=null; }
   if(S.superSec==='facturacion'){ facDetach(); S.fac=null; }
   if(S.superSec==='cobranza'){ cobDetach(); S.cob=null; }
+  if(S.superSec==='novedades'){ novDetach(); S.nov=null; }
   if(S.superSec==='marketing'){ mktDetach(); S.mkt=null; }
   if(S.superSec==='auditoria'){ audDetach(); S.aud=null; }
   if(S.superSec==='estadisticas'){ S.est=null; } // on-demand, sin listeners
@@ -4718,6 +4724,127 @@ async function cobAnularPago(pid, motivo){
     }
     render();
   }catch(e){ cobErr('No se pudo anular el pago: '+(e.message||e)); }
+}
+
+/* ===================== NOVEDADES (PWA-2a — curaduría del feed "Para vos") =====================
+   Gate por ROL admin/superadmin. Cola de aprobación: la CF ingesta deja docs en 'pendiente'; nada se publica solo.
+   Badge de pendientes en la tab (listener global). Sub-tabs: Pendientes / Publicados / + Nueva (alta manual 'interno'). */
+function novEsAdmin(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin')); }
+function novBadgeAttach(){ // listener GLOBAL del contador de pendientes (para el badge de la tab, siempre-on para admins)
+  if(S.novBadgeUnsub) return;
+  S.novBadgeUnsub = db.collection('feed_posts').where('estado','==','pendiente').onSnapshot(
+    s=>{ if(s.size!==S.novPendCount){ S.novPendCount=s.size; render(); } }, ()=>{ S.novPendCount=0; });
+}
+function novAttach(){
+  if(S.novUnsub) return;
+  const upd=()=>{ if(!(S.nov && S.nov.edit)) render(); }; // no re-renderizar con el form de edición abierto
+  S.novUnsub=[
+    db.collection('feed_posts').where('estado','==','pendiente').onSnapshot(s=>{ if(!S.nov)return; S.nov.pendientes=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.nov){ S.nov.err=(e.message||String(e)); render(); } }),
+    db.collection('feed_posts').where('estado','==','publicado').onSnapshot(s=>{ if(!S.nov)return; S.nov.publicados=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.nov) S.nov.publicados=[]; })
+  ];
+}
+function novDetach(){ if(S.novUnsub){ S.novUnsub.forEach(u=>{ try{u();}catch(_){} }); S.novUnsub=null; } }
+function novErr(t){ const e=document.getElementById('nov-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function novSub(id){ if(!S.nov) return; S.nov.sub=id; S.nov.edit=null; render(); navPush(); }
+function novFechaLbl(f){ const t=f&&f.toDate?f.toDate():(f&&f.seconds?new Date(f.seconds*1000):null); if(!t) return '—'; return t.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+const NOV_CAT={ medicar:['#ED1C24','MEDICAR'], salud:['#2E8B57','Cuidado'], nutri:['#F7941E','Alimentación'], vida:['#6C5CE7','Vida'] };
+function novChip(p){ const c=NOV_CAT[p.cat]||NOV_CAT.medicar; return `<span style="font-size:.6rem;font-weight:800;padding:.05rem .4rem;border-radius:6px;background:${c[0]};color:#fff">${c[1]}</span> <span style="font-size:.62rem;color:var(--ink3)">${esc(p.fuenteNombre||p.origen||'')}</span>`; }
+
+function novPanel(){
+  if(!novEsAdmin()) return `<div class="card"><div class="ch">Novedades</div><div style="font-size:.8rem;color:var(--ink3)">Solo para administradores.</div></div>`;
+  if(!S.nov){ S.nov={sub:'pendientes', pendientes:null, publicados:null, edit:null, err:''}; novAttach(); }
+  if(S.nov.err) return `<div class="card">No se pudo cargar novedades: ${esc(S.nov.err)}</div>`;
+  const sub=S.nov.sub||'pendientes';
+  const nPend=(S.nov.pendientes||[]).length;
+  const tab=(id,lbl)=>`<button onclick="novSub('${id}')" style="flex:1;padding:.45rem .3rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.68rem;font-weight:600;cursor:pointer">${lbl}</button>`;
+  const head=`
+  <div class="panel-h"><b>Novedades</b><span class="live-tag">en vivo</span></div>
+  <div style="font-size:.7rem;color:var(--ink3);margin-bottom:.6rem">Cola de aprobación del feed. Nada se publica hasta que lo apruebes.</div>
+  <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${tab('pendientes','Pendientes'+(nPend?` (${nPend})`:''))}${tab('publicados','Publicados')}${tab('nueva','+ Nueva')}</div>
+  <div id="nov-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
+  const body = sub==='publicados' ? novPublicadosView() : (sub==='nueva' ? novNuevaView() : novPendientesView());
+  return head + body;
+}
+
+function novPostCard(p, acciones){
+  const link = p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener" style="font-size:.72rem;color:var(--r);text-decoration:none">Ver fuente ↗</a>` : '';
+  return `<div class="card" style="margin-bottom:.6rem"><div style="margin-bottom:.3rem">${novChip(p)} <span style="font-size:.62rem;color:var(--ink3)">· ${novFechaLbl(p.fechaFuente)}</span></div>
+    <div style="font-weight:700;font-size:.92rem;color:var(--ink)">${esc(p.titulo||'—')}</div>
+    <div style="font-size:.8rem;color:var(--ink2);margin:.25rem 0 .4rem;line-height:1.4">${esc(p.bajada||'')}</div>
+    ${link}
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem">${acciones}</div></div>`;
+}
+
+function novPendientesView(){
+  if(S.nov.pendientes===null) return `<div class="card">Cargando pendientes…</div>`;
+  if(S.nov.edit!=null){ const p=(S.nov.pendientes||[]).find(x=>x.id===S.nov.edit); if(p) return novEditarView(p); }
+  const list=(S.nov.pendientes||[]).slice().sort((a,b)=>((b.fechaFuente&&b.fechaFuente.seconds)||0)-((a.fechaFuente&&a.fechaFuente.seconds)||0));
+  if(!list.length) return `<div class="card"><div style="font-size:.82rem;color:var(--ink3);padding:.4rem">No hay novedades pendientes de aprobar. ✓</div></div>`;
+  const btn=(txt,fn,cls)=>`<button class="${cls}" style="width:auto;padding:.4rem .7rem;font-size:.72rem" onclick="${fn}">${txt}</button>`;
+  return list.map(p=>novPostCard(p,
+    btn('✓ Aprobar',`novAprobar('${p.id}')`,'btn-r')+btn('Editar',`novEditarAbrir('${p.id}')`,'btn-o')+btn('Descartar',`novDescartar('${p.id}')`,'btn-o')
+  )).join('');
+}
+
+function novEditarView(p){
+  return `<div class="card"><div class="ch">Editar antes de publicar</div>
+    <div style="margin-bottom:.4rem">${novChip(p)}</div>
+    <div id="nov-err" class="err" style="display:none;margin-bottom:.4rem"></div>
+    <div class="field"><label>Título</label><input id="nov-e-titulo" value="${esc(p.titulo||'')}"></div>
+    <div class="field"><label>Bajada</label><textarea id="nov-e-bajada" rows="3">${esc(p.bajada||'')}</textarea></div>
+    <button class="btn-r" onclick="novEditarGuardar('${p.id}')">Guardar cambios</button>
+    <button class="btn-o" onclick="novEditarCerrar()" style="margin-top:.5rem">Cancelar</button></div>`;
+}
+
+function novPublicadosView(){
+  if(S.nov.publicados===null) return `<div class="card">Cargando publicados…</div>`;
+  const list=(S.nov.publicados||[]).slice().sort((a,b)=>((b.fechaFuente&&b.fechaFuente.seconds)||0)-((a.fechaFuente&&a.fechaFuente.seconds)||0));
+  if(!list.length) return `<div class="card"><div style="font-size:.82rem;color:var(--ink3);padding:.4rem">Todavía no publicaste ninguna novedad.</div></div>`;
+  const btn=`<button class="btn-o" style="width:auto;padding:.4rem .7rem;font-size:.72rem" onclick="novDespublicar('__ID__')">Despublicar</button>`;
+  return list.map(p=>novPostCard(p, btn.replace('__ID__',p.id))).join('');
+}
+
+function novNuevaView(){
+  return `<div class="card"><div class="ch">Nueva novedad de MEDICAR</div>
+    <div style="font-size:.72rem;color:var(--ink3);margin-bottom:.5rem">Alta manual (origen interno). La tarjeta muestra el mensaje completo, sin link. Se publica directo.</div>
+    <div id="nov-err" class="err" style="display:none;margin-bottom:.4rem"></div>
+    <div class="field"><label>Título</label><input id="nov-n-titulo" placeholder="Ej. Sumamos un móvil a la flota"></div>
+    <div class="field"><label>Mensaje</label><textarea id="nov-n-bajada" rows="3" placeholder="El mensaje que ve el socio"></textarea></div>
+    <button class="btn-r" onclick="novCrearInterno()">Publicar novedad</button></div>`;
+}
+
+async function novAprobar(id){ if(!novEsAdmin())return; novErr('');
+  try{ await db.collection('feed_posts').doc(id).update({ estado:'publicado', aprobadoEn:FV(), aprobadoPor:S.user.uid }); audit('feed_aprobado','feed_posts',id,''); }
+  catch(e){ novErr('No se pudo aprobar: '+(e.message||e)); }
+}
+async function novDescartar(id){ if(!novEsAdmin())return; novErr('');
+  try{ await db.collection('feed_posts').doc(id).update({ estado:'descartado', aprobadoEn:FV(), aprobadoPor:S.user.uid }); audit('feed_descartado','feed_posts',id,''); }
+  catch(e){ novErr('No se pudo descartar: '+(e.message||e)); }
+}
+async function novDespublicar(id){ if(!novEsAdmin())return; novErr('');
+  try{ await db.collection('feed_posts').doc(id).update({ estado:'descartado', aprobadoEn:FV(), aprobadoPor:S.user.uid }); audit('feed_despublicado','feed_posts',id,''); }
+  catch(e){ novErr('No se pudo despublicar: '+(e.message||e)); }
+}
+function novEditarAbrir(id){ if(!S.nov)return; S.nov.edit=id; render(); navPush(); }
+function novEditarCerrar(){ if(S.nov) S.nov.edit=null; render(); }
+async function novEditarGuardar(id){ if(!novEsAdmin())return; novErr('');
+  const titulo=(document.getElementById('nov-e-titulo')?.value||'').trim();
+  const bajada=(document.getElementById('nov-e-bajada')?.value||'').trim();
+  if(!titulo){ novErr('El título no puede quedar vacío.'); return; }
+  try{ await db.collection('feed_posts').doc(id).update({ titulo, bajada }); S.nov.edit=null; render(); }
+  catch(e){ novErr('No se pudo guardar: '+(e.message||e)); }
+}
+async function novCrearInterno(){ if(!novEsAdmin())return; novErr('');
+  const titulo=(document.getElementById('nov-n-titulo')?.value||'').trim();
+  const bajada=(document.getElementById('nov-n-bajada')?.value||'').trim();
+  if(!titulo){ novErr('Poné un título.'); return; }
+  if(!bajada){ novErr('Poné el mensaje.'); return; }
+  try{
+    await db.collection('feed_posts').add({ origen:'interno', cat:'medicar', titulo, bajada, link:null, fuenteNombre:'MEDICAR',
+      fechaFuente:FV(), estado:'publicado', creadoEn:FV(), aprobadoEn:FV(), aprobadoPor:S.user.uid });
+    audit('feed_interno_alta','feed_posts',titulo,'');
+    S.nov.sub='publicados'; render();
+  }catch(e){ novErr('No se pudo publicar: '+(e.message||e)); }
 }
 
 /* ===================== AFILIADOS — Socios + Personas (Estructura 3, Administración) =====================
