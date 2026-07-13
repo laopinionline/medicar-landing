@@ -445,19 +445,60 @@ service cloud.firestore {
     //    tambien leen socios), + el AFILIADO sobre su(s) propia(s) afiliacion(es) (para la credencial, E23;
     //    el != null evita el caso null==null). Se CIERRA a medico/chofer: no leen /socios en la app (recon E32).
     //  - Escritura: admin/superadmin o gestionar_afiliados. Baja LOGICA via 'activo', sin delete desde la app.
+
+    // E-1: forma de socios.facturarA (destinatario de facturacion del titular). AUSENTE = persona (default, sin
+    // migracion). Si esta: tipo en enum; si empresa -> empresaId y razonSocial string. Se valida en cada write del socio.
+    function facturarAOk() {
+      return !('facturarA' in request.resource.data)
+        || ( request.resource.data.facturarA.get('tipo','') in ['persona','empresa']
+             && ( request.resource.data.facturarA.get('tipo','') == 'persona'
+                  || ( request.resource.data.facturarA.get('empresaId', null) is string
+                       && request.resource.data.facturarA.get('razonSocial', null) is string ) ) );
+    }
+
+    // E-1: forma del convenio de una empresa. AUSENTE = sin convenio cargado todavia (E-2 lo carga).
+    // modo en enum; fijo -> montoMensual number > 0; per_capita -> SIN montoMensual (el precio vive en el plan del socio).
+    function convenioOk() {
+      return !('convenio' in request.resource.data)
+        || ( request.resource.data.convenio.keys().hasOnly(['modo','montoMensual'])
+             && request.resource.data.convenio.get('modo','') in ['fijo','per_capita']
+             && ( request.resource.data.convenio.get('modo','') == 'fijo'
+                    ? ( request.resource.data.convenio.get('montoMensual', 0) is number
+                        && request.resource.data.convenio.get('montoMensual', 0) > 0 )
+                    : !('montoMensual' in request.resource.data.convenio) ) );
+    }
+
     match /socios/{id} {
       allow read:           if esDespachante() || isAdmin() || esSuperadmin()
                                || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema')
                                || (isSignedIn() && miPersonaId() != null && resource.data.personaId == miPersonaId())
                                || (isSignedIn() && miPersonaId() != null && resource.data.titularPersonaId == miPersonaId()); // F2: el TITULAR lee sus dependientes (titularPersonaId denorm en F1)
-      allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
+      // E-1: gate intacto + validacion de forma de facturarA (solo cuando esta presente; no impone whitelist total).
+      allow create, update: if (isAdmin() || tienePermiso('gestionar_afiliados')) && facturarAOk();
     }
 
-    // empresas/{id}: raíz corporativa / área protegida (Fase 1 alta de socio). Mismos permisos que socios.
+    // empresas/{id}: raíz corporativa / área protegida (alta de socio) + convenio de cobro (E-1).
+    // Gate (E-1, SEPARACION ESTRICTA): identidad (razonSocial/cuit/contacto/plan…) = admin/gestionar_afiliados
+    // (alta inline) o configurar_sistema. CONVENIO (money) = SOLO admin/configurar_sistema (el contable, punto 4
+    // de negocio). gestionar_afiliados NO puede crear ni tocar 'convenio'. hasOnly del shape completo; numeroConvenio/
+    // tipo/creadoEn INMUTABLES (fuera del hasOnly de update). convenio validado por convenioOk().
     match /empresas/{id} {
       allow read:           if esDespachante() || isAdmin() || esSuperadmin()
                                || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema');
-      allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
+      // create: empGuardarNuevo + asignarNumeroRaiz (shape completo). Si trae 'convenio' -> exige gate contable.
+      allow create: if (isAdmin() || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema'))
+                       && ( !('convenio' in request.resource.data) || isAdmin() || tienePermiso('configurar_sistema') )
+                       && request.resource.data.keys().hasOnly(['razonSocial','cuit','contacto','telefono','email','tipo','planIdDefault','activo','creadoEn','numeroConvenio','ultimoSufijo','convenio'])
+                       && request.resource.data.keys().hasAll(['razonSocial','tipo','numeroConvenio'])
+                       && request.resource.data.tipo in ['corporativo','area_protegida']
+                       && request.resource.data.razonSocial is string
+                       && convenioOk();
+      // update: edicion del ABM (empGuardarEdit) + bump ultimoSufijo (asignarSufijo) + carga del convenio (E-2, contable).
+      // Si 'convenio' esta entre los campos TOCADOS -> exige gate contable; gestionar_afiliados solo toca identidad.
+      allow update: if (isAdmin() || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema'))
+                       && ( !tocadas().hasAny(['convenio']) || isAdmin() || tienePermiso('configurar_sistema') )
+                       && tocadas().hasOnly(['razonSocial','cuit','contacto','telefono','email','planIdDefault','activo','actualizadoEn','ultimoSufijo','convenio'])
+                       && convenioOk();
     }
 
     // staff/{id}: padron laboral del personal (Estructura 3, Bloque 3). id == uid del usuario; apunta a
@@ -552,15 +593,25 @@ service cloud.firestore {
     // F-2: nroComprobante (FC-AAAA-NNNNNN) REQUERIDO al emitir e INMUTABLE despues (no aparece en ningun update).
     match /facturas/{id} {
       allow read:   if puedeFacturar()
-                       || (isSignedIn() && resource.data.personaId != null && resource.data.personaId == miPersonaId()); // F-3: el socio lee SOLO sus comprobantes (calco de abonos F2)
-      // create: shape exacto de generarFacturas + estado inicial 'emitida' + total numerico >= 0 + nº de comprobante.
+                       || (isSignedIn() && resource.data.get('personaId', null) != null && resource.data.get('personaId', null) == miPersonaId()); // F-3: el socio lee SOLO sus comprobantes (calco abonos F2). E-1: .get() -> las facturas de empresa (sin personaId) no rompen la evaluacion.
+      // create: shape de generarFacturas + estado inicial 'emitida' + total >= 0 + nº comprobante. E-1: cliente POLIMORFICO.
       allow create: if puedeFacturar()
-                       && request.resource.data.keys().hasOnly(['periodo','personaId','socioId','nombre','numeroAfiliado','items','total','estado','emitidaEn','emitidaPor','nroComprobante'])
-                       && request.resource.data.keys().hasAll(['periodo','personaId','items','total','estado','nroComprobante'])
+                       && request.resource.data.keys().hasOnly(['periodo','personaId','socioId','nombre','numeroAfiliado','items','total','estado','emitidaEn','emitidaPor','nroComprobante','clienteTipo','clienteId','clienteNombre'])
+                       && request.resource.data.keys().hasAll(['periodo','items','total','estado','nroComprobante'])
                        && request.resource.data.estado == 'emitida'
                        && request.resource.data.total is number && request.resource.data.total >= 0
                        && request.resource.data.nroComprobante is string && request.resource.data.nroComprobante.matches('^FC-[0-9]{4}-[0-9]{6}$')
-                       && request.resource.data.periodo is string && request.resource.data.periodo.matches('^[0-9]{4}-[0-9]{2}$');
+                       && request.resource.data.periodo is string && request.resource.data.periodo.matches('^[0-9]{4}-[0-9]{2}$')
+                       // cliente polimorfico (espejo de pagos C-1): AUSENTE o 'persona' -> personaId presente, sin clienteId.
+                       // 'empresa' -> clienteId + clienteNombre string, SIN personaId. Rechaza el hibrido (personaId + empresa).
+                       && ( !('clienteTipo' in request.resource.data)
+                            ? ('personaId' in request.resource.data && !('clienteId' in request.resource.data))
+                            : ( request.resource.data.clienteTipo == 'persona'
+                                  ? ('personaId' in request.resource.data && !('clienteId' in request.resource.data))
+                                  : ( request.resource.data.clienteTipo == 'empresa'
+                                        && request.resource.data.clienteId is string
+                                        && request.resource.data.clienteNombre is string
+                                        && !('personaId' in request.resource.data) ) ) );
       // update — flip DERIVADO emitida->pagada (C-1): acompaña Σpagos>=total. El facturador o el cobrador.
       // El "Σpagos>=total" es invariante cross-doc client-side (rol confiable), misma clase que facturaId de F-1:
       // la regla habilita la transicion; C-2 construye el flip. Antes era solo puedeFacturar(); se suma puedeCobrar().

@@ -3922,7 +3922,8 @@ function facAttach(){
     db.collection('prestaciones').onSnapshot(s=>{ if(!S.fac) return; S.fac.prest=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.prest=[]; }),
     db.collection('cargos').onSnapshot(s=>{ if(!S.fac) return; S.fac.cargos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.cargos=[]; }),
     db.collection('abonos').onSnapshot(s=>{ if(!S.fac) return; S.fac.abonos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.abonos=[]; }),
-    db.collection('facturas').onSnapshot(s=>{ if(!S.fac) return; S.fac.facturas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.facturas=[]; })
+    db.collection('facturas').onSnapshot(s=>{ if(!S.fac) return; S.fac.facturas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.facturas=[]; }),
+    db.collection('empresas').onSnapshot(s=>{ if(!S.fac) return; S.fac.empresas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.empresas=[]; }) // E-3: N° convenio para el membrete del comprobante de empresa
   ];
 }
 function facDetach(){ if(S.facUnsub){ S.facUnsub.forEach(u=>{ try{u();}catch(_){} }); S.facUnsub=null; } }
@@ -3932,7 +3933,7 @@ function facTipoLbl(t){ return t==='por_km'?'Por km':'Fija'; }
 
 function facPanel(){
   if(!puedeConfig()) return `<div class="card"><div class="ch">Facturación</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para configurar facturación.</div></div>`;
-  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,abonos:null,facturas:null,edit:null,cedit:null,aedit:null,fedit:null,comprobante:null,showInact:false,showAnul:false,showAnulAb:false,showAnulF:false,periodo:facPeriodoActual(),err:'',report:null,reportAb:null,reportF:null}; facAttach(); }
+  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,abonos:null,facturas:null,empresas:null,edit:null,cedit:null,aedit:null,fedit:null,comprobante:null,showInact:false,showAnul:false,showAnulAb:false,showAnulF:false,periodo:facPeriodoActual(),err:'',report:null,reportAb:null,reportF:null}; facAttach(); }
   if(S.fac.err) return `<div class="card">No se pudo cargar facturación: ${esc(S.fac.err)}</div>`;
   if(S.fac.comprobante) return facComprobante(); // F-2: comprobante imprimible a pantalla completa (sin tabs)
   const sub=S.fac.sub||'tarifas';
@@ -4213,17 +4214,27 @@ async function generarAbonos(){
   facErr('');
   const periodo=(document.getElementById('fac-ab-periodo')?.value||S.fac.periodo||'').trim();
   if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
-  const rep={ generados:0, sinPlan:0, yaTenian:0, planInvalido:0, corporativos:0, errores:0 };
+  const rep={ generados:0, sinPlan:0, yaTenian:0, planInvalido:0, corpSinDest:0, destFijo:0, errores:0 };
   try{
-    // SOLO LECTURA: socios activos + abonos de ese período (idempotencia por socioId+periodo).
-    const [socSnap, abSnap] = await Promise.all([
+    // SOLO LECTURA: socios activos + abonos del período + empresas (E-3: mapa de convenios cacheado UNA vez).
+    const [socSnap, abSnap, empSnap] = await Promise.all([
       db.collection('socios').where('activo','==',true).get(),
-      db.collection('abonos').where('periodo','==',periodo).get()
+      db.collection('abonos').where('periodo','==',periodo).get(),
+      db.collection('empresas').get()
     ]);
+    const empMap={}; empSnap.docs.forEach(d=>{ empMap[d.id]=d.data(); });
     const yaConAbono=new Set(abSnap.docs.map(d=>d.data().socioId)); // incluye anulados → no regenera
     for(const sd of socSnap.docs){
       const socio=sd.data(), socioId=sd.id;
-      if(socio.tipoAfiliado==='corporativo'){ rep.corporativos++; continue; } // P4: el corporativo se factura a la EMPRESA (F-4), no individual
+      // E-3 (destino por facturarA, reemplaza la exclusión ciega por tipoAfiliado):
+      //  · empresa con convenio FIJO → sin abono per-socio (la empresa paga flat; el ítem lo genera generarFacturas).
+      //  · empresa per cápita (o convenio sin cargar) → genera abono normal, rolará a la factura de la empresa.
+      //  · RED (fallback): corporativo SIN facturarA configurado → excluido, con línea en el reporte.
+      const fa=socio.facturarA;
+      if(fa && fa.tipo==='empresa'){
+        const emp=empMap[fa.empresaId];
+        if(emp && emp.convenio && emp.convenio.modo==='fijo'){ rep.destFijo++; continue; }
+      } else if(socio.tipoAfiliado==='corporativo'){ rep.corpSinDest++; continue; }
       if(yaConAbono.has(socioId)){ rep.yaTenian++; continue; }
       if(!socio.planId){ rep.sinPlan++; continue; } // sin plan → no genera en 0
       let plan=null;
@@ -4249,7 +4260,7 @@ async function generarAbonos(){
       catch(e){ rep.errores++; console.warn('[generarAbonos] fallo',socioId,e); }
     }
     audit('abonos_generados','abonos',periodo,rep.generados+' generados');
-    S.fac.reportAb=`Período <b>${esc(periodo)}</b> — Generados: <b>${rep.generados}</b> · Sin plan: ${rep.sinPlan} · Ya tenían: ${rep.yaTenian} · Plan inválido: ${rep.planInvalido} · Corporativos excluidos: <b>${rep.corporativos}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
+    S.fac.reportAb=`Período <b>${esc(periodo)}</b> — Generados: <b>${rep.generados}</b> · Sin plan: ${rep.sinPlan} · Ya tenían: ${rep.yaTenian} · Plan inválido: ${rep.planInvalido} · Convenio fijo (sin abono): ${rep.destFijo} · <b>Corporativos sin destinatario configurado — excluidos: ${rep.corpSinDest}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar los abonos: '+(e.message||e)); }
 }
@@ -4340,53 +4351,83 @@ async function generarFacturas(){
   facErr('');
   const periodo=(document.getElementById('fac-fc-periodo')?.value||S.fac.periodo||'').trim();
   if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
-  const rep={ facturas:0, items:0, sinPend:0, corporativos:0, errores:0 };
+  const rep={ facturas:0, items:0, facPersona:0, facEmpresa:0, errores:0 };
   const year=new Date().getFullYear(); // F-2: año cosmético del comprobante (emisión), calco de INC-
   try{
-    // Candidatos (SOLO LECTURA): abonos del período + TODOS los cargos (barrido) + socios corporativos (exclusión F-2).
-    const [abSnap, cgSnap, corpSnap] = await Promise.all([
+    // E-3 (SOLO LECTURA): abonos del período + cargos + TODOS los socios (para resolver socioId→facturarA) +
+    // empresas (convenios) + facturas del período (idempotencia del ítem sintético fijo, que no deja marca facturaId).
+    const [abSnap, cgSnap, socSnap, empSnap, facSnap] = await Promise.all([
       db.collection('abonos').where('periodo','==',periodo).get(),
       db.collection('cargos').get(),
-      db.collection('socios').where('tipoAfiliado','==','corporativo').get() // P4: el corporativo se factura a la EMPRESA (F-4), no individual
+      db.collection('socios').get(),
+      db.collection('empresas').get(),
+      db.collection('facturas').where('periodo','==',periodo).get()
     ]);
-    const corpSocioIds=new Set(corpSnap.docs.map(d=>d.id)); const corpVistos=new Set();
-    const grupos={}; const scopePersonas=new Set();
-    const push=(pid,meta,item)=>{ if(!pid) return; if(!grupos[pid]) grupos[pid]={items:[],socioId:null,nombre:'',numeroAfiliado:null}; const g=grupos[pid]; if(meta.socioId&&!g.socioId)g.socioId=meta.socioId; if(meta.nombre&&!g.nombre)g.nombre=meta.nombre; if(meta.numeroAfiliado&&!g.numeroAfiliado)g.numeroAfiliado=meta.numeroAfiliado; g.items.push(item); };
-    abSnap.docs.forEach(d=>{ const a=d.data(); if(a.estado==='anulado') return; if(a.socioId && corpSocioIds.has(a.socioId)){ corpVistos.add(a.socioId); return; } if(a.personaId) scopePersonas.add(a.personaId); if(a.estado!=='generado'||a.facturaId) return; push(a.personaId,{socioId:a.socioId||null,nombre:a.socioNombre||'',numeroAfiliado:a.numeroAfiliado||null},{ tipo:'abono', refId:d.id, descripcion:('Abono '+(a.planNombre||'')+' '+(a.periodo||'')).trim(), monto:Number(a.precioFinal)||0 }); });
-    cgSnap.docs.forEach(d=>{ const c=d.data(); if(c.estado==='anulado') return; if(c.socioId && corpSocioIds.has(c.socioId)){ corpVistos.add(c.socioId); return; } if(c.personaId) scopePersonas.add(c.personaId); if(c.estado!=='generado'||c.facturaId) return; push(c.personaId,{socioId:c.socioId||null,nombre:c.pacNombre||'',numeroAfiliado:null},{ tipo:'cargo', refId:d.id, descripcion:((c.tarifaNombre||'—')+' · '+(c.nroIncidenteFmt||('INC '+(c.nroIncidente!=null?c.nroIncidente:'—')))), monto:Number(c.precioFinal)||0 }); });
-    rep.corporativos=corpVistos.size;
-    const pids=Object.keys(grupos);
-    for(const pid of pids){
-      const g=grupos[pid];
+    const socMap={}; socSnap.docs.forEach(d=>{ socMap[d.id]={id:d.id,...d.data()}; });
+    const empMap={}; empSnap.docs.forEach(d=>{ empMap[d.id]={id:d.id,...d.data()}; });
+    const empresasYaFacturadas=new Set(facSnap.docs.map(d=>d.data()).filter(f=>f.clienteTipo==='empresa').map(f=>f.clienteId)); // no duplicar el fijo
+    // Resuelve el destinatario de un abono/cargo desde su socio. null = corporativo SIN facturarA (RED → excluido).
+    const destinoDe=(socioId)=>{
+      const s=socMap[socioId]; const fa=s&&s.facturarA;
+      if(fa && fa.tipo==='empresa'){ const emp=empMap[fa.empresaId]; return { key:'e:'+fa.empresaId, tipo:'empresa', empresaId:fa.empresaId, razonSocial:fa.razonSocial||(emp&&emp.razonSocial)||'' }; }
+      if(s && s.tipoAfiliado==='corporativo') return null;
+      return { key:'p:'+(s?s.personaId:''), tipo:'persona' };
+    };
+    const grupos={}; const corpExcl=new Set();
+    const push=(dest, base, item)=>{ const g=grupos[dest.key]||(grupos[dest.key]=Object.assign({items:[]},base)); g.items.push(item); };
+    abSnap.docs.forEach(d=>{ const a=d.data(); if(a.estado==='anulado') return;
+      const dest=destinoDe(a.socioId); if(!dest){ corpExcl.add(a.socioId); return; }
+      if(a.estado!=='generado'||a.facturaId) return;
+      if(dest.tipo==='persona' && !a.personaId) return;
+      const item={ tipo:'abono', refId:d.id, monto:Number(a.precioFinal)||0,
+        descripcion: dest.tipo==='empresa' ? ('Abono '+(a.socioNombre||'')+' · '+(a.planNombre||'')+' '+(a.periodo||'')).trim() : ('Abono '+(a.planNombre||'')+' '+(a.periodo||'')).trim() };
+      if(dest.tipo==='empresa') push(dest,{clienteTipo:'empresa',clienteId:dest.empresaId,nombre:dest.razonSocial,clienteNombre:dest.razonSocial},item);
+      else push(dest,{personaId:a.personaId,socioId:a.socioId||null,nombre:a.socioNombre||'',numeroAfiliado:a.numeroAfiliado||null},item);
+    });
+    cgSnap.docs.forEach(d=>{ const c=d.data(); if(c.estado==='anulado') return;
+      const dest=destinoDe(c.socioId); if(!dest){ corpExcl.add(c.socioId); return; }
+      if(c.estado!=='generado'||c.facturaId) return;
+      if(dest.tipo==='persona' && !c.personaId) return;
+      const item={ tipo:'cargo', refId:d.id, monto:Number(c.precioFinal)||0, descripcion:((c.tarifaNombre||'—')+' · '+(c.nroIncidenteFmt||('INC '+(c.nroIncidente!=null?c.nroIncidente:'—')))) };
+      if(dest.tipo==='empresa') push(dest,{clienteTipo:'empresa',clienteId:dest.empresaId,nombre:dest.razonSocial,clienteNombre:dest.razonSocial},item);
+      else push(dest,{personaId:c.personaId,socioId:c.socioId||null,nombre:c.pacNombre||'',numeroAfiliado:null},item);
+    });
+    // E-3: pasada de CONVENIOS FIJOS — ítem sintético (SIN refId) por empresa fija activa con ≥1 socio activo que le
+    // factura, y que no tenga ya factura este período (idempotencia — el sintético no deja marca facturaId).
+    Object.values(empMap).forEach(emp=>{
+      if(emp.activo===false || !(emp.convenio && emp.convenio.modo==='fijo') || empresasYaFacturadas.has(emp.id)) return;
+      const tieneSocios=socSnap.docs.some(x=>{ const s=x.data(); return s.activo!==false && s.facturarA && s.facturarA.tipo==='empresa' && s.facturarA.empresaId===emp.id; });
+      if(!tieneSocios) return;
+      push({key:'e:'+emp.id}, {clienteTipo:'empresa',clienteId:emp.id,nombre:emp.razonSocial||'',clienteNombre:emp.razonSocial||''},
+        { tipo:'convenio', descripcion:('Convenio mensual '+(emp.razonSocial||'')+' · '+periodo), monto:Number(emp.convenio.montoMensual)||0 });
+    });
+    for(const key of Object.keys(grupos)){
+      const g=grupos[key];
       if(!g.items.length) continue;
       const total=g.items.reduce((s,it)=>s+(Number(it.monto)||0),0);
       try{
-        // F-2 (calco de dspCrear): numeración atómica. El contador se incrementa Y la factura se crea en la MISMA
-        // transacción → nunca un número sin factura ni una factura sin número. nroComprobante congelado al emitir.
+        // F-2: numeración atómica (contador + factura en la MISMA tx). E-3: factura polimórfica (persona | empresa).
         const counterRef=db.collection('contadores').doc('facturas');
         const facRef=db.collection('facturas').doc();
         await db.runTransaction(async tx=>{
-          const cs=await tx.get(counterRef);
-          const ultimo=cs.exists?(cs.data().ultimo||0):0;
-          const next=ultimo+1;
+          const cs=await tx.get(counterRef); const ultimo=cs.exists?(cs.data().ultimo||0):0; const next=ultimo+1;
           tx.set(counterRef,{ultimo:next,actualizadoEn:FV()},{merge:true});
-          tx.set(facRef,{
-            periodo, personaId:pid, socioId:g.socioId||null, nombre:g.nombre||'', numeroAfiliado:g.numeroAfiliado||null,
-            items:g.items, total, estado:'emitida', emitidaEn:FV(), emitidaPor:S.user.uid,
-            nroComprobante:fmtComprobante(next,year)
-          });
+          const doc = g.clienteTipo==='empresa'
+            ? { periodo, nombre:g.nombre||'', items:g.items, total, estado:'emitida', emitidaEn:FV(), emitidaPor:S.user.uid, nroComprobante:fmtComprobante(next,year), clienteTipo:'empresa', clienteId:g.clienteId, clienteNombre:g.clienteNombre||g.nombre||'' } // sin personaId (regla E-1)
+            : { periodo, personaId:g.personaId, socioId:g.socioId||null, nombre:g.nombre||'', numeroAfiliado:g.numeroAfiliado||null, items:g.items, total, estado:'emitida', emitidaEn:FV(), emitidaPor:S.user.uid, nroComprobante:fmtComprobante(next,year) };
+          tx.set(facRef, doc);
         });
-        for(const it of g.items){ // vincular facturaId en cada ítem (integridad: ya no re-facturable/editable)
+        for(const it of g.items){ // vincular facturaId — SALTA los ítems sintéticos (sin refId, ej. convenio fijo)
+          if(!it.refId) continue;
           const col= it.tipo==='abono' ? 'abonos' : 'cargos';
           try{ await db.collection(col).doc(it.refId).set({ facturaId:facRef.id },{merge:true}); }
           catch(e){ console.warn('[generarFacturas] no se pudo vincular',it.tipo,it.refId,e); }
         }
-        rep.facturas++; rep.items+=g.items.length;
-      }catch(e){ rep.errores++; console.warn('[generarFacturas] fallo persona',pid,e); }
+        rep.facturas++; rep.items+=g.items.length; if(g.clienteTipo==='empresa') rep.facEmpresa++; else rep.facPersona++;
+      }catch(e){ rep.errores++; console.warn('[generarFacturas] fallo grupo',key,e); }
     }
-    rep.sinPend = Math.max(0, scopePersonas.size - pids.length); // personas con historial en scope pero nada pendiente
     audit('facturas_generadas','facturas',periodo,rep.facturas+' facturas');
-    S.fac.reportF=`Período <b>${esc(periodo)}</b> — Facturas emitidas: <b>${rep.facturas}</b> · Items facturados: ${rep.items} · Personas sin pendientes: ${rep.sinPend} · Corporativos excluidos: <b>${rep.corporativos}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
+    S.fac.reportF=`Período <b>${esc(periodo)}</b> — Facturas: <b>${rep.facturas}</b> (persona ${rep.facPersona} · empresa ${rep.facEmpresa}) · Items: ${rep.items} · Corporativos sin destinatario (excluidos): <b>${corpExcl.size}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar las facturas: '+(e.message||e)); }
 }
@@ -4427,7 +4468,9 @@ function facComprobante(){
   const f=(S.fac.facturas||[]).find(x=>x.id===S.fac.comprobante);
   if(!f) return `<div class="card">Comprobante no encontrado.<br><button class="btn-o" onclick="facCerrarComprobante()" style="margin-top:.6rem">Volver</button></div>`;
   const items=(f.items||[]).map(it=>`<tr><td style="padding:.4rem .2rem;border-bottom:1px solid #eee">${esc(it.descripcion||it.tipo||'—')}</td><td style="padding:.4rem .2rem;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">${facMoney(it.monto)}</td></tr>`).join('');
-  const afil=f.numeroAfiliado?('N° socio '+esc(f.numeroAfiliado)):'Particular';
+  const afil = f.clienteTipo==='empresa'
+    ? ('Convenio N° '+esc(((S.fac.empresas||[]).find(x=>x.id===f.clienteId)||{}).numeroConvenio||'—')) // E-3: membrete de empresa
+    : (f.numeroAfiliado?('N° socio '+esc(f.numeroAfiliado)):'Particular');
   return `<style>@media print{ body *{visibility:hidden!important} .cbte-sheet,.cbte-sheet *{visibility:visible!important} .cbte-sheet{position:absolute;left:0;top:0;width:100%;padding:0!important} .no-print{display:none!important} }</style>
   <div style="display:flex;gap:.4rem;margin-bottom:.8rem" class="no-print">
     <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="facCerrarComprobante()">← Volver</button>
@@ -4514,7 +4557,7 @@ function cobPanel(){
   const tab=(id,lbl)=>`<button onclick="cobSub('${id}')" style="flex:1;padding:.45rem .3rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.68rem;font-weight:600;letter-spacing:.02em;cursor:pointer">${lbl}</button>`;
   const head=`
   <div class="panel-h"><b>Cobranza</b><span class="live-tag">en vivo</span></div>
-  <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${tab('porcobrar','Por cobrar')}${tab('deuda','Deuda por socio')}</div>
+  <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${tab('porcobrar','Por cobrar')}${tab('deuda','Deuda por cliente')}</div>
   <div id="cob-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
   const body = sub==='deuda' ? cobDeudaView() : cobPorCobrarView();
   return head + body;
@@ -4529,7 +4572,7 @@ function cobPorCobrarView(){
     .sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'') || String(a.nroComprobante||'').localeCompare(String(b.nroComprobante||'')));
   const rows = emit.length ? emit.map(f=>{
     const pagado=cobPagadoDe(f.id); const saldo=(Number(f.total)||0)-pagado; const parcial=pagado>0;
-    const afil=f.numeroAfiliado?('N° '+esc(f.numeroAfiliado)):'particular';
+    const afil = f.clienteTipo==='empresa' ? 'EMPRESA' : (f.numeroAfiliado?('N° '+esc(f.numeroAfiliado)):'particular'); // E-3: empresa sin slot N° socio
     return `<div class="lr" style="cursor:pointer" onclick="cobVerFactura('${f.id}')"><div class="lrb"><div class="lrn">${esc(f.nombre||'—')}</div>
       <div class="lrs">${esc(f.nroComprobante||'—')} · ${afil} · Total ${facMoney(f.total)}${parcial?(' · Pagado '+facMoney(pagado)):''}</div></div>
       <div style="text-align:right"><div style="font-size:.7rem;color:var(--ink3)">saldo</div><div style="font-weight:800;color:var(--r)">${facMoney(saldo)}</div></div>
@@ -4544,7 +4587,9 @@ function cobFacturaDetalle(){
   const f=(S.cob.facturas||[]).find(x=>x.id===S.cob.fedit); if(!f) return cobPorCobrarView();
   const pagos=cobPagosDe(f.id).slice().sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')));
   const pagado=cobPagadoDe(f.id); const saldo=(Number(f.total)||0)-pagado;
-  const afil=f.numeroAfiliado?('N° socio '+esc(f.numeroAfiliado)):'Particular';
+  const afil = f.clienteTipo==='empresa'
+    ? 'Empresa' // E-3: en Cobranza la razón social ya va en el header (f.nombre); cobranza no carga empresas (no depende de S.fac)
+    : (f.numeroAfiliado?('N° socio '+esc(f.numeroAfiliado)):'Particular');
   const histRows = pagos.length ? pagos.map(p=>{
     const anul=p.estado==='anulado';
     const medio=({efectivo:'Efectivo',transferencia:'Transferencia',deposito:'Depósito'})[p.medio]||p.medio||'—';
@@ -4581,14 +4626,16 @@ function cobFacturaDetalle(){
 function cobDeudaView(){
   if(S.cob.facturas===null || S.cob.pagos===null) return `<div class="card">Cargando…</div>`;
   const emit=(S.cob.facturas||[]).filter(f=>f.estado==='emitida');
-  const porSocio={};
-  emit.forEach(f=>{ const k=f.socioId||f.personaId||f.id; const saldo=(Number(f.total)||0)-cobPagadoDe(f.id); if(saldo<=0) return;
-    if(!porSocio[k]) porSocio[k]={nombre:f.nombre||'—', numeroAfiliado:f.numeroAfiliado||null, deuda:0, n:0}; porSocio[k].deuda+=saldo; porSocio[k].n++; });
-  const list=Object.values(porSocio).sort((a,b)=>b.deuda-a.deuda);
+  const porCliente={}; // E-3: agrupa por CLIENTE — empresa por clienteId (razón social), persona por socio/persona.
+  emit.forEach(f=>{ const saldo=(Number(f.total)||0)-cobPagadoDe(f.id); if(saldo<=0) return;
+    const esEmp=f.clienteTipo==='empresa'; const k=esEmp?('e:'+f.clienteId):('p:'+(f.socioId||f.personaId||f.id));
+    if(!porCliente[k]) porCliente[k]={ nombre:f.nombre||'—', ref:esEmp?'convenio':(f.numeroAfiliado||null), esEmp, deuda:0, n:0 };
+    porCliente[k].deuda+=saldo; porCliente[k].n++; });
+  const list=Object.values(porCliente).sort((a,b)=>b.deuda-a.deuda);
   if(!list.length) return `<div class="card"><div style="font-size:.82rem;color:var(--ink3);padding:.4rem">Nadie con deuda. Todo al día. 🎉</div></div>`;
   const total=list.reduce((s,x)=>s+x.deuda,0);
-  const rows=list.map(x=>`<div class="ir"><span class="il">${esc(x.nombre)}${x.numeroAfiliado?(' · N° '+esc(x.numeroAfiliado)):''} <span style="color:var(--ink3);font-size:.7rem">(${x.n} fact.)</span></span><span class="iv" style="font-weight:700;color:var(--r)">${facMoney(x.deuda)}</span></div>`).join('');
-  return `<div class="card" style="background:var(--bg);display:flex;justify-content:space-between;align-items:center"><span style="font-size:.78rem;font-weight:700">Deuda total (${list.length} socios)</span><span style="font-weight:800;color:var(--r)">${facMoney(total)}</span></div>
+  const rows=list.map(x=>`<div class="ir"><span class="il">${esc(x.nombre)}${x.esEmp?' <span style="font-size:.58rem;font-weight:800;color:var(--r)">EMPRESA</span>':(x.ref?(' · N° '+esc(x.ref)):'')} <span style="color:var(--ink3);font-size:.7rem">(${x.n} fact.)</span></span><span class="iv" style="font-weight:700;color:var(--r)">${facMoney(x.deuda)}</span></div>`).join('');
+  return `<div class="card" style="background:var(--bg);display:flex;justify-content:space-between;align-items:center"><span style="font-size:.78rem;font-weight:700">Deuda total (${list.length} cliente${list.length===1?'':'s'})</span><span style="font-weight:800;color:var(--r)">${facMoney(total)}</span></div>
     <div class="card">${rows}</div>`;
 }
 
@@ -4609,6 +4656,9 @@ async function registrarPago(fid){
   const pagadoPrev=cobPagadoDe(fid); const saldo=(Number(f.total)||0)-pagadoPrev;
   if(monto>saldo+0.001){ cobErr('El monto supera el saldo ('+facMoney(saldo)+').'); return; }
   const year=new Date().getFullYear();
+  // E-3: el pagador DERIVA del cliente de la factura (C-1 modeló pagadorTipo 'empresa'). Persona → personaId; empresa → clienteId.
+  const pagadorTipo = f.clienteTipo==='empresa' ? 'empresa' : 'persona';
+  const pagadorId   = f.clienteTipo==='empresa' ? (f.clienteId||null) : (f.personaId||null);
   try{
     const counterRef=db.collection('contadores').doc('recibos');
     const pagoRef=db.collection('pagos').doc();
@@ -4620,7 +4670,7 @@ async function registrarPago(fid){
       reciboAsignado=fmtRecibo(next,year);
       tx.set(counterRef,{ultimo:next,actualizadoEn:FV()},{merge:true});
       tx.set(pagoRef,{
-        pagadorId:f.personaId||null, pagadorTipo:'persona', facturaId:fid, personaId:f.personaId||null,
+        pagadorId, pagadorTipo, facturaId:fid, personaId:f.personaId||null,
         monto, fecha, medio, reciboNro:reciboAsignado, nota:nota||null,
         estado:'registrado', registradoEn:FV(), registradoPor:S.user.uid
       });
@@ -4630,7 +4680,7 @@ async function registrarPago(fid){
     // round-trip, y el snapshot que llega después lo salta upd() con el detalle abierto (cobFormOpen). Empujamos
     // el pago al estado local para que el render inmediato muestre el saldo/historial nuevos; el snapshot reconcilia.
     if(S.cob && Array.isArray(S.cob.pagos)){
-      S.cob.pagos.push({ id:pagoRef.id, pagadorId:f.personaId||null, pagadorTipo:'persona', facturaId:fid, personaId:f.personaId||null, monto, fecha, medio, reciboNro:reciboAsignado, nota:nota||null, estado:'registrado', registradoPor:S.user.uid });
+      S.cob.pagos.push({ id:pagoRef.id, pagadorId, pagadorTipo, facturaId:fid, personaId:f.personaId||null, monto, fecha, medio, reciboNro:reciboAsignado, nota:nota||null, estado:'registrado', registradoPor:S.user.uid });
     }
     // Flip derivado: si con este pago se salda, factura emitida->pagada (invariante client-side).
     if(pagadoPrev+monto >= (Number(f.total)||0)-0.001){
@@ -4714,7 +4764,7 @@ function afPanel(){
     const inact=s.activo===false;
     const meta=['N° '+esc(s.numeroAfiliado||'—'), '· '+afPlanNom(s.planId), '· desde '+afFmtFecha(s.vigenteDesde), '· '+esc(s.tipoAfiliado||'—'), inact?'· inactivo':''].filter(Boolean).join(' ');
     const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="afEditar('${s.id}')">Editar</button><button class="${btn}" onclick="afBaja('${s.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
-    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin socios${showInact?'':' activos'}</div>`;
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="afShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
   const head=`<div class="panel-h"><b>Afiliados</b><span class="live-tag">en vivo</span></div>`;
@@ -4883,6 +4933,7 @@ function afFormNew(){
     </div>
     <div class="field"><label>Vigente desde</label><input id="af-vig" type="date" value="${esc(draft.vig||afTsToInput(firebase.firestore.Timestamp.now()))}"></div>
     <div class="field"><label>Carencia hasta (opcional)</label><input id="af-car" type="date" value="${esc(draft.car||'')}"></div>
+    ${facturarAField(draft.facturarA||null,'af-facturara')}
     <button class="btn-r" onclick="afGuardarNuevo()">Guardar socio</button>` : '';
   return `<div class="card"><div class="ch">Nuevo socio</div>
     ${convBanner}<div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div>
@@ -4998,6 +5049,9 @@ async function afGuardarNuevo(){
       }));
       socioId=socioRef.id; numeroFinal=r.correlativo;
     }
+    // E-2: facturarA (destinatario de facturación) — SOLO titular (el dependiente factura por su titular). Ortogonal
+    // a la membresía corporativa (empresaId): NO se sincronizan. Solo escribe si se eligió una empresa válida.
+    if(modo!=='dependiente' && socioId){ const fa=leerFacturarA('af-facturara'); if(fa && !fa.__err){ try{ await db.collection('socios').doc(socioId).set({ facturarA:fa },{merge:true}); }catch(_){} } }
     // Geocode-on-save: FUERA de la transacción de numeración (la tx no espera red). No bloquea el alta.
     if(geoParams){ try{ await afGeocodePersona(geoParams.personaId, geoParams.direccion, geoParams.sindir); }catch(_){} }
     // Espejo eager pacientes/{personaId} (Tramo 4): hace al socio BUSCABLE en el despacho. FUERA de la tx.
@@ -5033,7 +5087,7 @@ function empPanel(){
     const n=(S.af.socios||[]).filter(s=>s.empresaId===e.id).length;
     const tl=(e.tipo==='area_protegida')?'Área protegida':'Corporativo';
     const inact=e.activo===false;
-    return `<div class="lr"${inact?' style="opacity:.5"':''}><div class="lrb"><div class="lrn">${esc(e.razonSocial||'—')}</div><div class="lrs">N° ${esc(e.numeroConvenio||'—')} · ${tl} · ${n} integrante${n===1?'':'s'}${inact?' · inactiva':''}</div></div><button class="${btn}" onclick="empEditar('${e.id}')">Editar</button></div>`;
+    return `<div class="lr"${inact?' style="opacity:.5"':''}><div class="lrb"><div class="lrn">${esc(e.razonSocial||'—')} ${convenioChip(e.convenio)}</div><div class="lrs">N° ${esc(e.numeroConvenio||'—')} · ${tl} · ${n} integrante${n===1?'':'s'}${inact?' · inactiva':''}</div></div><button class="${btn}" onclick="empEditar('${e.id}')">Editar</button></div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin empresas todavía.</div>`;
   return `<div class="panel-h"><b>Empresas / convenios</b><span class="live-tag">en vivo</span></div>
     <button class="btn-r" onclick="empNuevo(false)" style="margin-bottom:.7rem">+ Nueva empresa</button>
@@ -5070,7 +5124,17 @@ function empFormEdit(id){
     <div class="field"><label>Plan por defecto</label><select id="emp-plan">${empPlanOpts(e.planIdDefault)}</select></div>
     <div class="field"><label>Estado</label><select id="emp-activo"><option value="si" ${e.activo!==false?'selected':''}>Activa</option><option value="no" ${e.activo===false?'selected':''}>Inactiva</option></select></div>
     <button class="btn-r" onclick="empGuardarEdit('${id}')">Guardar cambios</button>
-    <button class="btn-o" onclick="empSet({view:'list'})">Cancelar</button></div>`;
+    ${puedeConfig() ? `
+    <div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)">Convenio de cobro <span style="text-transform:none;color:var(--ink3)">(contable)</span></div>
+    <div id="emp-conv-err" class="err" style="display:none;margin-bottom:.4rem"></div>
+    <div class="field"><label>Modo</label><select id="emp-conv-modo" onchange="empConvModoChange(this.value)">
+      <option value="" ${!(e.convenio&&e.convenio.modo)?'selected':''}>— sin cargar —</option>
+      <option value="fijo" ${e.convenio&&e.convenio.modo==='fijo'?'selected':''}>Fijo mensual (monto pactado)</option>
+      <option value="per_capita" ${e.convenio&&e.convenio.modo==='per_capita'?'selected':''}>Per cápita (Σ abonos de sus socios)</option></select></div>
+    <div class="field" id="emp-conv-monto-grp" style="display:${e.convenio&&e.convenio.modo==='fijo'?'':'none'}"><label>Monto mensual</label><input id="emp-conv-monto" type="number" min="0" step="0.01" value="${e.convenio&&e.convenio.modo==='fijo'?esc(e.convenio.montoMensual):''}"></div>
+    <button class="btn-r" onclick="empGuardarConvenio('${id}')">Guardar convenio</button>`
+    : `<div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem">${convenioChip(e.convenio)} <span style="font-size:.66rem;color:var(--ink3)">· lo edita el contable</span></div>`}
+    <button class="btn-o" onclick="empSet({view:'list'})" style="margin-top:.5rem">Cancelar</button></div>`;
 }
 async function empGuardarNuevo(){
   if(!puedeAfil()) return; empErr('');
@@ -5097,6 +5161,54 @@ async function empGuardarEdit(id){
     empSet({view:'list'});
   }catch(e){ empErr('No se pudo guardar: '+(e.message||e)); }
 }
+
+/* ===================== E-2: convenio de empresa + facturarA del socio (superficies de carga) ===================== */
+// Etiqueta y chip del convenio (read-only para todos; el EDITOR es aparte, solo puedeConfig).
+function convenioLbl(c){ return (!c || !c.modo) ? '— sin cargar' : (c.modo==='fijo' ? ('fijo '+facMoney(c.montoMensual)) : 'per cápita'); }
+function convenioChip(c){ const set=!!(c && c.modo); return `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:${set?'var(--r)':'transparent'};color:${set?'#fff':'var(--ink3)'};border:${set?'none':'1px solid var(--border2)'}">Convenio: ${esc(convenioLbl(c))}</span>`; }
+function empConvErr(t){ const e=document.getElementById('emp-conv-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function empConvModoChange(v){ const g=document.getElementById('emp-conv-monto-grp'); if(g) g.style.display=(v==='fijo')?'':'none'; } // DOM puro
+// Editor del convenio: SOLO puedeConfig (el gate contable de E-1). Guarda SOLO convenio+actualizadoEn (no toca identidad).
+async function empGuardarConvenio(id){
+  if(!puedeConfig()) return; empConvErr('');
+  const modo=document.getElementById('emp-conv-modo')?.value||'';
+  if(!['fijo','per_capita'].includes(modo)){ empConvErr('Elegí un modo de convenio.'); return; } // espejo client-side de convenioOk
+  let convenio;
+  if(modo==='fijo'){
+    const monto=Number(document.getElementById('emp-conv-monto')?.value);
+    if(!(monto>0)){ empConvErr('El monto mensual debe ser mayor a 0.'); return; }
+    convenio={ modo:'fijo', montoMensual:monto };
+  } else { convenio={ modo:'per_capita' }; }
+  // update() REEMPLAZA el mapa 'convenio' entero. Con set({..},{merge:true}) los mapas anidados se FUSIONAN →
+  // fijo->per_capita dejaría montoMensual residual y convenioOk() rebotaría. El error del catch es persistente
+  // (afFormOpen bloquea el re-render por snapshot mientras el form está abierto).
+  try{ await db.collection('empresas').doc(id).update({ convenio, actualizadoEn:FV() }); audit('empresa_convenio','empresa',id,convenioLbl(convenio)); empSet({view:'list'}); }
+  catch(e){ empConvErr('No se pudo guardar el convenio: '+(e.message||e)); } // empConvErr escribe el DOM directo; afFormOpen impide el re-render que lo borraría
+}
+// facturarA: campo "Facturar a" reusable (alta + edición). prefix -> ids `${prefix}-tipo/-emp/-grp`. Ortogonal a la membresía corporativa.
+function facturarAField(fa, prefix){
+  const emp=!!(fa && fa.tipo==='empresa');
+  const opts=(S.af.empresas||[]).filter(e=>e.activo!==false).map(e=>`<option value="${e.id}" ${emp&&fa.empresaId===e.id?'selected':''}>${esc(e.razonSocial||'—')} (N° ${esc(e.numeroConvenio||'—')})</option>`).join('');
+  return `<div class="field"><label>Facturar a</label>
+      <select id="${prefix}-tipo" onchange="afFacturarATipoChange(this.value,'${prefix}-grp')">
+        <option value="persona" ${!emp?'selected':''}>El socio (persona)</option>
+        <option value="empresa" ${emp?'selected':''}>Una empresa</option></select></div>
+    <div class="field" id="${prefix}-grp" style="display:${emp?'':'none'}"><label>Empresa destinataria</label>
+      <select id="${prefix}-emp">${opts||'<option value="">— sin empresas activas —</option>'}</select>
+      <div style="font-size:.66rem;color:var(--ink3);margin-top:.2rem">Independiente del tipo de afiliado: cualquier plan puede facturarse a una empresa.</div></div>`;
+}
+function afFacturarATipoChange(v, grpId){ const g=document.getElementById(grpId); if(g) g.style.display=(v==='empresa')?'':'none'; } // DOM puro
+// Lee el campo. Devuelve null (=persona, ausencia) | {tipo:'empresa',empresaId,razonSocial} | {__err} si empresa sin elegir.
+function leerFacturarA(prefix){
+  const tipo=document.getElementById(prefix+'-tipo')?.value||'persona';
+  if(tipo!=='empresa') return null;
+  const empId=document.getElementById(prefix+'-emp')?.value||'';
+  if(!empId) return { __err:'Elegí la empresa destinataria de la facturación.' };
+  const emp=(S.af.empresas||[]).find(e=>e.id===empId);
+  return { tipo:'empresa', empresaId:empId, razonSocial:(emp&&emp.razonSocial)||'' }; // razonSocial denorm al momento
+}
+function facturarAChip(fa){ return (fa && fa.tipo==='empresa') ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:var(--ink,#333);color:#fff">Factura a: ${esc(fa.razonSocial||'empresa')}</span>` : ''; }
+
 // Muestra/oculta los grupos del alta según el tipo (DOM puro, sin render → no borra lo tipeado).
 function afTipoChange(v){
   const corp=(v!=='directo');
@@ -5150,6 +5262,7 @@ function afFormEdit(){
     <div class="field"><label>Vigente desde</label><input id="af-e-vig" type="date" value="${afTsToInput(s.vigenteDesde)}"></div>
     <div class="field"><label>Carencia hasta (opcional)</label><input id="af-e-car" type="date" value="${afTsToInput(s.carenciaHasta)}"></div>
     <div class="field"><label>Estado de alta</label><select id="af-e-activo"><option value="si" ${s.activo!==false?'selected':''}>Activo</option><option value="no" ${s.activo===false?'selected':''}>Baja lógica</option></select></div>
+    ${facturarAField(s.facturarA||null,'af-e-facturara')}
     <button class="btn-r" onclick="afGuardarEdit('${s.id}')">Guardar</button>
     <button class="btn-o" onclick="navBack()">Cancelar</button>
   </div>`;
@@ -5170,6 +5283,10 @@ async function afGuardarEdit(id){
     activo:(document.getElementById('af-e-activo')?.value||'si')==='si',
     actualizadoEn:FV()
   };
+  // E-2: facturarA — empresa => set; persona (ausencia) => delete (vuelve al default persona). Ortogonal a empresaId.
+  const fa=leerFacturarA('af-e-facturara');
+  if(fa && fa.__err){ afErr(fa.__err); return; }
+  data.facturarA = fa ? fa : firebase.firestore.FieldValue.delete();
   try{
     await db.collection('socios').doc(id).set(data,{merge:true});
     // Punto 3 (Tramo 3): si se cargó una dirección nueva, actualizar personas.direccion + re-geocodificar.

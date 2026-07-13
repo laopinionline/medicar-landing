@@ -1071,7 +1071,11 @@ function homeView(){
       const capNota = fac.length>CAP ? `<div style="padding:.6rem 1rem;font-size:.7rem;color:var(--gris)">Mostrando los últimos ${CAP}.</div>` : '';
       inner = rows + capNota;
     }
-    comprobantesSec = `<div class="sec"><div class="sec-h">Mis comprobantes</div><div class="card">${inner}
+    // E-3: si la facturación del socio se emite a una empresa, avisarlo (no recibe facturas propias nuevas).
+    const notaEmpresa = (socio.facturarA && socio.facturarA.tipo==='empresa')
+      ? `<div style="padding:.75rem 1rem;font-size:.76rem;color:var(--tinta);background:#eef4ff;border-bottom:1px solid var(--linea)">Tu facturación se emite a <b>${esc(socio.facturarA.razonSocial||'tu empresa')}</b>.</div>`
+      : '';
+    comprobantesSec = `<div class="sec"><div class="sec-h">Mis comprobantes</div><div class="card">${notaEmpresa}${inner}
       <div style="padding:.75rem 1rem;font-size:.7rem;color:var(--gris);line-height:1.45;border-top:1px solid var(--linea)">Comprobantes internos de tu cuenta — no son facturas fiscales. Tocá uno para ver el detalle. Los pagos se coordinan con MEDICAR.</div>
     </div></div>`;
   }
