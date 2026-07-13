@@ -163,6 +163,18 @@ input{font-family:inherit}
 .result-t{font-weight:800;font-size:1.05rem}
 .result-s{font-size:.86rem;line-height:1.5;margin-top:.35rem}
 .result .call{display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:.9rem;background:var(--rojo);color:#fff;font-weight:800;padding:.8rem;border-radius:12px;text-decoration:none}
+/* PWA-1: botón "i" educativo por signo (círculo visible 18px + hit-area ≥44px vía ::after) + sheet */
+.sig-i{appearance:none;border:none;cursor:pointer;font-style:italic;font-weight:800;font-size:.72rem;color:var(--gris);background:#e8e8ea;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;line-height:1;position:relative;flex:none}
+.sig-i::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px}
+.sig-i:focus-visible{outline:2px solid var(--rojo);outline-offset:2px}
+.sig-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:flex-end;justify-content:center}
+.sig-sheet{background:#fff;width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:1.1rem 1.15rem 1.6rem;box-shadow:0 -8px 30px rgba(0,0,0,.2);max-height:80vh;overflow:auto}
+.sig-sheet-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem}
+.sig-sheet-h b{font-size:1.05rem;color:var(--tinta)}
+.sig-close{appearance:none;border:none;background:#f2f2f2;width:44px;height:44px;border-radius:50%;font-size:1rem;color:var(--gris);cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none}
+.sig-sec{margin-top:.75rem}
+.sig-sec-t{font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--gris);margin-bottom:.2rem}
+.sig-sec-b{font-size:.9rem;line-height:1.5;color:var(--tinta)}
 .reg-hint{display:flex;gap:.55rem;align-items:flex-start;background:var(--nieve);border:1px solid var(--linea);border-radius:12px;padding:.7rem .8rem;margin-top:.6rem;font-size:.78rem;color:var(--gris);line-height:1.45}
 .pref-row{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.7rem;padding:0 .2rem}
 .pref-row select{padding:.45rem .55rem;border:1.5px solid var(--linea);border-radius:9px;font-size:.85rem;background:#fff;color:var(--tinta)}
@@ -1410,6 +1422,16 @@ const PARAMS = [
   { k:'temp', lbl:'Temperatura',         uni:'°C',   min:30, max:44,  step:'0.1' },
   { k:'spo2', lbl:'Saturación (SpO₂)',   uni:'%',    min:50, max:100, step:'1' }
 ];
+/* PWA-1: textos educativos GENÉRICOS por signo (botón "i"). Contenido FIJO, idéntico para todos, indiferente
+   al valor tipeado. N3 INVIOLABLE: NO rangos ni valores de corte, NO interpretar los datos del socio, solo
+   "qué es" + técnica de medición (sin números). El semáforo verde/amarillo de enviarParams es el ÚNICO feedback.
+   // PENDIENTE REVISIÓN DIRECTOR MÉDICO — pre-lanzamiento (misma tanda del catálogo clínico). */
+const SIGNOS_INFO = {
+  fc:   { titulo:'Frecuencia cardíaca', queEs:'Es la cantidad de veces que late tu corazón por minuto.', comoMedirlo:'Sentate y descansá unos minutos antes de medir. Apoyá dos dedos sobre la muñeca o el costado del cuello hasta sentir el pulso y contá los latidos. Evitá medir justo después de un esfuerzo, del café o del cigarrillo.' },
+  sis:  { titulo:'Presión arterial (sistólica)', queEs:'Es la fuerza con la que la sangre empuja las paredes de tus arterias cuando el corazón late.', comoMedirlo:'Sentate con la espalda apoyada y los pies en el piso, sin cruzar las piernas. Apoyá el brazo relajado a la altura del corazón. Quedate quieto y en silencio mientras el tensiómetro mide. Evitá café o cigarrillo en la media hora previa.' },
+  temp: { titulo:'Temperatura corporal', queEs:'Es el calor de tu cuerpo, una señal de cómo está funcionando.', comoMedirlo:'Usá el termómetro en el lugar que indique su instrucción (axila, boca u oído). Si es axilar, secá la piel y mantené el brazo pegado al cuerpo hasta que el termómetro avise. Evitá medir apenas salís de bañarte o después de bebidas muy frías o calientes.' },
+  spo2: { titulo:'Saturación de oxígeno (SpO₂)', queEs:'Indica cuánto oxígeno está transportando tu sangre.', comoMedirlo:'Colocá el oxímetro en la punta de un dedo limpio, sin esmalte y que no esté frío. Apoyá la mano y quedate quieto unos segundos hasta que el número se estabilice. Si tenés las manos frías, entibiálas antes de medir.' }
+};
 function homeParamsBlock(c){
   return `<div class="sec">
     <div class="sec-h">Registrar mis signos</div>
@@ -1427,6 +1449,25 @@ function abrirParams(){
 }
 function cerrarParams(){ S.par=null; S.view='home'; render(); }
 function parSync(){ if(!S.par) return; PARAMS.forEach(p=>{ const e=el('par-'+p.k); if(e) S.par.vals[p.k]=e.value; }); }
+// PWA-1: popover educativo del botón "i". DOM PURO: NO llama render() ni toca S.par → no pierde lo tipeado.
+// Solo lee SIGNOS_INFO (contenido fijo). Cierra por tap afuera, por ✕ y por Escape. Foco al abrir.
+function signoInfoAbrir(k){
+  const info=SIGNOS_INFO[k]; if(!info) return;
+  signoInfoCerrar();
+  const ov=document.createElement('div');
+  ov.id='sig-info-ov'; ov.className='sig-ov';
+  ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); ov.setAttribute('aria-label',info.titulo);
+  ov.innerHTML=`<div class="sig-sheet">
+      <div class="sig-sheet-h"><b>${esc(info.titulo)}</b><button type="button" class="sig-close" aria-label="Cerrar" onclick="signoInfoCerrar()">✕</button></div>
+      <div class="sig-sec"><div class="sig-sec-t">Qué es</div><div class="sig-sec-b">${esc(info.queEs)}</div></div>
+      <div class="sig-sec"><div class="sig-sec-t">Cómo medirlo</div><div class="sig-sec-b">${esc(info.comoMedirlo)}</div></div>
+    </div>`;
+  ov.addEventListener('click', e=>{ if(e.target===ov) signoInfoCerrar(); });       // tap fuera del sheet
+  ov.addEventListener('keydown', e=>{ if(e.key==='Escape') signoInfoCerrar(); });   // accesibilidad
+  document.body.appendChild(ov);
+  const c=ov.querySelector('.sig-close'); if(c) c.focus();
+}
+function signoInfoCerrar(){ const ov=document.getElementById('sig-info-ov'); if(ov) ov.remove(); }
 function paramsFormView(){
   // Confirmación tras enviar — SEMÁFORO SUAVE (verde/amarillo). NUNCA score, "rojo", ni diagnóstico.
   if(S.par&&S.par.done){
@@ -1448,7 +1489,7 @@ function paramsFormView(){
     </div>`;
   }
   const v=(S.par&&S.par.vals)||{};
-  const inputs=PARAMS.map(p=>`<div class="field" style="margin-top:.9rem"><label>${p.lbl} · ${p.uni}</label>
+  const inputs=PARAMS.map(p=>`<div class="field" style="margin-top:.9rem"><label style="display:flex;align-items:center;gap:.35rem">${p.lbl} · ${p.uni}<button type="button" class="sig-i" aria-label="Información sobre ${esc(p.lbl)}" onclick="signoInfoAbrir('${p.k}')">i</button></label>
     <input id="par-${p.k}" type="number" inputmode="decimal" step="${p.step}" min="${p.min}" max="${p.max}" value="${esc(v[p.k]||'')}" placeholder="opcional"></div>`).join('');
   return `<div class="home">
     <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Registrar mis signos</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Cerrar</button></div>
