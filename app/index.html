@@ -1623,6 +1623,7 @@ function calcEdad(f){
   return e<0?'—':e;
 }
 function fmtIncidente(n,year){ return `INC-${year}-${String(n).padStart(6,'0')}`; }
+function fmtComprobante(n,year){ return `FC-${year}-${String(n).padStart(6,'0')}`; } // F-2: comprobante interno, calco de INC- (contador continuo, año cosmético)
 function codEmoji(c){ return {rojo:'🔴',amarillo:'🟡',verde:'🟢',traslado:'🔵'}[c]||'•'; }
 function fechaDe(e){
   const t=e&&e.creadoEn;
@@ -3923,8 +3924,9 @@ function facTipoLbl(t){ return t==='por_km'?'Por km':'Fija'; }
 
 function facPanel(){
   if(!puedeConfig()) return `<div class="card"><div class="ch">Facturación</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para configurar facturación.</div></div>`;
-  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,abonos:null,facturas:null,edit:null,cedit:null,aedit:null,fedit:null,showInact:false,showAnul:false,showAnulAb:false,showAnulF:false,periodo:facPeriodoActual(),err:'',report:null,reportAb:null,reportF:null}; facAttach(); }
+  if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,abonos:null,facturas:null,edit:null,cedit:null,aedit:null,fedit:null,comprobante:null,showInact:false,showAnul:false,showAnulAb:false,showAnulF:false,periodo:facPeriodoActual(),err:'',report:null,reportAb:null,reportF:null}; facAttach(); }
   if(S.fac.err) return `<div class="card">No se pudo cargar facturación: ${esc(S.fac.err)}</div>`;
+  if(S.fac.comprobante) return facComprobante(); // F-2: comprobante imprimible a pantalla completa (sin tabs)
   const sub=S.fac.sub||'tarifas';
   const tab=(id,lbl)=>`<button onclick="facSub('${id}')" style="flex:1;padding:.45rem .3rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.68rem;font-weight:600;letter-spacing:.02em;cursor:pointer">${lbl}</button>`;
   const head=`
@@ -3934,7 +3936,7 @@ function facPanel(){
   const body = sub==='cargos' ? facCargosView() : (sub==='abonos' ? facAbonosView() : (sub==='facturas' ? facFacturasView() : facTarifasView()));
   return head + body;
 }
-function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; S.fac.cedit=null; S.fac.aedit=null; S.fac.fedit=null; render(); navPush(); }
+function facSub(id){ if(!S.fac) return; S.fac.sub=id; S.fac.edit=null; S.fac.cedit=null; S.fac.aedit=null; S.fac.fedit=null; S.fac.comprobante=null; render(); navPush(); }
 
 /* ---- Tarifas (ABM, baja lógica) ---- */
 function facTarifasView(){
@@ -4203,7 +4205,7 @@ async function generarAbonos(){
   facErr('');
   const periodo=(document.getElementById('fac-ab-periodo')?.value||S.fac.periodo||'').trim();
   if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
-  const rep={ generados:0, sinPlan:0, yaTenian:0, planInvalido:0, errores:0 };
+  const rep={ generados:0, sinPlan:0, yaTenian:0, planInvalido:0, corporativos:0, errores:0 };
   try{
     // SOLO LECTURA: socios activos + abonos de ese período (idempotencia por socioId+periodo).
     const [socSnap, abSnap] = await Promise.all([
@@ -4213,6 +4215,7 @@ async function generarAbonos(){
     const yaConAbono=new Set(abSnap.docs.map(d=>d.data().socioId)); // incluye anulados → no regenera
     for(const sd of socSnap.docs){
       const socio=sd.data(), socioId=sd.id;
+      if(socio.tipoAfiliado==='corporativo'){ rep.corporativos++; continue; } // P4: el corporativo se factura a la EMPRESA (F-4), no individual
       if(yaConAbono.has(socioId)){ rep.yaTenian++; continue; }
       if(!socio.planId){ rep.sinPlan++; continue; } // sin plan → no genera en 0
       let plan=null;
@@ -4238,7 +4241,7 @@ async function generarAbonos(){
       catch(e){ rep.errores++; console.warn('[generarAbonos] fallo',socioId,e); }
     }
     audit('abonos_generados','abonos',periodo,rep.generados+' generados');
-    S.fac.reportAb=`Período <b>${esc(periodo)}</b> — Generados: <b>${rep.generados}</b> · Sin plan: ${rep.sinPlan} · Ya tenían: ${rep.yaTenian} · Plan inválido: ${rep.planInvalido}${rep.errores?(' · Errores: '+rep.errores):''}`;
+    S.fac.reportAb=`Período <b>${esc(periodo)}</b> — Generados: <b>${rep.generados}</b> · Sin plan: ${rep.sinPlan} · Ya tenían: ${rep.yaTenian} · Plan inválido: ${rep.planInvalido} · Corporativos excluidos: <b>${rep.corporativos}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar los abonos: '+(e.message||e)); }
 }
@@ -4329,30 +4332,45 @@ async function generarFacturas(){
   facErr('');
   const periodo=(document.getElementById('fac-fc-periodo')?.value||S.fac.periodo||'').trim();
   if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
-  const rep={ facturas:0, items:0, sinPend:0, errores:0 };
+  const rep={ facturas:0, items:0, sinPend:0, corporativos:0, errores:0 };
+  const year=new Date().getFullYear(); // F-2: año cosmético del comprobante (emisión), calco de INC-
   try{
-    // Candidatos (SOLO LECTURA): abonos del período + TODOS los cargos (barrido). Anulados nunca entran.
-    const [abSnap, cgSnap] = await Promise.all([
+    // Candidatos (SOLO LECTURA): abonos del período + TODOS los cargos (barrido) + socios corporativos (exclusión F-2).
+    const [abSnap, cgSnap, corpSnap] = await Promise.all([
       db.collection('abonos').where('periodo','==',periodo).get(),
-      db.collection('cargos').get()
+      db.collection('cargos').get(),
+      db.collection('socios').where('tipoAfiliado','==','corporativo').get() // P4: el corporativo se factura a la EMPRESA (F-4), no individual
     ]);
+    const corpSocioIds=new Set(corpSnap.docs.map(d=>d.id)); const corpVistos=new Set();
     const grupos={}; const scopePersonas=new Set();
     const push=(pid,meta,item)=>{ if(!pid) return; if(!grupos[pid]) grupos[pid]={items:[],socioId:null,nombre:'',numeroAfiliado:null}; const g=grupos[pid]; if(meta.socioId&&!g.socioId)g.socioId=meta.socioId; if(meta.nombre&&!g.nombre)g.nombre=meta.nombre; if(meta.numeroAfiliado&&!g.numeroAfiliado)g.numeroAfiliado=meta.numeroAfiliado; g.items.push(item); };
-    abSnap.docs.forEach(d=>{ const a=d.data(); if(a.estado==='anulado') return; if(a.personaId) scopePersonas.add(a.personaId); if(a.estado!=='generado'||a.facturaId) return; push(a.personaId,{socioId:a.socioId||null,nombre:a.socioNombre||'',numeroAfiliado:a.numeroAfiliado||null},{ tipo:'abono', refId:d.id, descripcion:('Abono '+(a.planNombre||'')+' '+(a.periodo||'')).trim(), monto:Number(a.precioFinal)||0 }); });
-    cgSnap.docs.forEach(d=>{ const c=d.data(); if(c.estado==='anulado') return; if(c.personaId) scopePersonas.add(c.personaId); if(c.estado!=='generado'||c.facturaId) return; push(c.personaId,{socioId:c.socioId||null,nombre:c.pacNombre||'',numeroAfiliado:null},{ tipo:'cargo', refId:d.id, descripcion:((c.tarifaNombre||'—')+' · '+(c.nroIncidenteFmt||('INC '+(c.nroIncidente!=null?c.nroIncidente:'—')))), monto:Number(c.precioFinal)||0 }); });
+    abSnap.docs.forEach(d=>{ const a=d.data(); if(a.estado==='anulado') return; if(a.socioId && corpSocioIds.has(a.socioId)){ corpVistos.add(a.socioId); return; } if(a.personaId) scopePersonas.add(a.personaId); if(a.estado!=='generado'||a.facturaId) return; push(a.personaId,{socioId:a.socioId||null,nombre:a.socioNombre||'',numeroAfiliado:a.numeroAfiliado||null},{ tipo:'abono', refId:d.id, descripcion:('Abono '+(a.planNombre||'')+' '+(a.periodo||'')).trim(), monto:Number(a.precioFinal)||0 }); });
+    cgSnap.docs.forEach(d=>{ const c=d.data(); if(c.estado==='anulado') return; if(c.socioId && corpSocioIds.has(c.socioId)){ corpVistos.add(c.socioId); return; } if(c.personaId) scopePersonas.add(c.personaId); if(c.estado!=='generado'||c.facturaId) return; push(c.personaId,{socioId:c.socioId||null,nombre:c.pacNombre||'',numeroAfiliado:null},{ tipo:'cargo', refId:d.id, descripcion:((c.tarifaNombre||'—')+' · '+(c.nroIncidenteFmt||('INC '+(c.nroIncidente!=null?c.nroIncidente:'—')))), monto:Number(c.precioFinal)||0 }); });
+    rep.corporativos=corpVistos.size;
     const pids=Object.keys(grupos);
     for(const pid of pids){
       const g=grupos[pid];
       if(!g.items.length) continue;
       const total=g.items.reduce((s,it)=>s+(Number(it.monto)||0),0);
       try{
-        const ref=await db.collection('facturas').add({
-          periodo, personaId:pid, socioId:g.socioId||null, nombre:g.nombre||'', numeroAfiliado:g.numeroAfiliado||null,
-          items:g.items, total, estado:'emitida', emitidaEn:FV(), emitidaPor:S.user.uid
+        // F-2 (calco de dspCrear): numeración atómica. El contador se incrementa Y la factura se crea en la MISMA
+        // transacción → nunca un número sin factura ni una factura sin número. nroComprobante congelado al emitir.
+        const counterRef=db.collection('contadores').doc('facturas');
+        const facRef=db.collection('facturas').doc();
+        await db.runTransaction(async tx=>{
+          const cs=await tx.get(counterRef);
+          const ultimo=cs.exists?(cs.data().ultimo||0):0;
+          const next=ultimo+1;
+          tx.set(counterRef,{ultimo:next,actualizadoEn:FV()},{merge:true});
+          tx.set(facRef,{
+            periodo, personaId:pid, socioId:g.socioId||null, nombre:g.nombre||'', numeroAfiliado:g.numeroAfiliado||null,
+            items:g.items, total, estado:'emitida', emitidaEn:FV(), emitidaPor:S.user.uid,
+            nroComprobante:fmtComprobante(next,year)
+          });
         });
         for(const it of g.items){ // vincular facturaId en cada ítem (integridad: ya no re-facturable/editable)
           const col= it.tipo==='abono' ? 'abonos' : 'cargos';
-          try{ await db.collection(col).doc(it.refId).set({ facturaId:ref.id },{merge:true}); }
+          try{ await db.collection(col).doc(it.refId).set({ facturaId:facRef.id },{merge:true}); }
           catch(e){ console.warn('[generarFacturas] no se pudo vincular',it.tipo,it.refId,e); }
         }
         rep.facturas++; rep.items+=g.items.length;
@@ -4360,7 +4378,7 @@ async function generarFacturas(){
     }
     rep.sinPend = Math.max(0, scopePersonas.size - pids.length); // personas con historial en scope pero nada pendiente
     audit('facturas_generadas','facturas',periodo,rep.facturas+' facturas');
-    S.fac.reportF=`Período <b>${esc(periodo)}</b> — Facturas emitidas: <b>${rep.facturas}</b> · Items facturados: ${rep.items} · Personas sin pendientes: ${rep.sinPend}${rep.errores?(' · Errores: '+rep.errores):''}`;
+    S.fac.reportF=`Período <b>${esc(periodo)}</b> — Facturas emitidas: <b>${rep.facturas}</b> · Items facturados: ${rep.items} · Personas sin pendientes: ${rep.sinPend} · Corporativos excluidos: <b>${rep.corporativos}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar las facturas: '+(e.message||e)); }
 }
@@ -4382,14 +4400,47 @@ function facFacturaDetalle(){
   } else {
     acciones=`<div style="font-size:.78rem;color:var(--ink3)">Factura anulada${f.motivoAnulacion?(' · '+esc(f.motivoAnulacion)):''}. Los ítems quedaron liberados (re-facturables). Se conserva como registro histórico.</div>`;
   }
-  return `<div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="navBack()">← Volver</button></div>
-    <div class="card"><div class="ch">Factura · ${esc(f.periodo||'—')} ${facEstBadge(est)}</div>
+  return `<div style="margin-bottom:.5rem;display:flex;gap:.4rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="navBack()">← Volver</button><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="facVerComprobante('${f.id}')">🖨️ Ver / imprimir comprobante</button></div>
+    <div class="card"><div class="ch">Factura · ${esc(f.nroComprobante||f.periodo||'—')} ${facEstBadge(est)}</div>
     <div style="font-size:.9rem;font-weight:700">${esc(f.nombre||'—')}</div>
     <div style="font-size:.75rem;color:var(--ink3);margin-bottom:.55rem">${afil}</div>
     <div id="fac-fc-err" class="err" style="display:none;margin:.4rem 0"></div>
     ${items}
     <div class="ir" style="border-top:2px solid var(--border2);margin-top:.4rem;padding-top:.4rem"><span class="il" style="font-weight:700">Total</span><span class="iv" style="font-weight:700">${facMoney(f.total)}</span></div>
     <div style="margin-top:.8rem">${acciones}</div>
+  </div>`;
+}
+// F-2: comprobante INTERNO imprimible (sin libs de PDF). window.print() + @media print que deja solo la hoja.
+function facVerComprobante(id){ if(!S.fac) return; S.fac.comprobante=id; render(); navPush(); }
+function facCerrarComprobante(){ if(!S.fac) return; S.fac.comprobante=null; render(); }
+function facComprobante(){
+  const f=(S.fac.facturas||[]).find(x=>x.id===S.fac.comprobante);
+  if(!f) return `<div class="card">Comprobante no encontrado.<br><button class="btn-o" onclick="facCerrarComprobante()" style="margin-top:.6rem">Volver</button></div>`;
+  const items=(f.items||[]).map(it=>`<tr><td style="padding:.4rem .2rem;border-bottom:1px solid #eee">${esc(it.descripcion||it.tipo||'—')}</td><td style="padding:.4rem .2rem;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">${facMoney(it.monto)}</td></tr>`).join('');
+  const afil=f.numeroAfiliado?('N° socio '+esc(f.numeroAfiliado)):'Particular';
+  return `<style>@media print{ body *{visibility:hidden!important} .cbte-sheet,.cbte-sheet *{visibility:visible!important} .cbte-sheet{position:absolute;left:0;top:0;width:100%;padding:0!important} .no-print{display:none!important} }</style>
+  <div style="display:flex;gap:.4rem;margin-bottom:.8rem" class="no-print">
+    <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="facCerrarComprobante()">← Volver</button>
+    <button class="btn-r" style="width:auto;padding:.4rem 1rem" onclick="window.print()">🖨️ Imprimir</button></div>
+  <div class="card cbte-sheet" style="max-width:640px;margin:0 auto">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid var(--r);padding-bottom:.6rem;margin-bottom:.8rem">
+      <div><div style="font-size:1.3rem;font-weight:800;color:var(--r);letter-spacing:.02em">MEDICAR</div>
+        <div style="font-size:.72rem;color:var(--ink3)">Emergencias médicas · Pergamino</div></div>
+      <div style="text-align:right"><div style="font-size:.68rem;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em">Comprobante interno</div>
+        <div style="font-size:1.05rem;font-weight:800;letter-spacing:.03em">${esc(f.nroComprobante||'—')}</div>
+        <div style="font-size:.72rem;color:var(--ink3);margin-top:.15rem">${facEstBadge(f.estado||'emitida')}</div></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.8rem">
+      <div><div style="font-weight:700">${esc(f.nombre||'—')}</div><div style="color:var(--ink3);font-size:.75rem">${afil}</div></div>
+      <div style="text-align:right"><div style="color:var(--ink3);font-size:.72rem">Período</div><div style="font-weight:700">${esc(f.periodo||'—')}</div></div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:.82rem">
+      <thead><tr><th style="text-align:left;padding:.3rem .2rem;border-bottom:2px solid var(--border2);font-size:.7rem;color:var(--ink3);text-transform:uppercase">Detalle</th><th style="text-align:right;padding:.3rem .2rem;border-bottom:2px solid var(--border2);font-size:.7rem;color:var(--ink3);text-transform:uppercase">Importe</th></tr></thead>
+      <tbody>${items||'<tr><td colspan="2" style="padding:.5rem .2rem;color:var(--ink3)">Sin ítems</td></tr>'}</tbody>
+    </table>
+    <div style="display:flex;justify-content:space-between;margin-top:.6rem;padding-top:.5rem;border-top:2px solid var(--r);font-size:1rem;font-weight:800"><span>TOTAL</span><span>${facMoney(f.total)}</span></div>
+    <div style="margin-top:1.2rem;padding-top:.6rem;border-top:1px dashed var(--border2);font-size:.68rem;color:var(--ink3);line-height:1.5">
+      Comprobante interno — no válido como factura fiscal (ARCA/AFIP).<br>Documento de gestión del club para el socio. La factura fiscal, si corresponde, se emite por separado.</div>
   </div>`;
 }
 async function facFacturaPagar(id){

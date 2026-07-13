@@ -468,32 +468,89 @@ service cloud.firestore {
       allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
     }
 
-    // cargos/{id}: cargos de facturacion generados por episodio (Estructura 1, Contable). DESVIO DELIBERADO
-    // del patron: es DATA FINANCIERA, NO se abre a todo el personal interno.
-    //  - Lectura Y escritura: SOLO admin/superadmin o configurar_sistema (NO esInterno).
-    //  - Anulacion LOGICA via estado:'anulado'; NUNCA delete desde la app.
+    // Gate financiero del carril (Contable): SOLO admin/superadmin o configurar_sistema (NO esInterno).
+    function puedeFacturar() { return isAdmin() || tienePermiso('configurar_sistema'); }
+
+    // cargos/{id}: cargos de facturacion generados por episodio (Estructura 1, Contable). DATA FINANCIERA.
+    // F-1 (blindaje): la integridad pasa de candado-en-cliente a reglas. Whitelists calcadas al motor real
+    // (generarCargos/facCargoGuardar/facCargoAnular + facturaId de generarFacturas/facFacturaAnular).
+    // INMUTABLE tras crear: episodioId/nroIncidente/socioId/personaId/tarifaId/precioSugerido (nunca en tocadas).
+    // precioFinal editable SOLO mientras NO este facturado. NUNCA delete (anulacion logica).
     match /cargos/{id} {
-      allow read:           if isAdmin() || tienePermiso('configurar_sistema');
-      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+      allow read:   if puedeFacturar();
+      // create: shape exacto de generarCargos + forma barata (estado inicial + monto numerico >= 0).
+      allow create: if puedeFacturar()
+                       && request.resource.data.keys().hasOnly(['episodioId','nroIncidente','nroIncidenteFmt','personaId','socioId','pacNombre','regla','tarifaId','tarifaNombre','tipoCalculo','precioSugerido','valorPorKm','km','kmPendiente','precioFinal','motivoAjuste','estado','generadoEn','generadoPor'])
+                       && request.resource.data.keys().hasAll(['episodioId','precioFinal','estado'])
+                       && request.resource.data.estado == 'generado'
+                       && request.resource.data.precioFinal is number && request.resource.data.precioFinal >= 0;
+      // update — ajuste manual de monto (facCargoGuardar), SOLO si no facturado:
+      allow update: if puedeFacturar() && resource.data.get('facturaId', null) == null
+                       && tocadas().hasOnly(['km','kmPendiente','precioFinal','motivoAjuste','actualizadoEn'])
+                       && request.resource.data.precioFinal is number && request.resource.data.precioFinal >= 0;
+      // update — anulacion logica (facCargoAnular), SOLO si no facturado:
+      allow update: if puedeFacturar() && resource.data.get('facturaId', null) == null
+                       && tocadas().hasOnly(['estado','motivoAnulacion','anuladoEn','anuladoPor'])
+                       && request.resource.data.estado == 'anulado';
+      // update — asignar facturaId (generarFacturas), SOLO si aun no tiene (null -> string):
+      allow update: if puedeFacturar() && resource.data.get('facturaId', null) == null
+                       && tocadas().hasOnly(['facturaId']) && request.resource.data.facturaId is string;
+      // update — liberar facturaId (facFacturaAnular), SOLO si lo tiene (campo removido):
+      allow update: if puedeFacturar() && resource.data.get('facturaId', null) != null
+                       && tocadas().hasOnly(['facturaId']) && !('facturaId' in request.resource.data);
     }
 
-    // abonos/{id}: cuotas mensuales por socio (Estructura 1, Contable). MISMO desvio financiero que /cargos:
-    // DATA FINANCIERA, no se abre a todo el personal interno.
-    //  - Lectura Y escritura: SOLO admin/superadmin o configurar_sistema (NO esInterno).
-    //  - Anulacion LOGICA via estado:'anulado'; NUNCA delete desde la app.
+    // abonos/{id}: cuotas mensuales por socio (Estructura 1, Contable). DATA FINANCIERA. Mismo blindaje F-1.
+    // INMUTABLE tras crear: periodo/socioId/personaId/planId/precioSugerido. precioFinal editable si NO facturado.
     match /abonos/{id} {
-      allow read:           if isAdmin() || tienePermiso('configurar_sistema')
-                               || (isSignedIn() && resource.data.personaId != null && resource.data.personaId == miPersonaId()); // F2: el AFILIADO lee SOLO sus abonos (personaId = titular, ya está en el doc)
-      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+      allow read:   if puedeFacturar()
+                       || (isSignedIn() && resource.data.personaId != null && resource.data.personaId == miPersonaId()); // F2: el AFILIADO lee SOLO sus abonos
+      // create: shape exacto de generarAbonos (integrantesFacturados opcional) + forma barata.
+      allow create: if puedeFacturar()
+                       && request.resource.data.keys().hasOnly(['periodo','socioId','personaId','socioNombre','numeroAfiliado','planId','planNombre','precioSugerido','precioFinal','motivoAjuste','estado','generadoEn','generadoPor','integrantesFacturados'])
+                       && request.resource.data.keys().hasAll(['periodo','socioId','planId','precioFinal','estado'])
+                       && request.resource.data.estado == 'generado'
+                       && request.resource.data.precioFinal is number && request.resource.data.precioFinal >= 0
+                       && request.resource.data.periodo is string && request.resource.data.periodo.matches('^[0-9]{4}-[0-9]{2}$');
+      // update — ajuste manual de monto (facAbonoGuardar), SOLO si no facturado:
+      allow update: if puedeFacturar() && resource.data.get('facturaId', null) == null
+                       && tocadas().hasOnly(['precioFinal','motivoAjuste','actualizadoEn'])
+                       && request.resource.data.precioFinal is number && request.resource.data.precioFinal >= 0;
+      // update — anulacion logica (facAbonoAnular), SOLO si no facturado:
+      allow update: if puedeFacturar() && resource.data.get('facturaId', null) == null
+                       && tocadas().hasOnly(['estado','motivoAnulacion','anuladoEn','anuladoPor'])
+                       && request.resource.data.estado == 'anulado';
+      // update — asignar facturaId (generarFacturas), SOLO si aun no tiene:
+      allow update: if puedeFacturar() && resource.data.get('facturaId', null) == null
+                       && tocadas().hasOnly(['facturaId']) && request.resource.data.facturaId is string;
+      // update — liberar facturaId (facFacturaAnular), SOLO si lo tiene:
+      allow update: if puedeFacturar() && resource.data.get('facturaId', null) != null
+                       && tocadas().hasOnly(['facturaId']) && !('facturaId' in request.resource.data);
     }
 
     // facturas/{id}: cierre de Contable (Estructura 1). Agrupa abono + cargos por persona (items congelados).
-    // MISMO desvio financiero que /cargos y /abonos: DATA FINANCIERA.
-    //  - Lectura Y escritura: SOLO admin/superadmin o configurar_sistema (NO esInterno).
-    //  - Anulacion LOGICA via estado:'anulada' (libera el facturaId de los items); NUNCA delete desde la app.
+    // DATA FINANCIERA. INMUTABLE tras emitir: items/total/personaId/socioId/periodo/numeroAfiliado.
+    // Transiciones validas: emitida->pagada (facFacturaPagar) · emitida->anulada (facFacturaAnular). NUNCA delete.
+    // F-2: nroComprobante (FC-AAAA-NNNNNN) REQUERIDO al emitir e INMUTABLE despues (no aparece en ningun update).
     match /facturas/{id} {
-      allow read:           if isAdmin() || tienePermiso('configurar_sistema');
-      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+      allow read:   if puedeFacturar()
+                       || (isSignedIn() && resource.data.personaId != null && resource.data.personaId == miPersonaId()); // F-3: el socio lee SOLO sus comprobantes (calco de abonos F2)
+      // create: shape exacto de generarFacturas + estado inicial 'emitida' + total numerico >= 0 + nº de comprobante.
+      allow create: if puedeFacturar()
+                       && request.resource.data.keys().hasOnly(['periodo','personaId','socioId','nombre','numeroAfiliado','items','total','estado','emitidaEn','emitidaPor','nroComprobante'])
+                       && request.resource.data.keys().hasAll(['periodo','personaId','items','total','estado','nroComprobante'])
+                       && request.resource.data.estado == 'emitida'
+                       && request.resource.data.total is number && request.resource.data.total >= 0
+                       && request.resource.data.nroComprobante is string && request.resource.data.nroComprobante.matches('^FC-[0-9]{4}-[0-9]{6}$')
+                       && request.resource.data.periodo is string && request.resource.data.periodo.matches('^[0-9]{4}-[0-9]{2}$');
+      // update — marcar pagada, SOLO emitida->pagada:
+      allow update: if puedeFacturar() && resource.data.estado == 'emitida'
+                       && tocadas().hasOnly(['estado','pagadaEn','pagadaPor'])
+                       && request.resource.data.estado == 'pagada';
+      // update — anular, SOLO emitida->anulada:
+      allow update: if puedeFacturar() && resource.data.estado == 'emitida'
+                       && tocadas().hasOnly(['estado','motivoAnulacion','anuladaEn','anuladaPor'])
+                       && request.resource.data.estado == 'anulada';
     }
 
     // leads/{id}: prospectos de captacion (Estructura 2, Marketing — Bloque 1). Datos personales de
