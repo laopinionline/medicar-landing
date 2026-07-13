@@ -163,6 +163,18 @@ input{font-family:inherit}
 .result-t{font-weight:800;font-size:1.05rem}
 .result-s{font-size:.86rem;line-height:1.5;margin-top:.35rem}
 .result .call{display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:.9rem;background:var(--rojo);color:#fff;font-weight:800;padding:.8rem;border-radius:12px;text-decoration:none}
+/* PWA-1: botón "i" educativo por signo (círculo visible 18px + hit-area ≥44px vía ::after) + sheet */
+.sig-i{appearance:none;border:none;cursor:pointer;font-style:italic;font-weight:800;font-size:.72rem;color:var(--gris);background:#e8e8ea;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;line-height:1;position:relative;flex:none}
+.sig-i::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:44px;height:44px}
+.sig-i:focus-visible{outline:2px solid var(--rojo);outline-offset:2px}
+.sig-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:flex-end;justify-content:center}
+.sig-sheet{background:#fff;width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:1.1rem 1.15rem 1.6rem;box-shadow:0 -8px 30px rgba(0,0,0,.2);max-height:80vh;overflow:auto}
+.sig-sheet-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem}
+.sig-sheet-h b{font-size:1.05rem;color:var(--tinta)}
+.sig-close{appearance:none;border:none;background:#f2f2f2;width:44px;height:44px;border-radius:50%;font-size:1rem;color:var(--gris);cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none}
+.sig-sec{margin-top:.75rem}
+.sig-sec-t{font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--gris);margin-bottom:.2rem}
+.sig-sec-b{font-size:.9rem;line-height:1.5;color:var(--tinta)}
 .reg-hint{display:flex;gap:.55rem;align-items:flex-start;background:var(--nieve);border:1px solid var(--linea);border-radius:12px;padding:.7rem .8rem;margin-top:.6rem;font-size:.78rem;color:var(--gris);line-height:1.45}
 .pref-row{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.7rem;padding:0 .2rem}
 .pref-row select{padding:.45rem .55rem;border:1.5px solid var(--linea);border-radius:9px;font-size:.85rem;background:#fff;color:var(--tinta)}
@@ -180,6 +192,8 @@ input{font-family:inherit}
 .tag-medicar{color:var(--rojo);background:#fdecec}
 .tag-salud{color:#1f7a4d;background:#e7f5ee}
 .tag-nutri{color:#b9700a;background:#fdf0dd}
+.tag-vida{color:#5A4BD1;background:#ece9fb}
+.post.tappable{cursor:pointer}
 .post h5{font-size:.98rem;font-weight:700;line-height:1.35;margin-bottom:.35rem;letter-spacing:-.01em;color:var(--tinta)}
 .post p{font-size:.8rem;color:var(--gris);line-height:1.5}
 .post .meta{margin-top:.7rem;font-size:.7rem;color:#aeb3b8;font-weight:600}
@@ -859,6 +873,8 @@ async function instalar(){
 function esStandalone(){
   return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 }
+// PWA-2c: en MÓVIL va la app nativa → el prompt de instalar la PWA NO va (no compite con ella). Solo desktop.
+function esMovil(){ return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent || ''); }
 
 /* ---------- Iconos inline ---------- */
 const IC = {
@@ -935,15 +951,17 @@ function homeView(){
   ].filter(r=>r[1]).map(r=>`<div class="row"><span class="rl">${r[0]}</span><span class="rv">${esc(r[1])}</span></div>`).join('')
     || `<div class="row"><span class="rl">Sin datos de contacto cargados</span><span class="rv"></span></div>`;
 
-  // hint de instalación
+  // hint de instalación — el PROMPT de instalar la PWA solo en desktop (en móvil va la app nativa).
   let instalBlock='';
   if(esStandalone()){
-    instalBlock = `<div class="installed">✓ App instalada en tu teléfono</div>`;
-  }else if(S.deferredPrompt){
-    instalBlock = `<button class="btn-o" style="margin-top:1.2rem" onclick="instalar()">＋ Agregar MEDICAR a mi pantalla de inicio</button>`;
-  }else{
-    instalBlock = `<div class="hint">${IC.share}<div>Agregá <b>MEDICAR</b> a tu pantalla de inicio para tenerla siempre a mano: tocá el menú <b>Compartir</b> del navegador y elegí <b>“Agregar a inicio”</b>.</div></div>`;
-  }
+    instalBlock = `<div class="installed">✓ App instalada</div>`;
+  }else if(!esMovil()){
+    if(S.deferredPrompt){
+      instalBlock = `<button class="btn-o" style="margin-top:1.2rem" onclick="instalar()">＋ Agregar MEDICAR a mi pantalla de inicio</button>`;
+    }else{
+      instalBlock = `<div class="hint">${IC.share}<div>Agregá <b>MEDICAR</b> a tu pantalla de inicio para tenerla siempre a mano desde la compu.</div></div>`;
+    }
+  } // en móvil sin instalar → instalBlock queda vacío (no se muestra)
 
   const sinAfilNota = socio ? '' : `<div class="foot-note" style="color:var(--o)">No encontramos tu ficha de afiliación. Contactá a MEDICAR para regularizarla.</div>`;
 
@@ -1135,35 +1153,42 @@ function homeView(){
   </div>`;
 }
 
-/* ---------- FEED "Para vos" (Tramo 3 — presentación pura) ---------- */
-/* ===== FEED DEMO — reemplazar por fuente real =====
-   Contenido estático de ejemplo. Cuando exista la fuente real (colección de contenido / novedades),
-   reemplazar SOLO este array por los docs traídos; homeFeedBlock() no cambia. cat: 'medicar'|'salud'|'nutri'. */
-const FEED_DEMO = [
-  { cat:'medicar', titulo:'Sumamos dos móviles de alta complejidad a la flota', bajada:'Más cobertura para Pergamino y la zona. Conocé el nuevo equipamiento.', meta:'Hace 2 días · 3 min de lectura' },
-  { cat:'salud',   titulo:'Presión arterial: cómo tomarla bien en casa', bajada:'Cinco pasos simples para que tu medición sea confiable y le sirva a tu médico.', meta:'Hace 4 días · 4 min de lectura' },
-  { cat:'nutri',   titulo:'Comer bien sin complicarte: el plato saludable', bajada:'La mitad verduras, un cuarto proteína, un cuarto cereales. Así de simple.', meta:'Hace 1 semana · 5 min de lectura' },
-  { cat:'salud',   titulo:'Dormir mejor: hábitos que ayudan de verdad', bajada:'Rutinas sencillas para un descanso que tu cuerpo agradece.', meta:'Hace 1 semana · 3 min de lectura' },
-  { cat:'medicar', titulo:'Cómo mostrar tu credencial digital desde el celular', bajada:'Tu afiliación a mano en segundos, sin buscar el carnet.', meta:'Hace 2 semanas · 2 min de lectura' },
-  { cat:'nutri',   titulo:'Hidratación: cuánta agua necesitás realmente', bajada:'Ni de más ni de menos — una guía simple para el día a día.', meta:'Hace 2 semanas · 4 min de lectura' }
-];
+/* ---------- FEED "Para vos" (PWA-2b — fuente real feed_posts) ---------- */
+/* Categorías de presentación (color/tag). 'cat' viene del doc (asignada por la CF según la fuente). */
 const FEED_CAT = {
   medicar:{ lbl:'MEDICAR',      tag:'tag-medicar', band:'linear-gradient(135deg,#ED1C24,#C8151C)' },
   salud:  { lbl:'Cuidado',      tag:'tag-salud',   band:'linear-gradient(135deg,#2E8B57,#1f7a4d)' },
-  nutri:  { lbl:'Alimentación', tag:'tag-nutri',   band:'linear-gradient(135deg,#F7941E,#e07d0a)' }
+  nutri:  { lbl:'Alimentación', tag:'tag-nutri',   band:'linear-gradient(135deg,#F7941E,#e07d0a)' },
+  vida:   { lbl:'Vida',         tag:'tag-vida',    band:'linear-gradient(135deg,#6C5CE7,#5A4BD1)' }
 };
-function feedAbrir(i){ /* TODO detalle del feed — sin contenido real todavía (placeholder no-op) */ }
+// Carga LAZY one-shot (NO onSnapshot: el feed cambia ~1 vez/día tras curaduría). Índice estado+fechaFuente ya en prod.
+async function feedLoad(){
+  if(S.feedLoading) return; S.feedLoading=true;
+  try{
+    const snap=await db.collection('feed_posts').where('estado','==','publicado').orderBy('fechaFuente','desc').limit(12).get();
+    S.feed=snap.docs.map(d=>d.data());
+  }catch(e){ S.feed=[]; console.warn('[feed] no se pudo cargar:', e); }
+  S.feedLoading=false; render();
+}
+// PWA-2c: cualquier post CON link es tocable (incluida una novedad interna con nota detrás). Sin link → no-op.
+function feedAbrir(i){
+  const p=(S.feed||[])[i]; if(!p || !p.link) return;
+  window.open(p.link, '_blank', 'noopener'); // mandar al sitio (para laopinion, devuelve tráfico al diario)
+}
 function homeFeedBlock(){
-  if(!FEED_DEMO.length) return '';
-  const posts = FEED_DEMO.map((p,i)=>{
+  if(S.feed===undefined){ feedLoad(); return ''; } // aún sin cargar → dispara la carga; se re-renderiza al llegar
+  if(!S.feed.length) return '';                     // sin publicados → OCULTAR la sección entera (sin placeholder)
+  const posts = S.feed.map((p,i)=>{
     const cc = FEED_CAT[p.cat] || FEED_CAT.medicar;
-    return `<article class="post" onclick="feedAbrir(${i})">
-      <div class="ph-img" style="background-image:${cc.band}"></div>
+    const tappable = !!p.link; // interno con link también es tocable
+    const fondo = p.imagenUrl ? `url('${esc(p.imagenUrl)}')` : cc.band; // con foto → la foto; sin foto → banda de color
+    return `<article class="post${tappable?' tappable':''}"${tappable?` onclick="feedAbrir(${i})"`:''}>
+      <div class="ph-img" style="background-image:${fondo}"></div>
       <div class="ph-body">
         <span class="tagp ${cc.tag}">${esc(cc.lbl)}</span>
         <h5>${esc(p.titulo)}</h5>
-        <p>${esc(p.bajada)}</p>
-        <div class="meta">${esc(p.meta)}</div>
+        <p>${esc(p.bajada||'')}</p>
+        <div class="meta">${esc(p.fuenteNombre||'')}</div>
       </div>
     </article>`;
   }).join('');
@@ -1410,6 +1435,16 @@ const PARAMS = [
   { k:'temp', lbl:'Temperatura',         uni:'°C',   min:30, max:44,  step:'0.1' },
   { k:'spo2', lbl:'Saturación (SpO₂)',   uni:'%',    min:50, max:100, step:'1' }
 ];
+/* PWA-1: textos educativos GENÉRICOS por signo (botón "i"). Contenido FIJO, idéntico para todos, indiferente
+   al valor tipeado. N3 INVIOLABLE: NO rangos ni valores de corte, NO interpretar los datos del socio, solo
+   "qué es" + técnica de medición (sin números). El semáforo verde/amarillo de enviarParams es el ÚNICO feedback.
+   // PENDIENTE REVISIÓN DIRECTOR MÉDICO — pre-lanzamiento (misma tanda del catálogo clínico). */
+const SIGNOS_INFO = {
+  fc:   { titulo:'Frecuencia cardíaca', queEs:'Es la cantidad de veces que late tu corazón por minuto.', comoMedirlo:'Sentate y descansá unos minutos antes de medir. Apoyá dos dedos sobre la muñeca o el costado del cuello hasta sentir el pulso y contá los latidos. Evitá medir justo después de un esfuerzo, del café o del cigarrillo.' },
+  sis:  { titulo:'Presión arterial (sistólica)', queEs:'Es la fuerza con la que la sangre empuja las paredes de tus arterias cuando el corazón late.', comoMedirlo:'Sentate con la espalda apoyada y los pies en el piso, sin cruzar las piernas. Apoyá el brazo relajado a la altura del corazón. Quedate quieto y en silencio mientras el tensiómetro mide. Evitá café o cigarrillo en la media hora previa.' },
+  temp: { titulo:'Temperatura corporal', queEs:'Es el calor de tu cuerpo, una señal de cómo está funcionando.', comoMedirlo:'Usá el termómetro en el lugar que indique su instrucción (axila, boca u oído). Si es axilar, secá la piel y mantené el brazo pegado al cuerpo hasta que el termómetro avise. Evitá medir apenas salís de bañarte o después de bebidas muy frías o calientes.' },
+  spo2: { titulo:'Saturación de oxígeno (SpO₂)', queEs:'Indica cuánto oxígeno está transportando tu sangre.', comoMedirlo:'Colocá el oxímetro en la punta de un dedo limpio, sin esmalte y que no esté frío. Apoyá la mano y quedate quieto unos segundos hasta que el número se estabilice. Si tenés las manos frías, entibiálas antes de medir.' }
+};
 function homeParamsBlock(c){
   return `<div class="sec">
     <div class="sec-h">Registrar mis signos</div>
@@ -1427,6 +1462,25 @@ function abrirParams(){
 }
 function cerrarParams(){ S.par=null; S.view='home'; render(); }
 function parSync(){ if(!S.par) return; PARAMS.forEach(p=>{ const e=el('par-'+p.k); if(e) S.par.vals[p.k]=e.value; }); }
+// PWA-1: popover educativo del botón "i". DOM PURO: NO llama render() ni toca S.par → no pierde lo tipeado.
+// Solo lee SIGNOS_INFO (contenido fijo). Cierra por tap afuera, por ✕ y por Escape. Foco al abrir.
+function signoInfoAbrir(k){
+  const info=SIGNOS_INFO[k]; if(!info) return;
+  signoInfoCerrar();
+  const ov=document.createElement('div');
+  ov.id='sig-info-ov'; ov.className='sig-ov';
+  ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); ov.setAttribute('aria-label',info.titulo);
+  ov.innerHTML=`<div class="sig-sheet">
+      <div class="sig-sheet-h"><b>${esc(info.titulo)}</b><button type="button" class="sig-close" aria-label="Cerrar" onclick="signoInfoCerrar()">✕</button></div>
+      <div class="sig-sec"><div class="sig-sec-t">Qué es</div><div class="sig-sec-b">${esc(info.queEs)}</div></div>
+      <div class="sig-sec"><div class="sig-sec-t">Cómo medirlo</div><div class="sig-sec-b">${esc(info.comoMedirlo)}</div></div>
+    </div>`;
+  ov.addEventListener('click', e=>{ if(e.target===ov) signoInfoCerrar(); });       // tap fuera del sheet
+  ov.addEventListener('keydown', e=>{ if(e.key==='Escape') signoInfoCerrar(); });   // accesibilidad
+  document.body.appendChild(ov);
+  const c=ov.querySelector('.sig-close'); if(c) c.focus();
+}
+function signoInfoCerrar(){ const ov=document.getElementById('sig-info-ov'); if(ov) ov.remove(); }
 function paramsFormView(){
   // Confirmación tras enviar — SEMÁFORO SUAVE (verde/amarillo). NUNCA score, "rojo", ni diagnóstico.
   if(S.par&&S.par.done){
@@ -1448,7 +1502,7 @@ function paramsFormView(){
     </div>`;
   }
   const v=(S.par&&S.par.vals)||{};
-  const inputs=PARAMS.map(p=>`<div class="field" style="margin-top:.9rem"><label>${p.lbl} · ${p.uni}</label>
+  const inputs=PARAMS.map(p=>`<div class="field" style="margin-top:.9rem"><label style="display:flex;align-items:center;gap:.35rem">${p.lbl} · ${p.uni}<button type="button" class="sig-i" aria-label="Información sobre ${esc(p.lbl)}" onclick="signoInfoAbrir('${p.k}')">i</button></label>
     <input id="par-${p.k}" type="number" inputmode="decimal" step="${p.step}" min="${p.min}" max="${p.max}" value="${esc(v[p.k]||'')}" placeholder="opcional"></div>`).join('');
   return `<div class="home">
     <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Registrar mis signos</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Cerrar</button></div>

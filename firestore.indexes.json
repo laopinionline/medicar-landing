@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "feed_posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "fechaFuente", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
