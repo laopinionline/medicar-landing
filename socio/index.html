@@ -873,6 +873,8 @@ async function instalar(){
 function esStandalone(){
   return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 }
+// PWA-2c: en MÓVIL va la app nativa → el prompt de instalar la PWA NO va (no compite con ella). Solo desktop.
+function esMovil(){ return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent || ''); }
 
 /* ---------- Iconos inline ---------- */
 const IC = {
@@ -949,15 +951,17 @@ function homeView(){
   ].filter(r=>r[1]).map(r=>`<div class="row"><span class="rl">${r[0]}</span><span class="rv">${esc(r[1])}</span></div>`).join('')
     || `<div class="row"><span class="rl">Sin datos de contacto cargados</span><span class="rv"></span></div>`;
 
-  // hint de instalación
+  // hint de instalación — el PROMPT de instalar la PWA solo en desktop (en móvil va la app nativa).
   let instalBlock='';
   if(esStandalone()){
-    instalBlock = `<div class="installed">✓ App instalada en tu teléfono</div>`;
-  }else if(S.deferredPrompt){
-    instalBlock = `<button class="btn-o" style="margin-top:1.2rem" onclick="instalar()">＋ Agregar MEDICAR a mi pantalla de inicio</button>`;
-  }else{
-    instalBlock = `<div class="hint">${IC.share}<div>Agregá <b>MEDICAR</b> a tu pantalla de inicio para tenerla siempre a mano: tocá el menú <b>Compartir</b> del navegador y elegí <b>“Agregar a inicio”</b>.</div></div>`;
-  }
+    instalBlock = `<div class="installed">✓ App instalada</div>`;
+  }else if(!esMovil()){
+    if(S.deferredPrompt){
+      instalBlock = `<button class="btn-o" style="margin-top:1.2rem" onclick="instalar()">＋ Agregar MEDICAR a mi pantalla de inicio</button>`;
+    }else{
+      instalBlock = `<div class="hint">${IC.share}<div>Agregá <b>MEDICAR</b> a tu pantalla de inicio para tenerla siempre a mano desde la compu.</div></div>`;
+    }
+  } // en móvil sin instalar → instalBlock queda vacío (no se muestra)
 
   const sinAfilNota = socio ? '' : `<div class="foot-note" style="color:var(--o)">No encontramos tu ficha de afiliación. Contactá a MEDICAR para regularizarla.</div>`;
 
@@ -1166,19 +1170,20 @@ async function feedLoad(){
   }catch(e){ S.feed=[]; console.warn('[feed] no se pudo cargar:', e); }
   S.feedLoading=false; render();
 }
-// interno → tarjeta autosuficiente (no lleva a ningún lado, ni se ve tocable). laopinion/externo → abre la fuente.
+// PWA-2c: cualquier post CON link es tocable (incluida una novedad interna con nota detrás). Sin link → no-op.
 function feedAbrir(i){
-  const p=(S.feed||[])[i]; if(!p || p.origen==='interno') return;
-  if(p.link) window.open(p.link, '_blank', 'noopener'); // mandar al sitio (para laopinion, devuelve tráfico al diario)
+  const p=(S.feed||[])[i]; if(!p || !p.link) return;
+  window.open(p.link, '_blank', 'noopener'); // mandar al sitio (para laopinion, devuelve tráfico al diario)
 }
 function homeFeedBlock(){
   if(S.feed===undefined){ feedLoad(); return ''; } // aún sin cargar → dispara la carga; se re-renderiza al llegar
   if(!S.feed.length) return '';                     // sin publicados → OCULTAR la sección entera (sin placeholder)
   const posts = S.feed.map((p,i)=>{
     const cc = FEED_CAT[p.cat] || FEED_CAT.medicar;
-    const tappable = p.origen!=='interno' && !!p.link;
+    const tappable = !!p.link; // interno con link también es tocable
+    const fondo = p.imagenUrl ? `url('${esc(p.imagenUrl)}')` : cc.band; // con foto → la foto; sin foto → banda de color
     return `<article class="post${tappable?' tappable':''}"${tappable?` onclick="feedAbrir(${i})"`:''}>
-      <div class="ph-img" style="background-image:${cc.band}"></div>
+      <div class="ph-img" style="background-image:${fondo}"></div>
       <div class="ph-body">
         <span class="tagp ${cc.tag}">${esc(cc.lbl)}</span>
         <h5>${esc(p.titulo)}</h5>

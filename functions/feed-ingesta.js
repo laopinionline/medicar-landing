@@ -101,11 +101,12 @@ async function ingestarUnaFuente(db, src, now){
         fechaFuente, estado: (apuestas || enIngles) ? 'descartado' : 'pendiente', creadoEn: admin.firestore.FieldValue.serverTimestamp()
       };
       if(apuestas || enIngles){ post.aprobadoEn = admin.firestore.FieldValue.serverTimestamp(); post.aprobadoPor = enIngles ? 'auto-idioma' : 'auto-apuestas'; if(enIngles) res.excluidosEn++; else res.autoDescartados++; }
-      // Contenido propio (laopinion/interno) puede llevar cuerpo/firma/imagen. 'externo' → NUNCA (descarte EXPLÍCITO).
+      // PWA-2c: la imagen de un enclosure/media:content es SINDICACIÓN explícita → va para TODOS los orígenes (con
+      // crédito a la fuente vía fuenteNombre). Lo que sigue vedado para 'externo' es el CUERPO/firma de terceros.
+      const img = imagenDe(item); if(img) post.imagenUrl = img; // linkeada (hoy solo laopinion trae; externo=0 medido)
       if(src.origen !== 'externo'){
         const firma = stripHtml(item['dc:creator']); if(firma) post.firma = firma;
         const cuerpo = txt(item['content:encoded']); if(cuerpo) post.cuerpo = cuerpo;
-        const img = imagenDe(item); if(img) post.imagenUrl = img;
       }
       await ref.set(post);
       res.nuevos++;

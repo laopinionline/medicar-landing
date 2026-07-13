@@ -9,17 +9,17 @@ const lines = html.split('\n');
 const slice = (a, b) => lines.slice(a - 1, b).join('\n'); // 1-based inclusivo
 
 // Funciones REALES que toca la sección (renderizan de verdad):
-const esc        = slice(559, 559);
-const socioMoney = slice(632, 632);
-const periodoLbl = slice(641, 645);
-const homeView   = slice(918, 1136);
+const esc        = slice(573, 573);
+const socioMoney = slice(646, 646);
+const periodoLbl = slice(655, 659);
+const homeView   = slice(934, 1154);
 
 // Stubs de dependencias externas de homeView (browser/otras vistas). Devuelven '' → no importan para el render smoke.
 const stubs = `
   const S = __S__;
   const TEL_EMERG = '443044'; // const de módulo real (no es del scope de la sección F-3)
   const IC = { phone:'', share:'' };
-  function nombreDe(){return 'X';} function tipoLbl(){return '—';} function esStandalone(){return false;}
+  function nombreDe(){return 'X';} function tipoLbl(){return '—';} function esStandalone(){return false;} function esMovil(){return false;}
   function planPrecioTotal(){return 0;} function chv(){return '';} function fmtDni(){return '';}
   function badgeDe(){return '';} function fechaTurno(){return '';} function fromMin(){return '';}
   function toMin(){return 0;} function fstr(){return '';} function pad2(n){return String(n);}

@@ -4,6 +4,22 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // Admin: el rol vive en Firestore (usuarios/{uid}.roles). Storage lo lee con firestore.get().
+    function esAdminStorage() {
+      return request.auth != null
+        && firestore.get(/databases/(default)/documents/usuarios/$(request.auth.uid)).data.get('roles', []).hasAny(['admin', 'superadmin']);
+    }
+
+    // feed/{docId}/... (PWA-2c): imágenes del feed "Para vos".
+    // Lectura PÚBLICA (el socio ve la foto en la tarjeta). Escritura/borrado: SOLO admin, imagen, < 3 MB.
+    match /feed/{docId}/{archivo=**} {
+      allow read:   if true;
+      allow write:  if esAdminStorage()
+                       && request.resource.size < 3 * 1024 * 1024
+                       && request.resource.contentType.matches('image/.*');
+      allow delete: if esAdminStorage();
+    }
+
     // Fotos de perfil: perfiles/{uid}/...
     // Escritura: SOLO el dueño (su propio uid), imagen, <3 MB.
     // Lectura: cualquier usuario autenticado -> los avatares se muestran en toda la app
