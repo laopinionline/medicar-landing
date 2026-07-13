@@ -10,7 +10,7 @@ const { ingestarFeeds } = require('./feed-ingesta');
   const { resultados, retencion } = await ingestarFeeds(admin.firestore());
   console.log('\n=== INGESTA feed_posts (log por fuente) ===');
   for (const r of resultados) {
-    console.log(`${r.error ? '✗' : '✓'} ${String(r.fuente).padEnd(12)} [${r.cat}/${r.origen}]  leídos:${r.leidos}  nuevos:${r.nuevos}  yaExisten:${r.yaExisten}  autoDescApuestas:${r.autoDescartados}${r.error ? ('  ERROR ' + r.error) : ''}`);
+    console.log(`${r.error ? '✗' : '✓'} ${String(r.fuente).padEnd(12)} [${r.cat}/${r.origen}]  leídos:${r.leidos}  nuevos:${r.nuevos}  yaExisten:${r.yaExisten}  autoDescApuestas:${r.autoDescartados}  excluidosEn:${r.excluidosEn}${r.error ? ('  ERROR ' + r.error) : ''}`);
   }
   const tot = resultados.reduce((a, r) => ({ leidos: a.leidos + r.leidos, nuevos: a.nuevos + r.nuevos, ya: a.ya + r.yaExisten, auto: a.auto + r.autoDescartados }), { leidos: 0, nuevos: 0, ya: 0, auto: 0 });
   console.log(`--- TOTAL leídos:${tot.leidos}  nuevos:${tot.nuevos}  yaExisten:${tot.ya}  autoDescartadosApuestas:${tot.auto}  ·  ${resultados.filter(r => r.error).length} fuente(s) con error ---`);

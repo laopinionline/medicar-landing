@@ -13,7 +13,7 @@ const FEED_SOURCES = [
   { url:'https://laopinionline.ar/seccion/salud/feed.xml',        origen:'laopinion', cat:'salud', fuenteNombre:'La Opinión' },
   { url:'https://laopinionline.ar/seccion/gastronomia/feed.xml',  origen:'laopinion', cat:'nutri', fuenteNombre:'La Opinión' },
   { url:'https://laopinionline.ar/seccion/tendencias/feed.xml',   origen:'laopinion', cat:'vida',  fuenteNombre:'La Opinión' },
-  { url:'https://www.paho.org/es/rss.xml',                        origen:'externo',   cat:'salud', fuenteNombre:'OPS' },
+  { url:'https://www.paho.org/es/rss.xml',                        origen:'externo',   cat:'salud', fuenteNombre:'OPS', excluirLinkEn:true }, // /es/rss.xml mezcla idiomas; los <link> con '/en/' son la versión inglesa → fuera
   { url:'https://www.sac.org.ar/feed/',                           origen:'externo',   cat:'salud', fuenteNombre:'SAC' },
   { url:'https://sanutricion.org.ar/feed/',                       origen:'externo',   cat:'nutri', fuenteNombre:'SANutrición' },
   { url:'https://medlineplus.gov/spanish/feeds/topics/healthyliving.xml',              origen:'externo', cat:'salud', fuenteNombre:'MedlinePlus' },
@@ -61,7 +61,7 @@ function imagenDe(item){
 }
 
 async function ingestarUnaFuente(db, src, now){
-  const res = { fuente:src.fuenteNombre, cat:src.cat, origen:src.origen, url:src.url, leidos:0, nuevos:0, yaExisten:0, autoDescartados:0, error:null };
+  const res = { fuente:src.fuenteNombre, cat:src.cat, origen:src.origen, url:src.url, leidos:0, nuevos:0, yaExisten:0, autoDescartados:0, excluidosEn:0, error:null };
   let xml;
   try { xml = await fetchTexto(src.url, 10000); }
   catch(e){ res.error = 'fetch: ' + (e.message || e); return res; }
@@ -76,26 +76,31 @@ async function ingestarUnaFuente(db, src, now){
       const snap = await ref.get();
       if(snap.exists){
         res.yaExisten++;
-        // Red de seguridad RETROACTIVA: un PENDIENTE (no curado) que matchea apuestas → descartado. NUNCA toca
-        // publicado/descartado (jamás revierte una decisión humana; solo re-clasifica lo aún sin curar).
+        // Re-clasificación RETROACTIVA de un PENDIENTE (no curado): apuestas o (OPS) link en inglés → descartado.
+        // NUNCA toca publicado/descartado (jamás revierte una decisión humana; solo lo aún sin curar).
         const cur = snap.data() || {};
-        if(cur.estado === 'pendiente' && esApuestas(cur.titulo, cur.bajada)){
-          await ref.update({ estado:'descartado', aprobadoEn: admin.firestore.FieldValue.serverTimestamp(), aprobadoPor:'auto-apuestas' });
-          res.autoDescartados++;
+        if(cur.estado === 'pendiente'){
+          const enIngles = !!src.excluirLinkEn && String(cur.link || '').includes('/en/');
+          if(esApuestas(cur.titulo, cur.bajada) || enIngles){
+            await ref.update({ estado:'descartado', aprobadoEn: admin.firestore.FieldValue.serverTimestamp(), aprobadoPor: enIngles ? 'auto-idioma' : 'auto-apuestas' });
+            if(enIngles) res.excluidosEn++; else res.autoDescartados++;
+          }
         }
         continue;
       }
       const titulo = stripHtml(item.title); if(!titulo) continue;
       const pub = txt(item.pubDate); const d = pub ? new Date(pub) : null;
       const fechaFuente = (d && !isNaN(d.getTime())) ? admin.firestore.Timestamp.fromDate(d) : admin.firestore.Timestamp.fromMillis(now);
+      const link = txt(item.link) || guid;
       const bajada = recortar(stripHtml(item.description), 200);
-      const apuestas = esApuestas(titulo, bajada); // red de seguridad ludopatía → nace 'descartado', no 'pendiente'
+      const enIngles = !!src.excluirLinkEn && String(link).includes('/en/'); // OPS: link /en/ = versión inglesa (determinista, sin detección de idioma)
+      const apuestas = esApuestas(titulo, bajada);                          // red de seguridad ludopatía
       const post = {
         guid, origen:src.origen, cat:src.cat, titulo, bajada,
-        link: txt(item.link) || guid, fuenteNombre:src.fuenteNombre,
-        fechaFuente, estado: apuestas ? 'descartado' : 'pendiente', creadoEn: admin.firestore.FieldValue.serverTimestamp()
+        link, fuenteNombre:src.fuenteNombre,
+        fechaFuente, estado: (apuestas || enIngles) ? 'descartado' : 'pendiente', creadoEn: admin.firestore.FieldValue.serverTimestamp()
       };
-      if(apuestas){ post.aprobadoEn = admin.firestore.FieldValue.serverTimestamp(); post.aprobadoPor = 'auto-apuestas'; res.autoDescartados++; }
+      if(apuestas || enIngles){ post.aprobadoEn = admin.firestore.FieldValue.serverTimestamp(); post.aprobadoPor = enIngles ? 'auto-idioma' : 'auto-apuestas'; if(enIngles) res.excluidosEn++; else res.autoDescartados++; }
       // Contenido propio (laopinion/interno) puede llevar cuerpo/firma/imagen. 'externo' → NUNCA (descarte EXPLÍCITO).
       if(src.origen !== 'externo'){
         const firma = stripHtml(item['dc:creator']); if(firma) post.firma = firma;
