@@ -855,11 +855,16 @@ const CAPS=[
   ['gestionar_afiliados','Gestionar afiliados'],
   ['configurar_sistema','Configurar sistema'],
   ['gestionar_guardias','Gestionar guardias'],
-  ['gestionar_agenda_turnos','Gestionar agenda de turnos']
+  ['gestionar_agenda_turnos','Gestionar agenda de turnos'],
+  ['gestionar_cobranza','Gestionar cobranza']
 ];
 function puede(cap){ return !!(S.user && (S.user.rol==='superadmin' || (S.user.permisos && S.user.permisos[cap]===true))); }
 // Acceso al catálogo (prestaciones/planes, Estructura 3). Roles admin/superadmin, o capacidad configurar_sistema.
 function puedeConfig(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('configurar_sistema'))); }
+// C-1 (Cobranza): gate del cobrador contable. Espejo del gate de reglas puedeCobrar() = isAdmin || cap.
+// configurar_sistema NO hereda el cobro: es la cap propia gestionar_cobranza (o admin/superadmin por bypass).
+// Sin superficie todavia (la UI de cobranza es C-2); se deja el helper listo y coherente con las reglas.
+function puedeCobrar(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('gestionar_cobranza'))); }
 // Acceso al padrón de afiliados (personas/socios, Estructura 3). Roles admin/superadmin, o capacidad gestionar_afiliados.
 function puedeAfil(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('gestionar_afiliados'))); }
 
