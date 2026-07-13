@@ -875,6 +875,7 @@ function getTabs(rol){
   const agendaTab = puede('gestionar_agenda_turnos') ? [{id:'agendaturnos',icon:'history',lbl:'Agenda turnos'}] : [];
   const catTab = puedeConfig() ? [{id:'catalogo',icon:'plan',lbl:'Catálogo'}] : [];
   const factTab = puedeConfig() ? [{id:'facturacion',icon:'chart',lbl:'Facturación'}] : [];
+  const cobTab = puedeCobrar() ? [{id:'cobranza',icon:'register',lbl:'Cobranza'}] : []; // C-2: cap propia gestionar_cobranza (el contable puro entra por acá)
   const mktTab = puedeAfil() ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : [];
   const audTab = puedeConfig() ? [{id:'auditoria',icon:'history',lbl:'Auditoría'}] : [];
   const estTab = puedeConfig() ? [{id:'estadisticas',icon:'chart',lbl:'Estadísticas'}] : [];
@@ -885,7 +886,7 @@ function getTabs(rol){
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...mktTab,...audTab,...estTab,...monTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...cobTab,...mktTab,...audTab,...estTab,...monTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
 }
 
 function pg(){
@@ -898,7 +899,7 @@ function pg(){
   if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='home')return mHome();if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='perfil')return miPerfil();} // D-1: dispatch de 'despacho'/'registro' retirado (desp()/reg() siguen definidos, no ruteados)
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='cobranza')return cobPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
@@ -1584,7 +1585,7 @@ function adConf(){
   const u=S.user;
   return`<div class="ptop"><div class="av">VM</div><div class="pname">${u.nombre}</div><div class="psub">${u.cargo||'—'}</div></div>
   <div class="card"><div class="ch">Sistema</div>
-    ${['Usuarios y roles','Planes y tarifas','Cobranza','Notificaciones','Backup','Integraciones'].map(i=>`<div class="lr" style="cursor:pointer" onclick="alert('Próximamente')"><div class="lrb"><div class="lrn">${i}</div></div><span style="color:var(--ink3);width:16px;height:16px">${IC.arrow}</span></div>`).join('')}
+    ${['Usuarios y roles','Planes y tarifas','Notificaciones','Backup','Integraciones'].map(i=>`<div class="lr" style="cursor:pointer" onclick="alert('Próximamente')"><div class="lrb"><div class="lrn">${i}</div></div><span style="color:var(--ink3);width:16px;height:16px">${IC.arrow}</span></div>`).join('')}
   </div>
   <button class="btn-o" onclick="doLogout()">Cerrar sesión</button>`;
 }
@@ -3135,7 +3136,7 @@ function perfilSuper(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['marketing','Marketing',true],['estadisticas','Estadísticas',true],['auditoria','Auditoría',true],['monitoreo','Monitoreo',true]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['cobranza','Cobranza',true],['marketing','Marketing',true],['estadisticas','Estadísticas',true],['auditoria','Auditoría',true],['monitoreo','Monitoreo',true]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -3159,6 +3160,7 @@ function superView(){
   else if(sec==='catalogo') body=catPanel();
   else if(sec==='afiliados') body=afPanel();
   else if(sec==='facturacion') body=facPanel();
+  else if(sec==='cobranza') body=cobPanel();
   else if(sec==='marketing') body=mktPanel();
   else if(sec==='auditoria') body=audPanel();
   else if(sec==='estadisticas') body=estPanel();
@@ -3176,6 +3178,7 @@ function superNav(sec){
   if(S.superSec==='catalogo'){ catDetach(); S.cat=null; }
   if(S.superSec==='afiliados'){ afDetach(); S.af=null; }
   if(S.superSec==='facturacion'){ facDetach(); S.fac=null; }
+  if(S.superSec==='cobranza'){ cobDetach(); S.cob=null; }
   if(S.superSec==='marketing'){ mktDetach(); S.mkt=null; }
   if(S.superSec==='auditoria'){ audDetach(); S.aud=null; }
   if(S.superSec==='estadisticas'){ S.est=null; } // on-demand, sin listeners
@@ -4396,12 +4399,14 @@ function facFacturaDetalle(){
   const est=f.estado||'emitida';
   let acciones='';
   if(est==='emitida'){
-    acciones=`<button class="btn-r" onclick="facFacturaPagar('${f.id}')">Marcar pagada</button>
+    // C-2: "Marcar pagada" RETIRADO de la UI — el pago se registra en el tab Cobranza (registrarPago hace el flip derivado).
+    // facFacturaPagar() queda definido pero no ruteado (banco de pruebas).
+    acciones=`<div style="font-size:.72rem;color:var(--ink3);margin-bottom:.6rem">Los pagos se registran en <b>Cobranza</b>. La factura pasa a <b>pagada</b> sola cuando se salda.</div>
       <div class="card" style="margin-top:.8rem;background:var(--bg)"><div style="font-size:.75rem;font-weight:700;margin-bottom:.3rem">Anular factura (libera los ítems)</div>
         <div class="field"><label>Motivo de anulación</label><input id="fac-fc-anmotivo" placeholder="requerido"></div>
         <button class="btn-o" onclick="facFacturaAnular('${f.id}')">Anular</button></div>`;
   } else if(est==='pagada'){
-    acciones=`<div style="background:var(--g,#1D9E75);color:#fff;border-radius:8px;padding:.5rem .65rem;font-size:.78rem;font-weight:600">Pagada${f.pagadaEn?'':''}. Una factura pagada no se anula directo (contradicción con la cobranza — decisión manual futura).</div>`;
+    acciones=`<div style="background:var(--g,#1D9E75);color:#fff;border-radius:8px;padding:.5rem .65rem;font-size:.78rem;font-weight:600">Pagada. Se saldó en Cobranza${f.pagadaLegacy?' (pago previo al módulo)':''}. Para revertir, anulá el pago en <b>Cobranza</b> (la factura vuelve a emitida).</div>`;
   } else {
     acciones=`<div style="font-size:.78rem;color:var(--ink3)">Factura anulada${f.motivoAnulacion?(' · '+esc(f.motivoAnulacion)):''}. Los ítems quedaron liberados (re-facturables). Se conserva como registro histórico.</div>`;
   }
@@ -4474,6 +4479,195 @@ async function facFacturaAnular(id){
     audit('factura_anulada','factura',id,motivo);
     render();
   }catch(e){ facFcMsg('No se pudo anular: '+(e.message||e)); }
+}
+
+/* ===================== COBRANZA (C-2, Contable-cobros) =====================
+   Registro de pagos por factura (semántica pago-por-factura, parciales). Gate puedeCobrar()
+   (cap gestionar_cobranza; admin/superadmin por bypass). El pago es INMUTABLE: se crea o se anula
+   con motivo, nunca se edita (reglas C-1). saldo = total − Σ pagos registrados (no anulados), DERIVADO.
+   El flip factura emitida<->pagada acompaña Σpagos>=total (invariante cross-doc client-side, rol confiable). */
+function fmtRecibo(n,year){ return `RC-${year}-${String(n).padStart(6,'0')}`; } // calco de fmtComprobante (FC-)
+function cobPagosDe(fid){ return (S.cob&&S.cob.pagos?S.cob.pagos:[]).filter(p=>p.facturaId===fid); }
+function cobPagadoDe(fid){ return cobPagosDe(fid).filter(p=>p.estado==='registrado').reduce((s,p)=>s+(Number(p.monto)||0),0); }
+function cobSaldoDe(f){ return (Number(f.total)||0) - cobPagadoDe(f.id); } // solo se llama sobre facturas 'emitida'
+function cobFormOpen(){ return !!(S.cob && S.cob.fedit!=null); } // el detalle tiene el form: no re-renderizar por snapshot mientras se tipea
+
+function cobAttach(){
+  if(S.cobUnsub) return;
+  const upd=()=>{ if(!cobFormOpen()) render(); };
+  S.cobUnsub=[
+    db.collection('facturas').onSnapshot(s=>{ if(!S.cob) return; S.cob.facturas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.cob){ S.cob.err=(e.message||String(e)); render(); } }),
+    db.collection('pagos').onSnapshot(s=>{ if(!S.cob) return; S.cob.pagos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.cob) S.cob.pagos=[]; })
+  ];
+}
+function cobDetach(){ if(S.cobUnsub){ S.cobUnsub.forEach(u=>{ try{u();}catch(_){} }); S.cobUnsub=null; } }
+function cobErr(t){ const e=document.getElementById('cob-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function cobSub(id){ if(!S.cob) return; S.cob.sub=id; S.cob.fedit=null; render(); navPush(); }
+function cobVerFactura(id){ if(!puedeCobrar()) return; S.cob.fedit=id; render(); navPush(); }
+function cobCerrarFactura(){ if(S.cob) S.cob.fedit=null; render(); }
+
+function cobPanel(){
+  if(!puedeCobrar()) return `<div class="card"><div class="ch">Cobranza</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para registrar cobranza.</div></div>`;
+  if(!S.cob){ S.cob={sub:'porcobrar', facturas:null, pagos:null, fedit:null, err:''}; cobAttach(); }
+  if(S.cob.err) return `<div class="card">No se pudo cargar cobranza: ${esc(S.cob.err)}</div>`;
+  const sub=S.cob.sub||'porcobrar';
+  const tab=(id,lbl)=>`<button onclick="cobSub('${id}')" style="flex:1;padding:.45rem .3rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.68rem;font-weight:600;letter-spacing:.02em;cursor:pointer">${lbl}</button>`;
+  const head=`
+  <div class="panel-h"><b>Cobranza</b><span class="live-tag">en vivo</span></div>
+  <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${tab('porcobrar','Por cobrar')}${tab('deuda','Deuda por socio')}</div>
+  <div id="cob-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
+  const body = sub==='deuda' ? cobDeudaView() : cobPorCobrarView();
+  return head + body;
+}
+
+function cobPorCobrarView(){
+  if(S.cob.facturas===null || S.cob.pagos===null) return `<div class="card">Cargando cobranza…</div>`;
+  if(S.cob.fedit!=null) return cobFacturaDetalle();
+  // Solo facturas emitidas con saldo REAL pendiente (> 0). Excluye la corporativa pre-exclusión de total 0
+  // y cualquier emitida ya saldada aún no flipeada. MISMO criterio que cobDeudaView (coherencia de vistas).
+  const emit=(S.cob.facturas||[]).filter(f=>f.estado==='emitida' && ((Number(f.total)||0)-cobPagadoDe(f.id))>0.001).slice()
+    .sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'') || String(a.nroComprobante||'').localeCompare(String(b.nroComprobante||'')));
+  const rows = emit.length ? emit.map(f=>{
+    const pagado=cobPagadoDe(f.id); const saldo=(Number(f.total)||0)-pagado; const parcial=pagado>0;
+    const afil=f.numeroAfiliado?('N° '+esc(f.numeroAfiliado)):'particular';
+    return `<div class="lr" style="cursor:pointer" onclick="cobVerFactura('${f.id}')"><div class="lrb"><div class="lrn">${esc(f.nombre||'—')}</div>
+      <div class="lrs">${esc(f.nroComprobante||'—')} · ${afil} · Total ${facMoney(f.total)}${parcial?(' · Pagado '+facMoney(pagado)):''}</div></div>
+      <div style="text-align:right"><div style="font-size:.7rem;color:var(--ink3)">saldo</div><div style="font-weight:800;color:var(--r)">${facMoney(saldo)}</div></div>
+      <svg class="chev" width="8" height="10" viewBox="0 0 1794 2190" style="margin-left:.5rem;opacity:.5"><use href="#cmono"/></svg></div>`;
+  }).join('') : `<div style="font-size:.82rem;color:var(--ink3);padding:.4rem">No hay facturas con saldo pendiente. Todo al día. 🎉</div>`;
+  const totalSaldo=emit.reduce((s,f)=>s+((Number(f.total)||0)-cobPagadoDe(f.id)),0);
+  const resumen=emit.length?`<div class="card" style="background:var(--bg);display:flex;justify-content:space-between;align-items:center"><span style="font-size:.78rem;font-weight:700">Por cobrar (${emit.length})</span><span style="font-weight:800;color:var(--r)">${facMoney(totalSaldo)}</span></div>`:'';
+  return `${resumen}<div class="card">${rows}</div>`;
+}
+
+function cobFacturaDetalle(){
+  const f=(S.cob.facturas||[]).find(x=>x.id===S.cob.fedit); if(!f) return cobPorCobrarView();
+  const pagos=cobPagosDe(f.id).slice().sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')));
+  const pagado=cobPagadoDe(f.id); const saldo=(Number(f.total)||0)-pagado;
+  const afil=f.numeroAfiliado?('N° socio '+esc(f.numeroAfiliado)):'Particular';
+  const histRows = pagos.length ? pagos.map(p=>{
+    const anul=p.estado==='anulado';
+    const medio=({efectivo:'Efectivo',transferencia:'Transferencia',deposito:'Depósito'})[p.medio]||p.medio||'—';
+    const accion = anul
+      ? `<span style="font-size:.62rem;color:var(--ink3)">anulado${p.motivoAnulacion?(' · '+esc(p.motivoAnulacion)):''}</span>`
+      : `<button class="btn-o" style="width:auto;padding:.2rem .5rem;font-size:.66rem" onclick="cobAnularPagoPrompt('${p.id}')">Anular</button>`;
+    return `<div class="ir" style="align-items:center;${anul?'opacity:.55':''}">
+      <span class="il" style="${anul?'text-decoration:line-through':''}">${esc(p.reciboNro||'—')} · ${esc(p.fecha||'—')} · ${esc(medio)}</span>
+      <span style="display:flex;gap:.5rem;align-items:center"><span class="iv" style="${anul?'text-decoration:line-through':'font-weight:700'}">${facMoney(p.monto)}</span>${accion}</span></div>`;
+  }).join('') : `<div style="font-size:.76rem;color:var(--ink3);padding:.4rem 0">Sin pagos registrados.</div>`;
+  const hoy=facHoyISO();
+  const form = saldo>0 ? `<div class="card" style="margin-top:.8rem;background:var(--bg)">
+      <div style="font-size:.75rem;font-weight:700;margin-bottom:.5rem">Registrar pago</div>
+      <div class="field"><label>Monto (máx. saldo ${facMoney(saldo)})</label><input id="cob-monto" type="number" min="0" step="0.01" placeholder="0"></div>
+      <div class="field"><label>Medio</label><select id="cob-medio"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option><option value="deposito">Depósito</option></select></div>
+      <div class="field"><label>Fecha del cobro</label><input id="cob-fecha" type="date" value="${esc(hoy)}"></div>
+      <div class="field"><label>Nota (opcional)</label><input id="cob-nota" placeholder="opcional"></div>
+      <button class="btn-r" onclick="registrarPago('${f.id}')">Registrar pago</button>
+    </div>` : `<div class="card" style="margin-top:.8rem;background:var(--bg);font-size:.78rem;color:var(--verde,#1D9E75);font-weight:700">✓ Factura saldada.</div>`;
+  return `<div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="cobCerrarFactura()">← Volver</button></div>
+    <div class="card"><div class="ch">Factura · ${esc(f.nroComprobante||'—')} ${facEstBadge(f.estado)}</div>
+    <div style="font-size:.9rem;font-weight:700">${esc(f.nombre||'—')}</div>
+    <div style="font-size:.75rem;color:var(--ink3);margin-bottom:.55rem">${afil} · ${esc(f.periodo||'—')}</div>
+    <div id="cob-err" class="err" style="display:none;margin:.4rem 0"></div>
+    <div class="ir"><span class="il">Total</span><span class="iv" style="font-weight:700">${facMoney(f.total)}</span></div>
+    <div class="ir"><span class="il">Pagado</span><span class="iv">${facMoney(pagado)}</span></div>
+    <div class="ir" style="border-top:2px solid var(--border2);margin-top:.3rem;padding-top:.3rem"><span class="il" style="font-weight:700">Saldo</span><span class="iv" style="font-weight:800;color:${saldo>0?'var(--r)':'var(--verde,#1D9E75)'}">${facMoney(saldo)}</span></div>
+    <div style="border-top:1px solid var(--border);margin:.7rem 0 .4rem;padding-top:.5rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)">Pagos</div>
+    ${histRows}
+    ${form}
+  </div>`;
+}
+
+function cobDeudaView(){
+  if(S.cob.facturas===null || S.cob.pagos===null) return `<div class="card">Cargando…</div>`;
+  const emit=(S.cob.facturas||[]).filter(f=>f.estado==='emitida');
+  const porSocio={};
+  emit.forEach(f=>{ const k=f.socioId||f.personaId||f.id; const saldo=(Number(f.total)||0)-cobPagadoDe(f.id); if(saldo<=0) return;
+    if(!porSocio[k]) porSocio[k]={nombre:f.nombre||'—', numeroAfiliado:f.numeroAfiliado||null, deuda:0, n:0}; porSocio[k].deuda+=saldo; porSocio[k].n++; });
+  const list=Object.values(porSocio).sort((a,b)=>b.deuda-a.deuda);
+  if(!list.length) return `<div class="card"><div style="font-size:.82rem;color:var(--ink3);padding:.4rem">Nadie con deuda. Todo al día. 🎉</div></div>`;
+  const total=list.reduce((s,x)=>s+x.deuda,0);
+  const rows=list.map(x=>`<div class="ir"><span class="il">${esc(x.nombre)}${x.numeroAfiliado?(' · N° '+esc(x.numeroAfiliado)):''} <span style="color:var(--ink3);font-size:.7rem">(${x.n} fact.)</span></span><span class="iv" style="font-weight:700;color:var(--r)">${facMoney(x.deuda)}</span></div>`).join('');
+  return `<div class="card" style="background:var(--bg);display:flex;justify-content:space-between;align-items:center"><span style="font-size:.78rem;font-weight:700">Deuda total (${list.length} socios)</span><span style="font-weight:800;color:var(--r)">${facMoney(total)}</span></div>
+    <div class="card">${rows}</div>`;
+}
+
+function facHoyISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+// registrarPago — tx atómica contadores/recibos + create del pago (calco de generarFacturas). Luego flip derivado.
+async function registrarPago(fid){
+  if(!puedeCobrar()) return; cobErr('');
+  const f=(S.cob.facturas||[]).find(x=>x.id===fid); if(!f){ cobErr('Factura no encontrada.'); return; }
+  if(f.estado!=='emitida'){ cobErr('Solo se cobran facturas emitidas.'); return; }
+  const monto=Number(document.getElementById('cob-monto')?.value);
+  const medio=document.getElementById('cob-medio')?.value||'';
+  const fecha=(document.getElementById('cob-fecha')?.value||'').trim();
+  const nota=(document.getElementById('cob-nota')?.value||'').trim();
+  if(!(monto>0)){ cobErr('El monto debe ser mayor a 0.'); return; }
+  if(!['efectivo','transferencia','deposito'].includes(medio)){ cobErr('Elegí un medio de pago.'); return; }
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(fecha)){ cobErr('Elegí la fecha del cobro.'); return; }
+  const pagadoPrev=cobPagadoDe(fid); const saldo=(Number(f.total)||0)-pagadoPrev;
+  if(monto>saldo+0.001){ cobErr('El monto supera el saldo ('+facMoney(saldo)+').'); return; }
+  const year=new Date().getFullYear();
+  try{
+    const counterRef=db.collection('contadores').doc('recibos');
+    const pagoRef=db.collection('pagos').doc();
+    let reciboAsignado='';
+    await db.runTransaction(async tx=>{
+      const cs=await tx.get(counterRef);
+      const ultimo=cs.exists?(cs.data().ultimo||0):0;
+      const next=ultimo+1;
+      reciboAsignado=fmtRecibo(next,year);
+      tx.set(counterRef,{ultimo:next,actualizadoEn:FV()},{merge:true});
+      tx.set(pagoRef,{
+        pagadorId:f.personaId||null, pagadorTipo:'persona', facturaId:fid, personaId:f.personaId||null,
+        monto, fecha, medio, reciboNro:reciboAsignado, nota:nota||null,
+        estado:'registrado', registradoEn:FV(), registradoPor:S.user.uid
+      });
+    });
+    audit('pago_registrado','pago',pagoRef.id,reciboAsignado+' · '+facMoney(monto));
+    // Actualización OPTIMISTA local: la tx (a diferencia de .set()) NO refleja el write en el cache antes del
+    // round-trip, y el snapshot que llega después lo salta upd() con el detalle abierto (cobFormOpen). Empujamos
+    // el pago al estado local para que el render inmediato muestre el saldo/historial nuevos; el snapshot reconcilia.
+    if(S.cob && Array.isArray(S.cob.pagos)){
+      S.cob.pagos.push({ id:pagoRef.id, pagadorId:f.personaId||null, pagadorTipo:'persona', facturaId:fid, personaId:f.personaId||null, monto, fecha, medio, reciboNro:reciboAsignado, nota:nota||null, estado:'registrado', registradoPor:S.user.uid });
+    }
+    // Flip derivado: si con este pago se salda, factura emitida->pagada (invariante client-side).
+    if(pagadoPrev+monto >= (Number(f.total)||0)-0.001){
+      try{ await db.collection('facturas').doc(fid).set({ estado:'pagada', pagadaEn:FV(), pagadaPor:S.user.uid },{merge:true}); audit('factura_pagada','factura',fid,'saldada por cobranza'); }
+      catch(e){ console.warn('[registrarPago] flip a pagada falló',e); }
+      const lf=(S.cob.facturas||[]).find(x=>x.id===fid); if(lf) lf.estado='pagada'; // espejo local del flip
+      S.cob.fedit=null; // saldada: volver a la lista
+    }
+    render();
+  }catch(e){ cobErr('No se pudo registrar el pago: '+(e.message||e)); }
+}
+
+function cobAnularPagoPrompt(pid){
+  const motivo=prompt('Motivo de anulación del pago:'); // simple; el rebote real lo hace la regla
+  if(motivo==null) return; const m=String(motivo).trim();
+  if(!m){ cobErr('El motivo es requerido para anular.'); return; }
+  cobAnularPago(pid, m);
+}
+// cobAnularPago — anula el pago (registrado->anulado + motivo). Flip inverso: si la factura estaba pagada
+// y al descontar este pago queda Σ < total → pagada->emitida (resuelve app:4399).
+async function cobAnularPago(pid, motivo){
+  if(!puedeCobrar()) return; cobErr('');
+  const p=(S.cob.pagos||[]).find(x=>x.id===pid); if(!p){ cobErr('Pago no encontrado.'); return; }
+  if(p.estado!=='registrado'){ cobErr('El pago ya está anulado.'); return; }
+  try{
+    await db.collection('pagos').doc(pid).set({ estado:'anulado', motivoAnulacion:motivo, anuladoEn:FV(), anuladoPor:S.user.uid },{merge:true});
+    audit('pago_anulado','pago',pid,motivo);
+    const f=(S.cob.facturas||[]).find(x=>x.id===p.facturaId);
+    if(f && f.estado==='pagada'){
+      const nuevoPagado=cobPagadoDe(f.id)-(Number(p.monto)||0); // pagado actual menos el que se anula
+      if(nuevoPagado < (Number(f.total)||0)-0.001){
+        try{ await db.collection('facturas').doc(f.id).set({ estado:'emitida', pagadaEn:null, pagadaPor:null },{merge:true}); audit('factura_reabierta','factura',f.id,'anulación de pago'); }
+        catch(e){ console.warn('[cobAnularPago] flip inverso falló',e); }
+      }
+    }
+    render();
+  }catch(e){ cobErr('No se pudo anular el pago: '+(e.message||e)); }
 }
 
 /* ===================== AFILIADOS — Socios + Personas (Estructura 3, Administración) =====================
