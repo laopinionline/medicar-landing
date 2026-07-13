@@ -29,7 +29,7 @@ const parser = new XMLParser({ ignoreAttributes:false, attributeNamePrefix:'@_',
 
 // RED DE SEGURIDAD (ludopatía): contenido de apuestas NO va a la cola de una app de salud. Si el título o la bajada
 // matchean, el doc se crea directo en 'descartado' (no 'pendiente'). NO reemplaza la curaduría humana — la respalda.
-const APUESTAS_RE = /apuestas|cuotas|casino|betting|pron[oó]sticos/i;
+const APUESTAS_RE = /apuestas|casino|betting|pron[oó]sticos/i; // "cuotas" a secas SACADO: en AR = pago en cuotas (falso positivo prepaga)
 const esApuestas = (titulo, bajada) => APUESTAS_RE.test(String(titulo || '') + ' ' + String(bajada || ''));
 
 const hashGuid = (g) => crypto.createHash('sha1').update(String(g)).digest('hex').slice(0, 24);
