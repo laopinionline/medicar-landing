@@ -12,7 +12,7 @@ const slice = (a, b) => lines.slice(a - 1, b).join('\n'); // 1-based inclusivo
 const esc        = slice(559, 559);
 const socioMoney = slice(632, 632);
 const periodoLbl = slice(641, 645);
-const homeView   = slice(918, 1132);
+const homeView   = slice(918, 1136);
 
 // Stubs de dependencias externas de homeView (browser/otras vistas). Devuelven '' → no importan para el render smoke.
 const stubs = `
@@ -49,6 +49,7 @@ const casos = [
   ['D sin socio (sección no debe renderizar)',  { socio:null, per:{}, u:{}, facturas:[] }],
   ['E 14 facturas (cap-12 + nota + anulada)',   { socio:socioBase, plan:planBase, planNombre:'Plan X', per:{}, u:{},
       facturas:Array.from({length:14},(_,i)=>FACT({nroComprobante:'FC-2026-'+String(i+1).padStart(6,'0'), periodo:'2099-'+String((i%12)+1).padStart(2,'0'), estado:i===0?'anulada':'emitida'})), dependientes:[] }],
+  ['F E-3 titular facturarA empresa (nota PWA)', { socio:{...socioBase, facturarA:{tipo:'empresa', razonSocial:'DEMO Convenios SA'}}, plan:planBase, planNombre:'Plan X', per:{}, u:{}, facturas:[], dependientes:[] }],
 ];
 
 let ok=0, fail=0;
@@ -60,8 +61,9 @@ for(const [nombre, cred] of casos){
     const tieneComprob = /Mis comprobantes/.test(out);
     const emptyState = /Todav.a no ten.s comprobantes/.test(out);
     const capNota = /Mostrando los .ltimos 12/.test(out);
+    const notaEmp = /Tu facturaci.n se emite a/.test(out);
     if(tipo!=='string') throw new Error('devolvió '+tipo+', no string');
-    console.log(`✓ ${nombre} → string(${out.length}) · comprobantes:${tieneComprob} empty:${emptyState} cap12:${capNota}`);
+    console.log(`✓ ${nombre} → string(${out.length}) · comprobantes:${tieneComprob} empty:${emptyState} cap12:${capNota} notaEmpresa:${notaEmp}`);
     ok++;
   }catch(e){
     console.log(`✗ ${nombre} → THROW: ${e.name}: ${e.message}`);

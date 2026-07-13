@@ -8,10 +8,10 @@ const lines = html.split('\n');
 const slice = (a, b) => lines.slice(a - 1, b).join('\n');
 
 const esc         = slice(1608, 1608);
-const facMoney    = slice(3930, 3930);
-const empPlanOpts = slice(5048, 5048);
-const empFormEdit = slice(5063, 5088);
-const e2helpers   = slice(5115, 5160);
+const facMoney    = slice(3931, 3931);
+const empPlanOpts = slice(5098, 5098);
+const empFormEdit = slice(5113, 5138);
+const e2helpers   = slice(5165, 5210);
 
 const stubs = `
   const S = __S__;
