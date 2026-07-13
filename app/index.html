@@ -4714,7 +4714,7 @@ function afPanel(){
     const inact=s.activo===false;
     const meta=['N° '+esc(s.numeroAfiliado||'—'), '· '+afPlanNom(s.planId), '· desde '+afFmtFecha(s.vigenteDesde), '· '+esc(s.tipoAfiliado||'—'), inact?'· inactivo':''].filter(Boolean).join(' ');
     const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="afEditar('${s.id}')">Editar</button><button class="${btn}" onclick="afBaja('${s.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
-    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin socios${showInact?'':' activos'}</div>`;
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="afShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
   const head=`<div class="panel-h"><b>Afiliados</b><span class="live-tag">en vivo</span></div>`;
@@ -4883,6 +4883,7 @@ function afFormNew(){
     </div>
     <div class="field"><label>Vigente desde</label><input id="af-vig" type="date" value="${esc(draft.vig||afTsToInput(firebase.firestore.Timestamp.now()))}"></div>
     <div class="field"><label>Carencia hasta (opcional)</label><input id="af-car" type="date" value="${esc(draft.car||'')}"></div>
+    ${facturarAField(draft.facturarA||null,'af-facturara')}
     <button class="btn-r" onclick="afGuardarNuevo()">Guardar socio</button>` : '';
   return `<div class="card"><div class="ch">Nuevo socio</div>
     ${convBanner}<div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div>
@@ -4998,6 +4999,9 @@ async function afGuardarNuevo(){
       }));
       socioId=socioRef.id; numeroFinal=r.correlativo;
     }
+    // E-2: facturarA (destinatario de facturación) — SOLO titular (el dependiente factura por su titular). Ortogonal
+    // a la membresía corporativa (empresaId): NO se sincronizan. Solo escribe si se eligió una empresa válida.
+    if(modo!=='dependiente' && socioId){ const fa=leerFacturarA('af-facturara'); if(fa && !fa.__err){ try{ await db.collection('socios').doc(socioId).set({ facturarA:fa },{merge:true}); }catch(_){} } }
     // Geocode-on-save: FUERA de la transacción de numeración (la tx no espera red). No bloquea el alta.
     if(geoParams){ try{ await afGeocodePersona(geoParams.personaId, geoParams.direccion, geoParams.sindir); }catch(_){} }
     // Espejo eager pacientes/{personaId} (Tramo 4): hace al socio BUSCABLE en el despacho. FUERA de la tx.
@@ -5033,7 +5037,7 @@ function empPanel(){
     const n=(S.af.socios||[]).filter(s=>s.empresaId===e.id).length;
     const tl=(e.tipo==='area_protegida')?'Área protegida':'Corporativo';
     const inact=e.activo===false;
-    return `<div class="lr"${inact?' style="opacity:.5"':''}><div class="lrb"><div class="lrn">${esc(e.razonSocial||'—')}</div><div class="lrs">N° ${esc(e.numeroConvenio||'—')} · ${tl} · ${n} integrante${n===1?'':'s'}${inact?' · inactiva':''}</div></div><button class="${btn}" onclick="empEditar('${e.id}')">Editar</button></div>`;
+    return `<div class="lr"${inact?' style="opacity:.5"':''}><div class="lrb"><div class="lrn">${esc(e.razonSocial||'—')} ${convenioChip(e.convenio)}</div><div class="lrs">N° ${esc(e.numeroConvenio||'—')} · ${tl} · ${n} integrante${n===1?'':'s'}${inact?' · inactiva':''}</div></div><button class="${btn}" onclick="empEditar('${e.id}')">Editar</button></div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin empresas todavía.</div>`;
   return `<div class="panel-h"><b>Empresas / convenios</b><span class="live-tag">en vivo</span></div>
     <button class="btn-r" onclick="empNuevo(false)" style="margin-bottom:.7rem">+ Nueva empresa</button>
@@ -5070,7 +5074,17 @@ function empFormEdit(id){
     <div class="field"><label>Plan por defecto</label><select id="emp-plan">${empPlanOpts(e.planIdDefault)}</select></div>
     <div class="field"><label>Estado</label><select id="emp-activo"><option value="si" ${e.activo!==false?'selected':''}>Activa</option><option value="no" ${e.activo===false?'selected':''}>Inactiva</option></select></div>
     <button class="btn-r" onclick="empGuardarEdit('${id}')">Guardar cambios</button>
-    <button class="btn-o" onclick="empSet({view:'list'})">Cancelar</button></div>`;
+    ${puedeConfig() ? `
+    <div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)">Convenio de cobro <span style="text-transform:none;color:var(--ink3)">(contable)</span></div>
+    <div id="emp-conv-err" class="err" style="display:none;margin-bottom:.4rem"></div>
+    <div class="field"><label>Modo</label><select id="emp-conv-modo" onchange="empConvModoChange(this.value)">
+      <option value="" ${!(e.convenio&&e.convenio.modo)?'selected':''}>— sin cargar —</option>
+      <option value="fijo" ${e.convenio&&e.convenio.modo==='fijo'?'selected':''}>Fijo mensual (monto pactado)</option>
+      <option value="per_capita" ${e.convenio&&e.convenio.modo==='per_capita'?'selected':''}>Per cápita (Σ abonos de sus socios)</option></select></div>
+    <div class="field" id="emp-conv-monto-grp" style="display:${e.convenio&&e.convenio.modo==='fijo'?'':'none'}"><label>Monto mensual</label><input id="emp-conv-monto" type="number" min="0" step="0.01" value="${e.convenio&&e.convenio.modo==='fijo'?esc(e.convenio.montoMensual):''}"></div>
+    <button class="btn-r" onclick="empGuardarConvenio('${id}')">Guardar convenio</button>`
+    : `<div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem">${convenioChip(e.convenio)} <span style="font-size:.66rem;color:var(--ink3)">· lo edita el contable</span></div>`}
+    <button class="btn-o" onclick="empSet({view:'list'})" style="margin-top:.5rem">Cancelar</button></div>`;
 }
 async function empGuardarNuevo(){
   if(!puedeAfil()) return; empErr('');
@@ -5097,6 +5111,54 @@ async function empGuardarEdit(id){
     empSet({view:'list'});
   }catch(e){ empErr('No se pudo guardar: '+(e.message||e)); }
 }
+
+/* ===================== E-2: convenio de empresa + facturarA del socio (superficies de carga) ===================== */
+// Etiqueta y chip del convenio (read-only para todos; el EDITOR es aparte, solo puedeConfig).
+function convenioLbl(c){ return (!c || !c.modo) ? '— sin cargar' : (c.modo==='fijo' ? ('fijo '+facMoney(c.montoMensual)) : 'per cápita'); }
+function convenioChip(c){ const set=!!(c && c.modo); return `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:${set?'var(--r)':'transparent'};color:${set?'#fff':'var(--ink3)'};border:${set?'none':'1px solid var(--border2)'}">Convenio: ${esc(convenioLbl(c))}</span>`; }
+function empConvErr(t){ const e=document.getElementById('emp-conv-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+function empConvModoChange(v){ const g=document.getElementById('emp-conv-monto-grp'); if(g) g.style.display=(v==='fijo')?'':'none'; } // DOM puro
+// Editor del convenio: SOLO puedeConfig (el gate contable de E-1). Guarda SOLO convenio+actualizadoEn (no toca identidad).
+async function empGuardarConvenio(id){
+  if(!puedeConfig()) return; empConvErr('');
+  const modo=document.getElementById('emp-conv-modo')?.value||'';
+  if(!['fijo','per_capita'].includes(modo)){ empConvErr('Elegí un modo de convenio.'); return; } // espejo client-side de convenioOk
+  let convenio;
+  if(modo==='fijo'){
+    const monto=Number(document.getElementById('emp-conv-monto')?.value);
+    if(!(monto>0)){ empConvErr('El monto mensual debe ser mayor a 0.'); return; }
+    convenio={ modo:'fijo', montoMensual:monto };
+  } else { convenio={ modo:'per_capita' }; }
+  // update() REEMPLAZA el mapa 'convenio' entero. Con set({..},{merge:true}) los mapas anidados se FUSIONAN →
+  // fijo->per_capita dejaría montoMensual residual y convenioOk() rebotaría. El error del catch es persistente
+  // (afFormOpen bloquea el re-render por snapshot mientras el form está abierto).
+  try{ await db.collection('empresas').doc(id).update({ convenio, actualizadoEn:FV() }); audit('empresa_convenio','empresa',id,convenioLbl(convenio)); empSet({view:'list'}); }
+  catch(e){ empConvErr('No se pudo guardar el convenio: '+(e.message||e)); } // empConvErr escribe el DOM directo; afFormOpen impide el re-render que lo borraría
+}
+// facturarA: campo "Facturar a" reusable (alta + edición). prefix -> ids `${prefix}-tipo/-emp/-grp`. Ortogonal a la membresía corporativa.
+function facturarAField(fa, prefix){
+  const emp=!!(fa && fa.tipo==='empresa');
+  const opts=(S.af.empresas||[]).filter(e=>e.activo!==false).map(e=>`<option value="${e.id}" ${emp&&fa.empresaId===e.id?'selected':''}>${esc(e.razonSocial||'—')} (N° ${esc(e.numeroConvenio||'—')})</option>`).join('');
+  return `<div class="field"><label>Facturar a</label>
+      <select id="${prefix}-tipo" onchange="afFacturarATipoChange(this.value,'${prefix}-grp')">
+        <option value="persona" ${!emp?'selected':''}>El socio (persona)</option>
+        <option value="empresa" ${emp?'selected':''}>Una empresa</option></select></div>
+    <div class="field" id="${prefix}-grp" style="display:${emp?'':'none'}"><label>Empresa destinataria</label>
+      <select id="${prefix}-emp">${opts||'<option value="">— sin empresas activas —</option>'}</select>
+      <div style="font-size:.66rem;color:var(--ink3);margin-top:.2rem">Independiente del tipo de afiliado: cualquier plan puede facturarse a una empresa.</div></div>`;
+}
+function afFacturarATipoChange(v, grpId){ const g=document.getElementById(grpId); if(g) g.style.display=(v==='empresa')?'':'none'; } // DOM puro
+// Lee el campo. Devuelve null (=persona, ausencia) | {tipo:'empresa',empresaId,razonSocial} | {__err} si empresa sin elegir.
+function leerFacturarA(prefix){
+  const tipo=document.getElementById(prefix+'-tipo')?.value||'persona';
+  if(tipo!=='empresa') return null;
+  const empId=document.getElementById(prefix+'-emp')?.value||'';
+  if(!empId) return { __err:'Elegí la empresa destinataria de la facturación.' };
+  const emp=(S.af.empresas||[]).find(e=>e.id===empId);
+  return { tipo:'empresa', empresaId:empId, razonSocial:(emp&&emp.razonSocial)||'' }; // razonSocial denorm al momento
+}
+function facturarAChip(fa){ return (fa && fa.tipo==='empresa') ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:var(--ink,#333);color:#fff">Factura a: ${esc(fa.razonSocial||'empresa')}</span>` : ''; }
+
 // Muestra/oculta los grupos del alta según el tipo (DOM puro, sin render → no borra lo tipeado).
 function afTipoChange(v){
   const corp=(v!=='directo');
@@ -5150,6 +5212,7 @@ function afFormEdit(){
     <div class="field"><label>Vigente desde</label><input id="af-e-vig" type="date" value="${afTsToInput(s.vigenteDesde)}"></div>
     <div class="field"><label>Carencia hasta (opcional)</label><input id="af-e-car" type="date" value="${afTsToInput(s.carenciaHasta)}"></div>
     <div class="field"><label>Estado de alta</label><select id="af-e-activo"><option value="si" ${s.activo!==false?'selected':''}>Activo</option><option value="no" ${s.activo===false?'selected':''}>Baja lógica</option></select></div>
+    ${facturarAField(s.facturarA||null,'af-e-facturara')}
     <button class="btn-r" onclick="afGuardarEdit('${s.id}')">Guardar</button>
     <button class="btn-o" onclick="navBack()">Cancelar</button>
   </div>`;
@@ -5170,6 +5233,10 @@ async function afGuardarEdit(id){
     activo:(document.getElementById('af-e-activo')?.value||'si')==='si',
     actualizadoEn:FV()
   };
+  // E-2: facturarA — empresa => set; persona (ausencia) => delete (vuelve al default persona). Ortogonal a empresaId.
+  const fa=leerFacturarA('af-e-facturara');
+  if(fa && fa.__err){ afErr(fa.__err); return; }
+  data.facturarA = fa ? fa : firebase.firestore.FieldValue.delete();
   try{
     await db.collection('socios').doc(id).set(data,{merge:true});
     // Punto 3 (Tramo 3): si se cargó una dirección nueva, actualizar personas.direccion + re-geocodificar.
