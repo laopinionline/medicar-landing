@@ -606,7 +606,7 @@ function set(patch){ Object.assign(S, patch); render(); }
    mínimo; navPush al ABRIR una vista apilada; los "Volver/Cancelar" internos llaman
    navBack()=history.back; popstate -> navRestore aplica SOLO por las funciones existentes
    (abrir/cerrar). Flag navRestoring para no re-pushear. Solo navegación; cero lógica clínica. */
-const APILADAS=['chequeo','reporte','parametros'];
+const APILADAS=['chequeo','reporte','parametros','comprobantes'];
 let navRestoring=false;
 function navDesc(){ return { v:1, view: (APILADAS.includes(S.view) ? S.view : 'home') }; }
 function navPush(){ if(navRestoring) return; try{ history.pushState(navDesc(),''); }catch(_){} }      // al ABRIR (deeper)
@@ -622,12 +622,14 @@ function navRestore(desc){
     if(S.view==='chequeo'    && target!=='chequeo')    cerrarChequeo();
     else if(S.view==='reporte'    && target!=='reporte')    cerrarReporte();
     else if(S.view==='parametros' && target!=='parametros') cerrarParams();
+    else if(S.view==='comprobantes' && target!=='comprobantes') cerrarComprobantes();
     // ABRIR la apilada del descriptor si estamos en home (dirección "adelante", best-effort).
     // GRACIA: los abrir* tienen guard (cuestionario/personaId); si falta la data NO cambian de vista -> queda home.
     if(S.view==='home' && APILADAS.includes(target)){
       if(target==='chequeo') abrirChequeo();
       else if(target==='reporte') abrirReporte();
       else if(target==='parametros') abrirParams();
+      else if(target==='comprobantes') abrirComprobantes();
     }
     render();
   } finally { navRestoring=false; }
@@ -657,8 +659,50 @@ function periodoLbl(p){
   const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const i=parseInt(m[2],10)-1; return (meses[i]||m[2])+' '+m[1];
 }
-// F4: estado de display del abono. Facturado = presencia de facturaId (no hay estado 'facturado').
-function abonoEstado(a){ if((a||{}).estado==='anulado') return 'anulado'; if((a||{}).facturaId) return 'facturado'; return 'emitido'; }
+// Etiqueta del socio, derivada del ESTADO interno (que NO se toca): emitida→FACTURADO (listo para pagar),
+// pagada→PAGADO, anulada→ANULADA. "Emitido" (vocabulario interno) desaparece de la vista del socio.
+function facBadge(est){
+  const m = est==='anulada' ? ['var(--gris)','ANULADA','text-decoration:line-through']
+    : est==='pagada' ? ['var(--verde)','PAGADO','']
+    : ['var(--tinta)','FACTURADO',''];
+  return `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:${m[0]};${m[2]}">${m[1]}</span>`;
+}
+// Detalle del comprobante: desglose por item.tipo. 'abono' → "Abono", 'cargo' → "Otras prestaciones".
+// Hoy no hay cargos: esa sección se OCULTA (grupoDetalle devuelve '' si el grupo está vacío). No se simula nada.
+function comprobanteDetalle(f){
+  const items = f.items || [];
+  const sum = arr => arr.reduce((s,it)=>s+(Number(it.monto)||0),0);
+  const grupo = (titulo, arr) => !arr.length ? '' : `
+    <div class="row" style="padding:.45rem 1rem"><span class="rl" style="font-weight:700;color:var(--tinta)">${titulo}</span><span class="rv" style="font-weight:700">${socioMoney(sum(arr))}</span></div>
+    ${arr.map(it=>`<div class="row" style="padding:.15rem 1rem .15rem 1.7rem"><span class="rl" style="font-size:.74rem;color:var(--gris)">${esc(it.descripcion||it.tipo||'—')}</span><span class="rv" style="font-size:.74rem;color:var(--gris)">${socioMoney(it.monto)}</span></div>`).join('')}`;
+  return `<div style="background:#fafafa">
+    ${grupo('Abono', items.filter(it=>it.tipo==='abono'))}
+    ${grupo('Otras prestaciones', items.filter(it=>it.tipo==='cargo'))}
+    <div class="row" style="padding:.55rem 1rem;border-top:1px solid var(--linea)"><span class="rl" style="font-weight:800;color:var(--tinta)">TOTAL</span><span class="rv" style="font-weight:800">${socioMoney(f.total)}</span></div>
+  </div>`;
+}
+// Fila expandible de un comprobante (nº · período · etiqueta · monto → detalle). Reusada en el home y en el historial.
+function comprobanteRow(f){
+  const tach = f.estado==='anulada';
+  return `<details style="border-bottom:1px solid var(--linea)"><summary style="list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:.7rem 1rem">
+    <span class="rl" style="color:var(--tinta);font-weight:700;${tach?'text-decoration:line-through;color:var(--gris)':''}">${esc(f.nroComprobante||'—')} <span style="font-weight:500;color:var(--gris)">· ${esc(periodoLbl(f.periodo))}</span> ${facBadge(f.estado)}</span>
+    <span class="rv" style="${tach?'color:var(--gris);text-decoration:line-through':'font-weight:700'}">${socioMoney(f.total)}</span></summary>
+    ${comprobanteDetalle(f)}</details>`;
+}
+function comprobantesOrdenadas(c){ return (c.facturas||[]).slice().sort((a,b)=> String(b.periodo||'').localeCompare(String(a.periodo||'')) || String(b.nroComprobante||'').localeCompare(String(a.nroComprobante||''))); }
+function abrirComprobantes(){ if(!S.cred) return; S.view='comprobantes'; render(); navPush(); }
+function cerrarComprobantes(){ S.view='home'; render(); }
+function comprobantesFullView(){
+  const c = S.cred || {};
+  const fac = comprobantesOrdenadas(c);
+  const rows = fac.length ? fac.map(comprobanteRow).join('') : `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">Todavía no tenés comprobantes.</div>`;
+  return `<div class="home">
+    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Mis comprobantes</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Volver</button></div>
+    <div class="sec"><div class="card">${rows}
+      <div style="padding:.75rem 1rem;font-size:.7rem;color:var(--gris);line-height:1.45;border-top:1px solid var(--linea)">Comprobantes internos de tu cuenta — no son facturas fiscales. Tocá uno para ver el detalle. Los pagos se coordinan con MEDICAR.</div>
+    </div></div>
+  </div>`;
+}
 
 /* ---------- Monitoreo N1: fechas y estado del chequeo semanal ---------- */
 function tsMs(t){ if(!t) return null; if(t.toMillis) return t.toMillis(); if(t.seconds!=null) return t.seconds*1000; if(typeof t==='number') return t; return null; }
@@ -773,11 +817,7 @@ async function cargarCredencial(uid){
     try{ const dep = await db.collection('socios').where('titularPersonaId','==',personaId).get(); dependientes = dep.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
   }
 
-  // F4: historial de abonos — el abono lleva el personaId del titular facturado (F2 habilita la lectura).
-  let abonos = [];
-  if(personaId){
-    try{ const ab = await db.collection('abonos').where('personaId','==',personaId).get(); abonos = ab.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
-  }
+  // (El socio ya NO ve abonos: la vista de cuenta es por comprobantes/facturas. Se dejó de cargar c.abonos.)
 
   // F3: comprobantes — la factura lleva el personaId de la persona facturada (regla F-3 habilita la lectura).
   let facturas = [];
@@ -825,7 +865,7 @@ async function cargarCredencial(uid){
     sintomas = sc.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>((a.orden||0)-(b.orden||0)));
   }catch(_){}
 
-  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, abonos, facturas, agenda, misTurnos, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
+  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, facturas, agenda, misTurnos, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
 }
 
 /* ---------- Auth flow ---------- */
@@ -1035,67 +1075,29 @@ function homeView(){
     </div>`;
   }
 
-  // F4 — Historial de abonos. El abono lleva el personaId del TITULAR: el dependiente ve una nota, no la lista.
-  let historialSec = '';
-  if(esDependiente){
-    historialSec = `<div class="sec"><div class="sec-h">Cuotas</div><div class="card"><div style="padding:.9rem 1rem;font-size:.78rem;color:var(--gris);line-height:1.45">La facturación de tu grupo la gestiona el titular.</div></div></div>`;
-  } else if(socio && socio.planId){ // titular/individual con plan → sección con historial o empty-state
-    const abonos = (c.abonos||[]).slice().sort((a,b)=>String(b.periodo||'').localeCompare(String(a.periodo||''))); // período desc
-    const CAP = 12; const mostrados = abonos.slice(0, CAP);
-    const badgeDe = (est) => est==='anulado'
-        ? `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--gris);text-decoration:line-through">ANULADO</span>`
-      : est==='facturado'
-        ? `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--verde)">FACTURADO</span>`
-        : `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--tinta)">EMITIDO</span>`;
-    let inner;
-    if(!abonos.length){
-      inner = `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">Todavía no hay cuotas emitidas.</div>`;
-    } else {
-      const rows = mostrados.map(a=>{
-        const est = abonoEstado(a); const tach = est==='anulado';
-        return `<div class="row"><span class="rl" style="color:var(--tinta);font-weight:700">${esc(periodoLbl(a.periodo))} ${badgeDe(est)}</span><span class="rv" style="${tach?'color:var(--gris);text-decoration:line-through':''}">${socioMoney(a.precioFinal)}</span></div>`;
-      }).join('');
-      const capNota = abonos.length>CAP ? `<div style="padding:.6rem 1rem;font-size:.7rem;color:var(--gris)">Mostrando las últimas ${CAP}.</div>` : '';
-      inner = rows + capNota;
-    }
-    historialSec = `<div class="sec"><div class="sec-h">Historial de cuotas</div><div class="card">${inner}
-      <div style="padding:.75rem 1rem;font-size:.7rem;color:var(--gris);line-height:1.45;border-top:1px solid var(--linea)">Historial de emisión de tus cuotas. El estado indica si la cuota fue emitida o facturada, no si está paga — los pagos se coordinan con MEDICAR.</div>
-    </div></div>`;
-  }
-
-  // F3 — Mis comprobantes: espejo de F4 para facturas. La factura lleva el personaId de la persona facturada;
-  // los dependientes no tienen factura propia (su cuota va en el abono del titular) → ven el empty-state.
+  // Vista de cuenta del socio — UN solo bloque, por COMPROBANTES (facturas). El socio ya no ve abonos.
+  //  - Dependiente: nota (la facturación del grupo la gestiona el titular; hay UN comprobante del grupo, en el titular).
+  //  - Titular/individual: la ÚLTIMA factura (expandible al detalle) + "Ver historial ›" (listado completo apilado).
   let comprobantesSec = '';
   if(socio){
-    const fac = (c.facturas||[]).slice().sort((a,b)=> String(b.periodo||'').localeCompare(String(a.periodo||'')) || String(b.nroComprobante||'').localeCompare(String(a.nroComprobante||''))); // período desc, luego nº desc
-    const CAP = 12; const mostrados = fac.slice(0, CAP);
-    const facBadge = (est) => est==='anulada'
-        ? `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--gris);text-decoration:line-through">ANULADA</span>`
-      : est==='pagada'
-        ? `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--verde)">PAGADA</span>`
-        : `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--tinta)">EMITIDA</span>`;
-    let inner;
-    if(!fac.length){
-      inner = `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">Todavía no tenés comprobantes emitidos.</div>`;
+    if(esDependiente){
+      comprobantesSec = `<div class="sec"><div class="sec-h">Mi cuenta</div><div class="card"><div style="padding:.9rem 1rem;font-size:.78rem;color:var(--gris);line-height:1.45">La facturación de tu grupo la gestiona el titular.</div></div></div>`;
     } else {
-      const rows = mostrados.map(f=>{
-        const tach = f.estado==='anulada';
-        const items = (f.items||[]).map(it=>`<div class="row" style="padding:.35rem 1rem"><span class="rl" style="font-size:.76rem;color:var(--gris)">${esc(it.descripcion||it.tipo||'—')}</span><span class="rv" style="font-size:.76rem;color:var(--gris)">${socioMoney(it.monto)}</span></div>`).join('');
-        return `<details style="border-bottom:1px solid var(--linea)"><summary style="list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:.7rem 1rem">
-          <span class="rl" style="color:var(--tinta);font-weight:700;${tach?'text-decoration:line-through;color:var(--gris)':''}">${esc(f.nroComprobante||'—')} <span style="font-weight:500;color:var(--gris)">· ${esc(periodoLbl(f.periodo))}</span> ${facBadge(f.estado)}</span>
-          <span class="rv" style="${tach?'color:var(--gris);text-decoration:line-through':'font-weight:700'}">${socioMoney(f.total)}</span></summary>
-          <div style="background:#fafafa">${items||'<div style="padding:.5rem 1rem;font-size:.76rem;color:var(--gris)">Sin detalle</div>'}</div></details>`;
-      }).join('');
-      const capNota = fac.length>CAP ? `<div style="padding:.6rem 1rem;font-size:.7rem;color:var(--gris)">Mostrando los últimos ${CAP}.</div>` : '';
-      inner = rows + capNota;
+      const fac = comprobantesOrdenadas(c);
+      const notaEmpresa = (socio.facturarA && socio.facturarA.tipo==='empresa')
+        ? `<div style="padding:.75rem 1rem;font-size:.76rem;color:var(--tinta);background:#eef4ff;border-bottom:1px solid var(--linea)">Tu facturación se emite a <b>${esc(socio.facturarA.razonSocial||'tu empresa')}</b>.</div>`
+        : '';
+      let inner;
+      if(!fac.length){
+        inner = `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">Todavía no tenés comprobantes.</div>`;
+      } else {
+        const verHist = fac.length>1 ? `<button onclick="abrirComprobantes()" style="width:100%;background:none;border:none;border-top:1px solid var(--linea);padding:.7rem 1rem;font-size:.8rem;color:var(--rojo);font-weight:700;cursor:pointer;display:flex;justify-content:space-between;align-items:center">Ver historial (${fac.length}) <span style="display:inline-flex">${chv(12)}</span></button>` : '';
+        inner = comprobanteRow(fac[0]) + verHist;
+      }
+      comprobantesSec = `<div class="sec"><div class="sec-h">Mi cuenta</div><div class="card">${notaEmpresa}${inner}
+        <div style="padding:.75rem 1rem;font-size:.7rem;color:var(--gris);line-height:1.45;border-top:1px solid var(--linea)">Comprobantes internos de tu cuenta — no son facturas fiscales. Los pagos se coordinan con MEDICAR.</div>
+      </div></div>`;
     }
-    // E-3: si la facturación del socio se emite a una empresa, avisarlo (no recibe facturas propias nuevas).
-    const notaEmpresa = (socio.facturarA && socio.facturarA.tipo==='empresa')
-      ? `<div style="padding:.75rem 1rem;font-size:.76rem;color:var(--tinta);background:#eef4ff;border-bottom:1px solid var(--linea)">Tu facturación se emite a <b>${esc(socio.facturarA.razonSocial||'tu empresa')}</b>.</div>`
-      : '';
-    comprobantesSec = `<div class="sec"><div class="sec-h">Mis comprobantes</div><div class="card">${notaEmpresa}${inner}
-      <div style="padding:.75rem 1rem;font-size:.7rem;color:var(--gris);line-height:1.45;border-top:1px solid var(--linea)">Comprobantes internos de tu cuenta — no son facturas fiscales. Tocá uno para ver el detalle. Los pagos se coordinan con MEDICAR.</div>
-    </div></div>`;
   }
 
   return `<div class="home">
@@ -1126,7 +1128,6 @@ function homeView(){
 
     ${cuotaSec}
     ${grupoSec}
-    ${historialSec}
     ${comprobantesSec}
     ${turnosSec}
 
@@ -1557,6 +1558,7 @@ function render(){
     case 'chequeo': html=chequeoFormView(); break;
     case 'reporte': html=reporteFormView(); break;
     case 'parametros': html=paramsFormView(); break;
+    case 'comprobantes': html=comprobantesFullView(); break;
     default: html=bootView();
   }
   root.innerHTML=html;
