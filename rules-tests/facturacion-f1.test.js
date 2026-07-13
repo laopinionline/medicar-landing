@@ -35,6 +35,7 @@ async function seed(env) {
     await db.doc('facturas/fEmit').set(FACT());
     await db.doc('facturas/fPagada').set(FACT({ estado:'pagada' }));
     await db.doc('facturas/fAnulada').set(FACT({ estado:'anulada' }));
+    await db.doc('facturas/fOtro').set(FACT({ personaId:'pZ' })); // F-3: factura de OTRA persona
   });
 }
 const ctx = (uid) => env.authenticatedContext(uid).firestore();
@@ -95,7 +96,9 @@ describe('F-1 — FACTURAS', () => {
   it('✗ transición inválida pagada -> emitida', async () => { await assertFails(ctx('cfg').doc('facturas/fPagada').set({ estado:'emitida' }, { merge:true })); });
   it('✗ transición inválida pagada -> anulada', async () => { await assertFails(ctx('cfg').doc('facturas/fPagada').set({ estado:'anulada', motivoAnulacion:'m', anuladaEn:2, anuladaPor:'cfg' }, { merge:true })); });
   it('✗ transición inválida anulada -> pagada', async () => { await assertFails(ctx('cfg').doc('facturas/fAnulada').set({ estado:'pagada', pagadaEn:2, pagadaPor:'cfg' }, { merge:true })); });
-  it('✗ afiliado lee factura (no es su colección)', async () => { await assertFails(ctx('socioU').doc('facturas/fEmit').get()); });
+  it('✓ afiliado lee SU factura (F-3, personaId propio)', async () => { await assertSucceeds(ctx('socioU').doc('facturas/fEmit').get()); });
+  it('✗ afiliado lee factura AJENA (F-3, personaId de otro)', async () => { await assertFails(ctx('socioU').doc('facturas/fOtro').get()); });
+  it('✗ afiliado escribe factura (F-3 es solo lectura)', async () => { await assertFails(ctx('socioU').doc('facturas/fEmit').set({ estado:'pagada' }, { merge:true })); });
   it('✗ operativo SIN cap lee factura', async () => { await assertFails(ctx('oper').doc('facturas/fEmit').get()); });
   it('✗ anónimo escribe factura', async () => { await assertFails(anon().doc('facturas/fEmit').set({ estado:'pagada' }, { merge:true })); });
 });

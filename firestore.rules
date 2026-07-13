@@ -533,7 +533,8 @@ service cloud.firestore {
     // Transiciones validas: emitida->pagada (facFacturaPagar) · emitida->anulada (facFacturaAnular). NUNCA delete.
     // F-2: nroComprobante (FC-AAAA-NNNNNN) REQUERIDO al emitir e INMUTABLE despues (no aparece en ningun update).
     match /facturas/{id} {
-      allow read:   if puedeFacturar();
+      allow read:   if puedeFacturar()
+                       || (isSignedIn() && resource.data.personaId != null && resource.data.personaId == miPersonaId()); // F-3: el socio lee SOLO sus comprobantes (calco de abonos F2)
       // create: shape exacto de generarFacturas + estado inicial 'emitida' + total numerico >= 0 + nº de comprobante.
       allow create: if puedeFacturar()
                        && request.resource.data.keys().hasOnly(['periodo','personaId','socioId','nombre','numeroAfiliado','items','total','estado','emitidaEn','emitidaPor','nroComprobante'])

@@ -765,6 +765,12 @@ async function cargarCredencial(uid){
     try{ const ab = await db.collection('abonos').where('personaId','==',personaId).get(); abonos = ab.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
   }
 
+  // F3: comprobantes — la factura lleva el personaId de la persona facturada (regla F-3 habilita la lectura).
+  let facturas = [];
+  if(personaId){
+    try{ const fc = await db.collection('facturas').where('personaId','==',personaId).get(); facturas = fc.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
+  }
+
   // F5: turnos — franjas activas (la ventana real la enforca la CF; acá se filtra en la UI) + MIS turnos
   // (personaId propio; por reglas el titular NO lee los turnos de sus dependientes → solo los ve como slot tomado).
   let agenda = [], misTurnos = [];
@@ -805,7 +811,7 @@ async function cargarCredencial(uid){
     sintomas = sc.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>((a.orden||0)-(b.orden||0)));
   }catch(_){}
 
-  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, abonos, agenda, misTurnos, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
+  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, abonos, facturas, agenda, misTurnos, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
 }
 
 /* ---------- Auth flow ---------- */
@@ -1039,6 +1045,37 @@ function homeView(){
     </div></div>`;
   }
 
+  // F3 — Mis comprobantes: espejo de F4 para facturas. La factura lleva el personaId de la persona facturada;
+  // los dependientes no tienen factura propia (su cuota va en el abono del titular) → ven el empty-state.
+  let comprobantesSec = '';
+  if(socio){
+    const fac = (c.facturas||[]).slice().sort((a,b)=> String(b.periodo||'').localeCompare(String(a.periodo||'')) || String(b.nroComprobante||'').localeCompare(String(a.nroComprobante||''))); // período desc, luego nº desc
+    const CAP = 12; const mostrados = fac.slice(0, CAP);
+    const facBadge = (est) => est==='anulada'
+        ? `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--gris);text-decoration:line-through">ANULADA</span>`
+      : est==='pagada'
+        ? `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--verde)">PAGADA</span>`
+        : `<span style="font-size:.58rem;font-weight:800;letter-spacing:.06em;color:var(--tinta)">EMITIDA</span>`;
+    let inner;
+    if(!fac.length){
+      inner = `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">Todavía no tenés comprobantes emitidos.</div>`;
+    } else {
+      const rows = mostrados.map(f=>{
+        const tach = f.estado==='anulada';
+        const items = (f.items||[]).map(it=>`<div class="row" style="padding:.35rem 1rem"><span class="rl" style="font-size:.76rem;color:var(--gris)">${esc(it.descripcion||it.tipo||'—')}</span><span class="rv" style="font-size:.76rem;color:var(--gris)">${socioMoney(it.monto)}</span></div>`).join('');
+        return `<details style="border-bottom:1px solid var(--linea)"><summary style="list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:.7rem 1rem">
+          <span class="rl" style="color:var(--tinta);font-weight:700;${tach?'text-decoration:line-through;color:var(--gris)':''}">${esc(f.nroComprobante||'—')} <span style="font-weight:500;color:var(--gris)">· ${esc(periodoLbl(f.periodo))}</span> ${facBadge(f.estado)}</span>
+          <span class="rv" style="${tach?'color:var(--gris);text-decoration:line-through':'font-weight:700'}">${socioMoney(f.total)}</span></summary>
+          <div style="background:#fafafa">${items||'<div style="padding:.5rem 1rem;font-size:.76rem;color:var(--gris)">Sin detalle</div>'}</div></details>`;
+      }).join('');
+      const capNota = fac.length>CAP ? `<div style="padding:.6rem 1rem;font-size:.7rem;color:var(--gris)">Mostrando los últimos ${CAP}.</div>` : '';
+      inner = rows + capNota;
+    }
+    comprobantesSec = `<div class="sec"><div class="sec-h">Mis comprobantes</div><div class="card">${inner}
+      <div style="padding:.75rem 1rem;font-size:.7rem;color:var(--gris);line-height:1.45;border-top:1px solid var(--linea)">Comprobantes internos de tu cuenta — no son facturas fiscales. Tocá uno para ver el detalle. Los pagos se coordinan con MEDICAR.</div>
+    </div></div>`;
+  }
+
   return `<div class="home">
     <div class="topbar">
       <div class="brand">${chv(20)}<span class="word">medicar</span></div>
@@ -1068,6 +1105,7 @@ function homeView(){
     ${cuotaSec}
     ${grupoSec}
     ${historialSec}
+    ${comprobantesSec}
     ${turnosSec}
 
     ${homeReporteBlock(c)}
