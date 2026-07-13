@@ -192,6 +192,8 @@ input{font-family:inherit}
 .tag-medicar{color:var(--rojo);background:#fdecec}
 .tag-salud{color:#1f7a4d;background:#e7f5ee}
 .tag-nutri{color:#b9700a;background:#fdf0dd}
+.tag-vida{color:#5A4BD1;background:#ece9fb}
+.post.tappable{cursor:pointer}
 .post h5{font-size:.98rem;font-weight:700;line-height:1.35;margin-bottom:.35rem;letter-spacing:-.01em;color:var(--tinta)}
 .post p{font-size:.8rem;color:var(--gris);line-height:1.5}
 .post .meta{margin-top:.7rem;font-size:.7rem;color:#aeb3b8;font-weight:600}
@@ -1147,35 +1149,41 @@ function homeView(){
   </div>`;
 }
 
-/* ---------- FEED "Para vos" (Tramo 3 — presentación pura) ---------- */
-/* ===== FEED DEMO — reemplazar por fuente real =====
-   Contenido estático de ejemplo. Cuando exista la fuente real (colección de contenido / novedades),
-   reemplazar SOLO este array por los docs traídos; homeFeedBlock() no cambia. cat: 'medicar'|'salud'|'nutri'. */
-const FEED_DEMO = [
-  { cat:'medicar', titulo:'Sumamos dos móviles de alta complejidad a la flota', bajada:'Más cobertura para Pergamino y la zona. Conocé el nuevo equipamiento.', meta:'Hace 2 días · 3 min de lectura' },
-  { cat:'salud',   titulo:'Presión arterial: cómo tomarla bien en casa', bajada:'Cinco pasos simples para que tu medición sea confiable y le sirva a tu médico.', meta:'Hace 4 días · 4 min de lectura' },
-  { cat:'nutri',   titulo:'Comer bien sin complicarte: el plato saludable', bajada:'La mitad verduras, un cuarto proteína, un cuarto cereales. Así de simple.', meta:'Hace 1 semana · 5 min de lectura' },
-  { cat:'salud',   titulo:'Dormir mejor: hábitos que ayudan de verdad', bajada:'Rutinas sencillas para un descanso que tu cuerpo agradece.', meta:'Hace 1 semana · 3 min de lectura' },
-  { cat:'medicar', titulo:'Cómo mostrar tu credencial digital desde el celular', bajada:'Tu afiliación a mano en segundos, sin buscar el carnet.', meta:'Hace 2 semanas · 2 min de lectura' },
-  { cat:'nutri',   titulo:'Hidratación: cuánta agua necesitás realmente', bajada:'Ni de más ni de menos — una guía simple para el día a día.', meta:'Hace 2 semanas · 4 min de lectura' }
-];
+/* ---------- FEED "Para vos" (PWA-2b — fuente real feed_posts) ---------- */
+/* Categorías de presentación (color/tag). 'cat' viene del doc (asignada por la CF según la fuente). */
 const FEED_CAT = {
   medicar:{ lbl:'MEDICAR',      tag:'tag-medicar', band:'linear-gradient(135deg,#ED1C24,#C8151C)' },
   salud:  { lbl:'Cuidado',      tag:'tag-salud',   band:'linear-gradient(135deg,#2E8B57,#1f7a4d)' },
-  nutri:  { lbl:'Alimentación', tag:'tag-nutri',   band:'linear-gradient(135deg,#F7941E,#e07d0a)' }
+  nutri:  { lbl:'Alimentación', tag:'tag-nutri',   band:'linear-gradient(135deg,#F7941E,#e07d0a)' },
+  vida:   { lbl:'Vida',         tag:'tag-vida',    band:'linear-gradient(135deg,#6C5CE7,#5A4BD1)' }
 };
-function feedAbrir(i){ /* TODO detalle del feed — sin contenido real todavía (placeholder no-op) */ }
+// Carga LAZY one-shot (NO onSnapshot: el feed cambia ~1 vez/día tras curaduría). Índice estado+fechaFuente ya en prod.
+async function feedLoad(){
+  if(S.feedLoading) return; S.feedLoading=true;
+  try{
+    const snap=await db.collection('feed_posts').where('estado','==','publicado').orderBy('fechaFuente','desc').limit(12).get();
+    S.feed=snap.docs.map(d=>d.data());
+  }catch(e){ S.feed=[]; console.warn('[feed] no se pudo cargar:', e); }
+  S.feedLoading=false; render();
+}
+// interno → tarjeta autosuficiente (no lleva a ningún lado, ni se ve tocable). laopinion/externo → abre la fuente.
+function feedAbrir(i){
+  const p=(S.feed||[])[i]; if(!p || p.origen==='interno') return;
+  if(p.link) window.open(p.link, '_blank', 'noopener'); // mandar al sitio (para laopinion, devuelve tráfico al diario)
+}
 function homeFeedBlock(){
-  if(!FEED_DEMO.length) return '';
-  const posts = FEED_DEMO.map((p,i)=>{
+  if(S.feed===undefined){ feedLoad(); return ''; } // aún sin cargar → dispara la carga; se re-renderiza al llegar
+  if(!S.feed.length) return '';                     // sin publicados → OCULTAR la sección entera (sin placeholder)
+  const posts = S.feed.map((p,i)=>{
     const cc = FEED_CAT[p.cat] || FEED_CAT.medicar;
-    return `<article class="post" onclick="feedAbrir(${i})">
+    const tappable = p.origen!=='interno' && !!p.link;
+    return `<article class="post${tappable?' tappable':''}"${tappable?` onclick="feedAbrir(${i})"`:''}>
       <div class="ph-img" style="background-image:${cc.band}"></div>
       <div class="ph-body">
         <span class="tagp ${cc.tag}">${esc(cc.lbl)}</span>
         <h5>${esc(p.titulo)}</h5>
-        <p>${esc(p.bajada)}</p>
-        <div class="meta">${esc(p.meta)}</div>
+        <p>${esc(p.bajada||'')}</p>
+        <div class="meta">${esc(p.fuenteNombre||'')}</div>
       </div>
     </article>`;
   }).join('');
