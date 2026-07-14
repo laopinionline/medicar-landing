@@ -84,6 +84,11 @@ service cloud.firestore {
              && get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.get('permisos', {}).get(cap, false) == true );
     }
 
+    // Fase2 (rol contable, J2 cap-driven): quien factura y/o cobra necesita LEER datos auxiliares para armar la
+    // facturación/cobranza (socios/personas/empresas/episodios/contadores) SIN ser esOperativo/esInterno. Solo lectura.
+    // NO abre tarifas/prestaciones (config) ni datos de salud. Definida temprano para no depender del orden.
+    function puedeFinanzas() { return tienePermiso('facturar') || tienePermiso('gestionar_cobranza'); }
+
     // usuarios/{uid}: cada quien lee su doc; admin lee toda la coleccion.
     // Escritura: alta/baja/cambios de rol -> solo superadmin (via panel / Admin SDK).
     // Mi perfil: cada usuario puede actualizar SOLO su propio nombre/fotoURL (nada mas).
@@ -126,7 +131,7 @@ service cloud.firestore {
       //    where ofrecido==true) son query-safe: cada una matchea una rama OR. Handoff TOMAR es un update
       //    ATOMICO (medicoId=uid + ofrecido=false en el mismo write) -> sin ventana de perdida de lectura.
       //  - CHOFER dueno: SOLO su propio episodio (choferId==uid), vista "mi despacho" (Bloque 3).
-      allow read:   if esDespachante() || isAdmin() || esSuperadmin()
+      allow read:   if esDespachante() || isAdmin() || esSuperadmin() // Fase2: el contable NO lee episodios (contienen motivo/triage/examen/desenlace clínicos). Factura desde cargos (denormalizados).
                        || (esMedico() && (resource.data.medicoId == request.auth.uid
                                           || resource.data.ofrecido == true))
                        || (isSignedIn() && resource.data.choferId == request.auth.uid);
@@ -263,13 +268,13 @@ service cloud.firestore {
     // app:2029, contadores/facturas app:4364, series de socios asignarNumeroRaiz app:4546) y de la nueva
     // contadores/recibos. Ningun test toca contadores → sin regresion.
     match /contadores/{id} {
-      allow read:   if esOperativo();
+      allow read:   if esOperativo() || puedeFinanzas(); // Fase2: el contable lee el contador FC-/RC-
       // create: bootstrap de una serie nueva (ej. contadores/recibos la primera vez). ultimo numerico.
-      allow create: if esOperativo()
+      allow create: if (esOperativo() || puedeFinanzas()) // Fase2: bootstrap de serie por el contable
                        && request.resource.data.keys().hasOnly(['ultimo','actualizadoEn'])
                        && request.resource.data.ultimo is number && request.resource.data.ultimo >= 1;
       // update: SOLO incremento +1 sobre el valor previo (0 si el doc no traia ultimo). Nunca retroceso ni pisada.
-      allow update: if esOperativo()
+      allow update: if (esOperativo() || puedeFinanzas()) // Fase2: el contable incrementa FC-/RC-
                        && tocadas().hasOnly(['ultimo','actualizadoEn'])
                        && request.resource.data.ultimo == resource.data.get('ultimo', 0) + 1;
       allow delete: if esSuperadmin();
@@ -447,6 +452,7 @@ service cloud.firestore {
     match /personas/{id} {
       allow read:           if isAdmin() || esSuperadmin()
                                || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema')
+                               // Fase2: el contable NO lee personas (llevan antecedentesCronicos/Otros clínicos). Los nombres ya vienen denormalizados en abonos/facturas.
                                || (isSignedIn() && id == miPersonaId());
       allow create, update: if tienePermiso('gestionar_afiliados'); // Tablero-Fase1: sin bypass isAdmin (el read mantiene el rol para el despacho)
     }
@@ -483,6 +489,7 @@ service cloud.firestore {
     match /socios/{id} {
       allow read:           if esDespachante() || isAdmin() || esSuperadmin()
                                || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema')
+                               || puedeFinanzas() // Fase2: el contable lee el socio para generar abonos y la deuda
                                || (isSignedIn() && miPersonaId() != null && resource.data.personaId == miPersonaId())
                                || (isSignedIn() && miPersonaId() != null && resource.data.titularPersonaId == miPersonaId()); // F2: el TITULAR lee sus dependientes (titularPersonaId denorm en F1)
       // E-1: gate intacto + validacion de forma de facturarA (solo cuando esta presente; no impone whitelist total).
@@ -496,7 +503,8 @@ service cloud.firestore {
     // tipo/creadoEn INMUTABLES (fuera del hasOnly de update). convenio validado por convenioOk().
     match /empresas/{id} {
       allow read:           if esDespachante() || isAdmin() || esSuperadmin()
-                               || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema');
+                               || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema')
+                               || puedeFinanzas(); // Fase2: el contable lee la empresa para facturarle / cobrarle
       // create: empGuardarNuevo + asignarNumeroRaiz (shape completo). Si trae 'convenio' -> exige gate contable.
       allow create: if (tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema'))
                        && ( !('convenio' in request.resource.data) || tienePermiso('configurar_sistema') )
@@ -694,7 +702,7 @@ service cloud.firestore {
     //  - SIN update, SIN delete: inmutable (ni el superadmin edita/borra por esta regla; el catch-all
     //    del superadmin igual podria, es intencional como valvula, pero desde la app nunca se toca).
     match /auditoria/{id} {
-      allow create: if esInterno();
+      allow create: if esInterno() || puedeFinanzas(); // Fase2: las acciones del contable quedan auditadas
       allow read:   if tienePermiso('configurar_sistema');
     }
 

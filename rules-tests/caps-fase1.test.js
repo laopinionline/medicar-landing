@@ -34,8 +34,18 @@ async function seed(env) {
     await db.doc('usuarios/cur').set({ rol:'despachante', roles:['despachante'], permisos: { curar_novedades:true } });
     await db.doc('usuarios/gp').set({ rol:'despachante', roles:['despachante'], permisos: { gestionar_personal:true } });
     await db.doc('usuarios/med1').set({ rol:'medico', roles:['medico'] });
+    await db.doc('usuarios/cont').set({ rol:'contable', roles:['contable'], permisos: { facturar:true, gestionar_cobranza:true } }); // Fase2: rol contable
     await db.doc('usuarios/plano').set({ rol:'despachante', roles:['despachante'] }); // operativo SIN caps
     await db.doc('staff_medico/med1').set({ nombre:'Dr X', activo:true });
+    // fixtures para los reads del contable (Fase2)
+    await db.doc('socios/s1').set({ numeroAfiliado:'100', activo:true });
+    await db.doc('episodios/e1').set({ estado:'cerrado' });
+    await db.doc('empresas/emp1').set({ razonSocial:'ACME' });
+    await db.doc('personas/pA').set({ nombre:'X' });
+    await db.doc('contadores/facturas').set({ ultimo:5 });
+    await db.doc('tarifas/t1').set({ nombre:'T', activo:true });
+    await db.doc('prestaciones/pr1').set({ nombre:'Emergencias', activo:true });
+    await db.doc('respuestas_cuestionario/r1').set({ personaId:'pZ', creadoEn:1 });
     // fixtures de lectura
     await db.doc('feed_posts/fPend').set({ estado:'pendiente', origen:'interno', titulo:'P' });
     await db.doc('auditoria/a1').set({ accion:'x', en:1 });
@@ -97,6 +107,19 @@ describe('gestionar_personal (staff + staff_medico, sin bypass isAdmin)', () => 
   it('✓ gestionar_personal escribe staff', async () => { await assertSucceeds(ctx('gp').doc('staff/s9').set({ personaId:'s9', rol:'medico', activo:true })); });
   it('✓ el médico actualiza SU propio nombre en staff_medico', async () => { await assertSucceeds(ctx('med1').doc('staff_medico/med1').set({ nombre:'Dr X2' }, { merge:true })); });
   it('✗ operativo pelado NO crea staff_medico', async () => { await assertFails(ctx('plano').doc('staff_medico/m9').set({ nombre:'Z', activo:true })); });
+});
+
+describe('Fase2 — reads del contable (cap-driven, sin datos de salud ni tarifas)', () => {
+  it('✓ contable lee socios (deuda por socio; sin datos clínicos)', async () => { await assertSucceeds(ctx('cont').doc('socios/s1').get()); });
+  it('✗ contable NO lee episodios (motivo/triage/examen/desenlace clínicos)', async () => { await assertFails(ctx('cont').doc('episodios/e1').get()); });
+  it('✓ contable lee empresas (facturar/cobrar a empresa)', async () => { await assertSucceeds(ctx('cont').doc('empresas/emp1').get()); });
+  it('✗ contable NO lee personas (antecedentesCronicos/Otros clínicos)', async () => { await assertFails(ctx('cont').doc('personas/pA').get()); });
+  it('✓ contable lee e incrementa contador FC-/RC-', async () => { await assertSucceeds(ctx('cont').doc('contadores/facturas').get()); await assertSucceeds(ctx('cont').doc('contadores/facturas').set({ ultimo:6, actualizadoEn:2 }, { merge:true })); });
+  it('✓ contable crea factura y pago', async () => { await assertSucceeds(ctx('cont').doc('facturas/fC').set(FACT())); await assertSucceeds(ctx('cont').collection('pagos').add(PAGO())); });
+  it('✗ contable NO lee tarifas (NO ve tarifas — J4)', async () => { await assertFails(ctx('cont').doc('tarifas/t1').get()); });
+  it('✗ contable NO lee prestaciones', async () => { await assertFails(ctx('cont').doc('prestaciones/pr1').get()); });
+  it('✗ contable NO lee datos de salud (respuestas_cuestionario)', async () => { await assertFails(ctx('cont').doc('respuestas_cuestionario/r1').get()); });
+  it('✗ contable NO escribe planes/sintomas/leads (no tiene esas caps)', async () => { await assertFails(ctx('cont').doc('planes/pX').set({ nombre:'P' })); await assertFails(ctx('cont').doc('sintomas_catalogo/sX').set({ nombre:'S', banderaRoja:false, activo:true })); await assertFails(ctx('cont').doc('leads/lX').set({ nombre:'L' })); });
 });
 
 describe('curar_novedades (antes rol admin, ahora cap)', () => {
