@@ -881,29 +881,33 @@ function puedeCobrar(){ return puede('gestionar_cobranza'); } // registrar/anula
 function puedeAfil(){ return puede('gestionar_afiliados'); }  // padrón (personas/socios/empresas), SIN marketing
 
 function getTabs(rol){
-  // Tabs para operativos NO-superadmin que tengan el permiso (consumo de la capa de permisos).
+  // CAP-DRIVEN (Tablero): cada cap-tab la enciende su CAP y se agrega para CUALQUIER rol (la cap MANDA).
+  // El rol solo aporta sus tabs ESTRUCTURALES (home/bandeja/despacho/episodios/alertas). afiliados pasó a cap.
   const movTab = puede('gestionar_moviles') ? [{id:'moviles',icon:'dispatch',lbl:'Móviles'}] : [];
   const cronoTab = puede('gestionar_guardias') ? [{id:'cronograma',icon:'history',lbl:'Cronograma'}] : [];
   const agendaTab = puede('gestionar_agenda_turnos') ? [{id:'agendaturnos',icon:'history',lbl:'Agenda turnos'}] : [];
+  const afTab = puede('gestionar_afiliados') ? [{id:'afiliados',icon:'users',lbl:'Afiliados'}] : []; // antes hardcodeada a admin; ahora por CAP
   const catTab = puedeConfig() ? [{id:'catalogo',icon:'plan',lbl:'Catálogo'}] : [];
-  const factTab = (puede('facturar') || puedeConfig()) ? [{id:'facturacion',icon:'chart',lbl:'Facturación'}] : []; // Tablero-Fase1: 'facturar' (operaciones) O configurar_sistema (tarifas). El tab mezcla ambos; el gate fino es por acción.
-  const cobTab = puedeCobrar() ? [{id:'cobranza',icon:'register',lbl:'Cobranza'}] : []; // cap propia gestionar_cobranza (el contable entra por acá)
-  // Tablero-Fase1: Novedades (curaduría del feed) por CAP 'curar_novedades' (antes era rol admin). Badge con pendientes por curar.
-  const puedeNov = puede('curar_novedades');
-  if(puedeNov) novBadgeAttach();
+  const factTab = (puede('facturar') || puedeConfig()) ? [{id:'facturacion',icon:'chart',lbl:'Facturación'}] : [];
+  const cobTab = puedeCobrar() ? [{id:'cobranza',icon:'register',lbl:'Cobranza'}] : [];
+  const puedeNov = puede('curar_novedades'); if(puedeNov) novBadgeAttach();
   const novTab = puedeNov ? [{id:'novedades',icon:'history',lbl:'Novedades'+(S.novPendCount?(' ('+S.novPendCount+')'):'')}] : [];
-  const mktTab = puede('marketing') ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : []; // Tablero-Fase1: cap propia 'marketing' (split del padrón)
+  const mktTab = puede('marketing') ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : [];
   const audTab = puedeConfig() ? [{id:'auditoria',icon:'history',lbl:'Auditoría'}] : [];
   const estTab = puedeConfig() ? [{id:'estadisticas',icon:'chart',lbl:'Estadísticas'}] : [];
-  const monTab = puede('clinico') ? [{id:'monitoreo',icon:'register',lbl:'Monitoreo'}] : []; // Tablero-Fase1: cap 'clinico' (catálogo clínico + monitoreo)
-  if(rol==='afiliado')return[{id:'perfil',icon:'user',lbl:'Perfil'}]; // el afiliado se atiende en el PWA (../socio/); en el panel no hay vistas suyas (historia/turnos eran mock demo-v1). Inalcanzable: enterWithFbUser/entrarConRol lo redirigen antes.
-  if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}]; // D-1: 'despacho'/'registro' retirados del nav (desp()/reg() quedan como banco de pruebas)
-  if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
-  if(rol==='contable')return[...factTab,...cobTab,{id:'perfil',icon:'user',lbl:'Perfil'}]; // Fase2: rol contable = Facturación (cap facturar) + Cobranza (cap gestionar_cobranza) + Perfil
-  if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
-  if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'afiliados',icon:'users',lbl:'Afiliados'},...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...cobTab,...novTab,...mktTab,...audTab,...estTab,...monTab,{id:'perfil',icon:'user',lbl:'Perfil'}]; // 'Guardias' y 'Atenciones' RETIRADAS (eran mock: cronoPanel real ya cubre guardias; adAtenc tenía números fabricados). Cronograma real sigue en cronoTab.
+  const monTab = puede('clinico') ? [{id:'monitoreo',icon:'register',lbl:'Monitoreo'}] : [];
+  const capTabs = [...afTab,...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...cobTab,...novTab,...mktTab,...audTab,...estTab,...monTab];
+  const perfil = {id:'perfil',icon:'user',lbl:'Perfil'};
+  const home = {id:'home',icon:'home',lbl:'Inicio'};
+  if(rol==='afiliado')return[perfil]; // el afiliado se atiende en el PWA; inalcanzable (redirigido antes)
+  if(rol==='superadmin')return[home,perfil]; // navega por superView/SUPER_SECS
+  let estr;
+  if(rol==='medico') estr=[home,{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'}];
+  else if(rol==='despachante') estr=[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'}];
+  else if(rol==='contable') estr=[]; // el contable no tiene home propio; sus tabs son las cap-tabs
+  else if(rol==='chofer') estr=[home];
+  else estr=[home]; // admin (default)
+  return [...estr,...capTabs,perfil];
 }
 
 function pg(){
@@ -913,13 +917,19 @@ function pg(){
   // goTab→set→render→pg, que NO pasa por verBandeja. Sin este guard, un reporteId rancio vincularía un episodio ajeno.
   if(S.pedidoReporteId && !(r==='despachante' && t==='despacho')) pedLimpiarVinculo();
   if(t!=='bandeja'&&t!=='episodios') S.epView=null; // salir de la bandeja cierra el detalle abierto
-  if(r==='afiliado'){if(t==='perfil')return miPerfil();return '';} // afiliado se atiende en el PWA (redirigido antes de llegar acá). aHome/hist/plan/turnos eran mock demo-v1: quedan definidos pero SIN ruta.
-  if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='home')return mHome();if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='perfil')return miPerfil();} // D-1: dispatch de 'despacho'/'registro' retirado (desp()/reg() siguen definidos, no ruteados)
-  if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='contable'){if(t==='cobranza')return cobPanel();if(t==='perfil')return miPerfil();return facPanel();} // Fase2: contable rutea SOLO facturación/cobranza/perfil
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='cobranza')return cobPanel();if(t==='novedades')return novPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='perfil')return miPerfil();} // 'guardias'/'atenciones' RETIRADOS: eran mock (adGuardias duplica cronoPanel real; adAtenc con números fabricados). Quedan definidos, sin ruta.
-  if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
-  if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
+  if(t==='perfil') return miPerfil();
+  // CAP-DRIVEN: router COMPARTIDO de cap-tabs. La tab solo existe si la cap está (getTabs); el panel + las reglas
+  // enforcen. Sirve para CUALQUIER rol → un contable con gestionar_moviles rutea Móviles. (afiliados por cap.)
+  const capRoute={moviles:movPanel,cronograma:cronoPanel,agendaturnos:agendaTurnosPanel,catalogo:catPanel,afiliados:afPanel,facturacion:facPanel,cobranza:cobPanel,novedades:novPanel,marketing:mktPanel,auditoria:audPanel,estadisticas:estPanel,monitoreo:monPanel};
+  if(capRoute[t]) return capRoute[t]();
+  // estructurales del rol (lo que no es cap-tab):
+  if(r==='afiliado') return ''; // PWA; inalcanzable (redirigido antes)
+  if(r==='medico'){if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();return mHome();}
+  if(r==='despachante'){if(t==='despacho')return dDesp();return bandeja();}
+  if(r==='contable') return facPanel();
+  if(r==='superadmin') return superView();
+  if(r==='chofer') return choferHome();
+  if(r==='admin') return adHome();
   return '';
 }
 

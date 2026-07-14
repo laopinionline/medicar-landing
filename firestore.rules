@@ -285,7 +285,8 @@ service cloud.firestore {
     // Alta/baja: admin (director medico) o superadmin. El uid sigue siendo la clave de las
     // reglas de episodios (medicoId == request.auth.uid), que no cambian.
     match /staff_medico/{uid} {
-      allow read:           if esOperativo();
+      allow read:           if esOperativo() || tienePermiso('gestionar_guardias') || tienePermiso('gestionar_personal'); // selector de cronograma + gestión de personal, por CAP
+
       // Tablero-Fase1: gestión del padrón de médicos = cap 'gestionar_personal' (calco de /staff). SIN bypass isAdmin.
       allow create, delete: if tienePermiso('gestionar_personal');
       // Mi perfil: el propio médico puede actualizar SOLO su nombre en su ficha; nada mas.
@@ -300,12 +301,13 @@ service cloud.firestore {
     //  - Escritura (alta/edicion/baja): SOLO quien tenga gestionar_moviles
     //    (o superadmin, por cortocircuito en tienePermiso). Fail-closed.
     match /moviles/{id} {
-      allow read:           if esOperativo();
-      // Alta/baja y CRUD general de la flota: gestionar_moviles.
-      allow create, delete: if esOperativo() && tienePermiso('gestionar_moviles');
-      allow update: if esOperativo() && (
+      // Cap-driven (Tablero): la cap MANDA, sin importar el rol. Lee la flota quien opera móviles/guardias/despacho.
+      allow read:           if esOperativo() || tienePermiso('gestionar_moviles') || tienePermiso('gestionar_guardias') || tienePermiso('despachar_episodios');
+      // Alta/baja y CRUD general de la flota: gestionar_moviles (SIN esOperativo — la cap alcanza).
+      allow create, delete: if tienePermiso('gestionar_moviles');
+      allow update:
         // (a) CRUD general (editar campos del móvil): gestionar_moviles.
-        tienePermiso('gestionar_moviles')
+        if tienePermiso('gestionar_moviles')
         // (b) DESPACHO: ocupar/liberar el móvil al asignar/reasignar desde el episodio.
         //     SOLO toca estado + episodioActivoId + actualizadoEn, y SOLO la transición
         //     disponible<->ocupado. Requiere despachar_episodios. Fail-closed.
@@ -314,8 +316,7 @@ service cloud.firestore {
           && tocadas().hasOnly(['estado','episodioActivoId','actualizadoEn'])
           && resource.data.estado in ['disponible','ocupado']
           && request.resource.data.estado in ['disponible','ocupado']
-        )
-      );
+        );
     }
 
     // tipos_movil/{id}: catálogo de tipos de móvil (UTI, Traslado, ...). Mismo criterio que moviles:
@@ -323,8 +324,8 @@ service cloud.firestore {
     // tenga gestionar_moviles. Baja lógica vía campo activo (no se borra desde acá salvo superadmin
     // por el catch-all). Fail-closed igual que moviles.
     match /tipos_movil/{id} {
-      allow read:                  if esOperativo();
-      allow create, update, delete: if esOperativo() && tienePermiso('gestionar_moviles');
+      allow read:                  if esOperativo() || tienePermiso('gestionar_moviles') || tienePermiso('gestionar_guardias');
+      allow create, update, delete: if tienePermiso('gestionar_moviles');
     }
 
     // guardias/{id}: cronograma de tripulacion (Bloque 1). Una guardia = UNA persona (chofer o medico)
@@ -343,11 +344,10 @@ service cloud.firestore {
         );
     }
     match /guardias/{id} {
-      allow read:           if esOperativo();
-      allow create, update: if esOperativo()
-                               && tienePermiso('gestionar_guardias')
+      allow read:           if esOperativo() || tienePermiso('gestionar_guardias') || tienePermiso('gestionar_moviles') || tienePermiso('despachar_episodios');
+      allow create, update: if tienePermiso('gestionar_guardias')
                                && guardiaFormaOK(request.resource.data);
-      allow delete:         if esOperativo() && tienePermiso('gestionar_guardias');
+      allow delete:         if tienePermiso('gestionar_guardias');
     }
 
     // agenda_turnos/{id} — franjas de disponibilidad de turnos (videollamada), Tramo Turnos T-A.1.
@@ -370,8 +370,7 @@ service cloud.firestore {
     }
     match /agenda_turnos/{id} {
       allow read:           if isSignedIn();
-      allow create, update: if esOperativo()
-                               && tienePermiso('gestionar_agenda_turnos')
+      allow create, update: if tienePermiso('gestionar_agenda_turnos')
                                && agendaTurnoFormaOK(request.resource.data);
       allow delete:         if false;
     }
@@ -414,7 +413,8 @@ service cloud.firestore {
     //    (tienePermiso ya cortocircuita superadmin a true.) Fail-closed.
     //  - Sin delete desde la app (baja logica). Superadmin conserva borrado por el catch-all.
     match /prestaciones/{id} {
-      allow read:           if esInterno();
+      allow read:           if esInterno() || tienePermiso('configurar_sistema'); // el que configura el catálogo lo lee, por CAP
+
       allow create, update: if tienePermiso('configurar_sistema');
     }
 
@@ -527,7 +527,8 @@ service cloud.firestore {
     //  - Escritura (alta/edicion): admin/superadmin o gestionar_personal. Baja LOGICA via 'activo', sin
     //    delete desde la app. NO altera las reglas de usuarios (cuentas) ni staff_medico (intactas).
     match /staff/{id} {
-      allow read:           if esInterno();
+      allow read:           if esInterno() || tienePermiso('gestionar_moviles') || tienePermiso('gestionar_guardias') || tienePermiso('gestionar_personal'); // selectores de choferes (móviles/cronograma) + personal, por CAP
+
       allow create, update: if tienePermiso('gestionar_personal'); // Tablero-Fase1: sin bypass isAdmin
     }
 
@@ -537,7 +538,8 @@ service cloud.firestore {
     //  - Escritura (alta/edicion; baja LOGICA via 'activo'): admin/superadmin o configurar_sistema.
     //    Sin delete desde la app. Superadmin conserva borrado por el catch-all.
     match /tarifas/{id} {
-      allow read:           if esInterno();
+      allow read:           if esInterno() || tienePermiso('configurar_sistema'); // configurar_sistema (NO facturar — el contable no ve tarifas, J4)
+
       allow create, update: if tienePermiso('configurar_sistema');
     }
 
@@ -613,7 +615,7 @@ service cloud.firestore {
     // Transiciones validas: emitida->pagada (facFacturaPagar) · emitida->anulada (facFacturaAnular). NUNCA delete.
     // F-2: nroComprobante (FC-AAAA-NNNNNN) REQUERIDO al emitir e INMUTABLE despues (no aparece en ningun update).
     match /facturas/{id} {
-      allow read:   if puedeFacturar()
+      allow read:   if puedeFacturar() || puedeCobrar() // Tablero: el cobrador (gestionar_cobranza) lee las facturas para cobrar, por CAP
                        || (isSignedIn() && resource.data.get('personaId', null) != null && resource.data.get('personaId', null) == miPersonaId()); // F-3: el socio lee SOLO sus comprobantes (calco abonos F2). E-1: .get() -> las facturas de empresa (sin personaId) no rompen la evaluacion.
       // create: shape de generarFacturas + estado inicial 'emitida' + total >= 0 + nº comprobante. E-1: cliente POLIMORFICO.
       allow create: if puedeFacturar()
@@ -729,15 +731,15 @@ service cloud.firestore {
                        || ( isSignedIn()
                             && request.resource.data.personaId == miPersonaId()
                             && request.resource.data.keys().hasOnly(['cuestionarioId','cuestionarioNombre','personaId','personaNombre','personaTelefono','respuestas','who5','pedidoContacto','motivoContacto','creadoEn']) );
-      allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId());
+      allow read:   if esInterno() || tienePermiso('clinico') || (isSignedIn() && resource.data.personaId == miPersonaId()); // clinico = catálogo clínico + MONITOREO (datos de salud reales), por CAP a cualquier rol (decisión Lucas)
     }
 
     // gestiones_contacto/{respuestaId}: atención de un "quiero que me contacten" (Etapa 26). La respuesta es
     // INMUTABLE; la gestión vive aparte. doc id = respuestaId (idempotente: una gestión por respuesta).
     //  - create: rol INTERNO (médico/admin marcan atendido). read: rol INTERNO. SIN update, SIN delete.
     match /gestiones_contacto/{respuestaId} {
-      allow create: if esInterno();
-      allow read:   if esInterno();
+      allow create: if esInterno() || tienePermiso('clinico'); // monitoreo marca "atendido", por CAP
+      allow read:   if esInterno() || tienePermiso('clinico');
     }
 
     // sintomas_catalogo/{id}: catálogo de síntomas configurables del Nivel 2 (Etapa 30). El afiliado necesita
@@ -761,7 +763,7 @@ service cloud.firestore {
                        || ( isSignedIn()
                             && request.resource.data.personaId == miPersonaId()
                             && request.resource.data.keys().hasOnly(['personaId','personaNombre','personaTelefono','sintomas','texto','tieneBanderaRoja','creadoEn']) );
-      allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId());
+      allow read:   if esInterno() || tienePermiso('clinico') || (isSignedIn() && resource.data.personaId == miPersonaId()); // clinico = catálogo clínico + MONITOREO (datos de salud reales), por CAP a cualquier rol (decisión Lucas)
       // D-3: puente bandera roja → despacho. SOLO el operativo gestiona el pedido (el socio NO toca el estado).
       // Whitelist por acción (calca episodios) + estadoPedido con valor válido. El create del socio queda intacto.
       allow update: if esOperativo()
@@ -780,7 +782,7 @@ service cloud.firestore {
                        || ( isSignedIn()
                             && request.resource.data.personaId == miPersonaId()
                             && request.resource.data.keys().hasOnly(['personaId','personaNombre','personaTelefono','fc','sis','temp','spo2','news2Score','news2Parcial','news2RedScore','news2Nivel','creadoEn']) );
-      allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId());
+      allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId()); // NO se abre a clinico (fuera de la lista de Lucas; sigue esInterno/afiliado propio)
     }
 
     // Resto del datastore: cerrado para todos, salvo superadmin. (Etapa 29 — INMUTABILIDAD REAL.)
