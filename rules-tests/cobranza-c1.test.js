@@ -25,10 +25,10 @@ const FACT = (over={}) => Object.assign({ periodo:'2099-01', personaId:'pA', soc
 async function seed(env) {
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await db.doc('usuarios/adm').set({ rol:'admin', roles:['admin'] });                                           // admin: cobra y factura por bypass
+    await db.doc('usuarios/adm').set({ rol:'admin', roles:['admin'], permisos:{ facturar:true, gestionar_cobranza:true } }); // Tablero-Fase1: admin post-migración (caps sembradas, sin bypass)
     await db.doc('usuarios/sadm').set({ rol:'superadmin', roles:['superadmin'] });                                 // superadmin: todo
     await db.doc('usuarios/cob').set({ rol:'despachante', roles:['despachante'], permisos:{ gestionar_cobranza:true } });   // COBRADOR puro
-    await db.doc('usuarios/cfg').set({ rol:'despachante', roles:['despachante'], permisos:{ configurar_sistema:true } });   // facturador (NO cobra)
+    await db.doc('usuarios/cfg').set({ rol:'despachante', roles:['despachante'], permisos:{ facturar:true } });   // facturador (cap 'facturar', NO cobra)
     await db.doc('usuarios/oper').set({ rol:'despachante', roles:['despachante'] });                              // operativo sin caps
     await db.doc('usuarios/socioU').set({ rol:'afiliado', roles:['afiliado'], personaId:'pA' });                  // afiliado
     await db.doc('pagos/pReg').set(PAGO());

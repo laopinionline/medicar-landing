@@ -25,7 +25,7 @@ async function seed(env) {
     await db.doc('usuarios/dep1').set({ rol: 'afiliado', roles: ['afiliado'], personaId: 'pD1' });
     await db.doc('usuarios/suelto').set({ rol: 'afiliado', roles: ['afiliado'] }); // sin personaId
     await db.doc('usuarios/despa').set({ rol: 'despachante', roles: ['despachante'] });
-    await db.doc('usuarios/adm').set({ rol: 'admin', roles: ['admin'] });
+    await db.doc('usuarios/adm').set({ rol: 'admin', roles: ['admin'], permisos: { facturar: true } }); // Tablero-Fase1: lee abonos por la cap 'facturar' (sin bypass)
     await db.doc('usuarios/medico').set({ rol: 'medico', roles: ['medico'] });
 
     // Socios: titular T; dependiente D1 (titularPersonaId=pT); hermano D3 (mismo T); dependiente ajeno D2 (titularPersonaId=pOtro).

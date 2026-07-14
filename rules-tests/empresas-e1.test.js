@@ -23,9 +23,9 @@ const FACT_EMP = (o={}) => Object.assign({ periodo:'2099-01', nombre:'ACME', ite
 async function seed(env) {
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await db.doc('usuarios/adm').set({ rol:'admin', roles:['admin'] });
+    await db.doc('usuarios/adm').set({ rol:'admin', roles:['admin'], permisos:{ gestionar_afiliados:true, configurar_sistema:true } }); // Tablero-Fase1: admin post-migración (sin bypass; identidad+convenio por caps)
     await db.doc('usuarios/afi').set({ rol:'despachante', roles:['despachante'], permisos:{ gestionar_afiliados:true } });
-    await db.doc('usuarios/cfg').set({ rol:'despachante', roles:['despachante'], permisos:{ configurar_sistema:true } });
+    await db.doc('usuarios/cfg').set({ rol:'despachante', roles:['despachante'], permisos:{ configurar_sistema:true, facturar:true } }); // Tablero-Fase1: convenio(configurar_sistema) + emite facturas(facturar)
     await db.doc('usuarios/oper').set({ rol:'despachante', roles:['despachante'] });
     await db.doc('usuarios/socioU').set({ rol:'afiliado', roles:['afiliado'], personaId:'pA' });
     await db.doc('socios/sA').set(SOC());

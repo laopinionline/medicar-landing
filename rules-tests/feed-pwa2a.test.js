@@ -16,7 +16,7 @@ let env;
 async function seed(env) {
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await db.doc('usuarios/adm').set({ rol:'admin', roles:['admin'] });
+    await db.doc('usuarios/adm').set({ rol:'admin', roles:['admin'], permisos:{ curar_novedades:true } }); // Tablero-Fase1: curaduría por cap (antes era rol admin)
     await db.doc('usuarios/socioU').set({ rol:'afiliado', roles:['afiliado'], personaId:'pA' });
     await db.doc('usuarios/oper').set({ rol:'despachante', roles:['despachante'] });
     await db.doc('feed_posts/fPend').set({ estado:'pendiente', origen:'laopinion', titulo:'X' });
