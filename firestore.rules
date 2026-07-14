@@ -97,7 +97,7 @@ service cloud.firestore {
     // ANTI AUTO-EDICION (Etapa 29): NADIE (incluido superadmin) cambia 'rol' ni 'activo' de SU PROPIO doc
     // (guarda final). Un segundo superadmin administrando a OTRO queda intacto (uid != su uid).
     match /usuarios/{uid} {
-      allow read:           if esSuperadmin() || (isSignedIn() && (request.auth.uid == uid || isAdmin()));
+      allow read:           if esSuperadmin() || (isSignedIn() && request.auth.uid == uid); // Paso 4: SIN isAdmin — usuarios lleva los permisos de todos; el admin ya NO lee la colección (nombres/conteo salen de staff/staff_medico/socios). Cada quien su doc; superadmin todo.
       allow create, delete: if esSuperadmin();
       allow update: if ( esSuperadmin()
                          || ( isSignedIn()
