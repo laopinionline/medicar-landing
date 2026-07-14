@@ -2,7 +2,7 @@
 const fs=require('fs'), vm=require('vm'), path=require('path');
 const lines=fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8').split('\n');
 const sl=(a,b)=>lines.slice(a-1,b).join('\n');
-const puedes=sl(875,880), getTabs=sl(882,905); // puede/puedeConfig/puedeCobrar/puedeAfil + getTabs
+const puedes=sl(876,881), getTabs=sl(883,907); // puede/puedeConfig/puedeCobrar/puedeAfil + getTabs
 
 const src=`
   const IC={home:'',history:'',plan:'',dispatch:'',user:'',chart:'',users:'',register:'',settings:''};
@@ -61,6 +61,14 @@ for(const [cap,tab] of MAP){
 // admin pelado (sin caps): solo afiliados+perfil+home
 { const T=tabsFor('admin',{});
   t('admin SIN caps → sin tabs de gestión (solo home/afiliados/perfil)', !MAP.some(([,tab])=>has(T,tab)), JSON.stringify(T)); }
+
+// Fase2 — rol contable
+{ const T=tabsFor('contable',{ facturar:true, gestionar_cobranza:true });
+  t('contable ve SOLO Facturación + Cobranza + Perfil', JSON.stringify(T)==='["facturacion","cobranza","perfil"]', JSON.stringify(T)); }
+{ const T=tabsFor('contable',{ facturar:true, gestionar_cobranza:true });
+  t('contable NO ve catalogo/monitoreo/marketing/novedades/afiliados', !['catalogo','monitoreo','marketing','novedades','afiliados','moviles','cronograma'].some(x=>has(T,x)), JSON.stringify(T)); }
+{ const T=tabsFor('contable',{});
+  t('contable SIN caps → solo Perfil', JSON.stringify(T)==='["perfil"]', JSON.stringify(T)); }
 
 console.log(`\n${ok}/${ok+fail} checks OK`);
 process.exit(fail?1:0);

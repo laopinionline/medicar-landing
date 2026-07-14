@@ -787,7 +787,7 @@ function entrarConRol(rol){
   if(rol==='afiliado'){ try{ sessionStorage.removeItem('medicar_rol'); }catch(_){} window.location.replace('../socio/'); return; } // defensa: el afiliado nunca rutea en el panel
   S.user.rol=rol;
   try{ sessionStorage.setItem('medicar_rol',rol); }catch(_){}
-  set({roleSelect:false,tab:(rol==='despachante'?'bandeja':'home'),step:0}); navReplace(); // baseline de sesión: atrás desde el home base SALE (no re-entra a login/selector)
+  set({roleSelect:false,tab:(rol==='despachante'?'bandeja':(rol==='contable'?'facturacion':'home')),step:0}); navReplace(); // baseline de sesión: atrás desde el home base SALE (no re-entra a login/selector)
   if(['despachante','medico','admin','superadmin'].includes(rol)) loadStaffMedico();
 }
 // onclick del selector: SOLO roles del propio array (cero escalación).
@@ -803,6 +803,7 @@ const ROL_META={
   despachante:{lbl:'Como despachante',ic:'dispatch',sub:'Bandeja y nuevo despacho'},
   admin:{lbl:'Como administrador',ic:'settings',sub:'Gestión, facturación y estadísticas'},
   chofer:{lbl:'Como chofer',ic:'dispatch',sub:'Tu despacho actual'},
+  contable:{lbl:'Como contable',ic:'register',sub:'Facturación y cobranza'},
   superadmin:{lbl:'Superadmin',ic:'settings',sub:'Panel completo'}
 };
 function roleSelectView(){
@@ -898,6 +899,7 @@ function getTabs(rol){
   if(rol==='afiliado')return[{id:'perfil',icon:'user',lbl:'Perfil'}]; // el afiliado se atiende en el PWA (../socio/); en el panel no hay vistas suyas (historia/turnos eran mock demo-v1). Inalcanzable: enterWithFbUser/entrarConRol lo redirigen antes.
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}]; // D-1: 'despacho'/'registro' retirados del nav (desp()/reg() quedan como banco de pruebas)
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='contable')return[...factTab,...cobTab,{id:'perfil',icon:'user',lbl:'Perfil'}]; // Fase2: rol contable = Facturación (cap facturar) + Cobranza (cap gestionar_cobranza) + Perfil
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
@@ -914,6 +916,7 @@ function pg(){
   if(r==='afiliado'){if(t==='perfil')return miPerfil();return '';} // afiliado se atiende en el PWA (redirigido antes de llegar acá). aHome/hist/plan/turnos eran mock demo-v1: quedan definidos pero SIN ruta.
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='home')return mHome();if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='perfil')return miPerfil();} // D-1: dispatch de 'despacho'/'registro' retirado (desp()/reg() siguen definidos, no ruteados)
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
+  if(r==='contable'){if(t==='cobranza')return cobPanel();if(t==='perfil')return miPerfil();return facPanel();} // Fase2: contable rutea SOLO facturación/cobranza/perfil
   if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='cobranza')return cobPanel();if(t==='novedades')return novPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='perfil')return miPerfil();} // 'guardias'/'atenciones' RETIRADOS: eran mock (adGuardias duplica cronoPanel real; adAtenc con números fabricados). Quedan definidos, sin ruta.
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
@@ -3936,14 +3939,21 @@ function facFormOpen(){ return !!(S.fac && (S.fac.edit!=null || S.fac.cedit!=nul
 function facAttach(){
   if(S.facUnsub) return;
   const upd=()=>{ if(!facFormOpen()) render(); }; // no re-renderiza con un form abierto
-  S.facUnsub=[
-    db.collection('tarifas').onSnapshot(s=>{ if(!S.fac) return; S.fac.tarifas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.fac){ S.fac.err=(e.message||String(e)); render(); } }),
-    db.collection('prestaciones').onSnapshot(s=>{ if(!S.fac) return; S.fac.prest=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.prest=[]; }),
+  // Fase2: tarifas/prestaciones son CONFIG (configurar_sistema). El contable (facturar, sin config) NO las ve ni las lee
+  // → sus listeners solo se enganchan con puedeConfig(); si no, ni se suscriben (evita permission-denied y "NO ve tarifas").
+  const subs=[
     db.collection('cargos').onSnapshot(s=>{ if(!S.fac) return; S.fac.cargos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.cargos=[]; }),
     db.collection('abonos').onSnapshot(s=>{ if(!S.fac) return; S.fac.abonos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.abonos=[]; }),
     db.collection('facturas').onSnapshot(s=>{ if(!S.fac) return; S.fac.facturas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.facturas=[]; }),
     db.collection('empresas').onSnapshot(s=>{ if(!S.fac) return; S.fac.empresas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.empresas=[]; }) // E-3: N° convenio para el membrete del comprobante de empresa
   ];
+  if(puedeConfig()){
+    subs.unshift(
+      db.collection('tarifas').onSnapshot(s=>{ if(!S.fac) return; S.fac.tarifas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.fac){ S.fac.err=(e.message||String(e)); render(); } }),
+      db.collection('prestaciones').onSnapshot(s=>{ if(!S.fac) return; S.fac.prest=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.fac) S.fac.prest=[]; })
+    );
+  } else { if(S.fac){ S.fac.tarifas=[]; S.fac.prest=[]; } }
+  S.facUnsub=subs;
 }
 function facDetach(){ if(S.facUnsub){ S.facUnsub.forEach(u=>{ try{u();}catch(_){} }); S.facUnsub=null; } }
 function facErr(t){ const e=document.getElementById('fac-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
@@ -3955,11 +3965,13 @@ function facPanel(){
   if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,abonos:null,facturas:null,empresas:null,edit:null,cedit:null,aedit:null,fedit:null,comprobante:null,showInact:false,showAnul:false,showAnulAb:false,showAnulF:false,periodo:facPeriodoActual(),err:'',report:null,reportAb:null,reportF:null}; facAttach(); }
   if(S.fac.err) return `<div class="card">No se pudo cargar facturación: ${esc(S.fac.err)}</div>`;
   if(S.fac.comprobante) return facComprobante(); // F-2: comprobante imprimible a pantalla completa (sin tabs)
-  const sub=S.fac.sub||'tarifas';
+  const verTarifas=puedeConfig(); // Fase2: Tarifas es config (configurar_sistema); el contable NO la ve
+  let sub=S.fac.sub||(verTarifas?'tarifas':'cargos');
+  if(sub==='tarifas' && !verTarifas) sub='cargos'; // coerción defensiva: sin config no cae en la vista de tarifas
   const tab=(id,lbl)=>`<button onclick="facSub('${id}')" style="flex:1;padding:.45rem .3rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.68rem;font-weight:600;letter-spacing:.02em;cursor:pointer">${lbl}</button>`;
   const head=`
   <div class="panel-h"><b>Facturación</b><span class="live-tag">en vivo</span></div>
-  <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${tab('tarifas','Tarifas')}${tab('cargos','Cargos')}${tab('abonos','Abonos')}${tab('facturas','Facturas')}</div>
+  <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${verTarifas?tab('tarifas','Tarifas'):''}${tab('cargos','Cargos')}${tab('abonos','Abonos')}${tab('facturas','Facturas')}</div>
   <div id="fac-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
   const body = sub==='cargos' ? facCargosView() : (sub==='abonos' ? facAbonosView() : (sub==='facturas' ? facFacturasView() : facTarifasView()));
   return head + body;
@@ -4064,9 +4076,10 @@ function facCargosView(){
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin cargos${showAnul?'':' activos'}</div>`;
   const report = S.fac.report ? `<div class="card" style="background:var(--bg)"><div style="font-size:.78rem;font-weight:700;margin-bottom:.3rem">Última corrida</div><div style="font-size:.75rem;color:var(--ink2);line-height:1.6">${S.fac.report}</div></div>` : '';
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="facShowAnul(this.checked)" ${showAnul?'checked':''}>Ver anulados${nAnul?(' ('+nAnul+')'):''}</label>`;
-  return `<button class="btn-r" onclick="generarCargos()" style="margin-bottom:.4rem">⚙️ GENERAR CARGOS</button>
-    <div style="font-size:.66rem;color:var(--ink3);margin:0 0 .7rem">Sobre episodios <b>cerrados</b> sin cargo. Idempotente (no duplica). Solo lee episodios.</div>
-    ${report}${toggle}<div class="card">${rows}</div>`;
+  // Fase2: GENERAR CARGOS lee episodios (datos clínicos) → solo configurar_sistema/admin. El contable factura sobre los cargos ya generados.
+  const genBtn = puedeConfig() ? `<button class="btn-r" onclick="generarCargos()" style="margin-bottom:.4rem">⚙️ GENERAR CARGOS</button>
+    <div style="font-size:.66rem;color:var(--ink3);margin:0 0 .7rem">Sobre episodios <b>cerrados</b> sin cargo. Idempotente (no duplica). Solo lee episodios.</div>` : '';
+  return `${genBtn}${report}${toggle}<div class="card">${rows}</div>`;
 }
 function facShowAnul(on){ if(!S.fac) return; S.fac.showAnul=!!on; render(); }
 function facCargoEditar(id){ if(!puede('facturar'))return; S.fac.cedit=id; render(); }
@@ -4222,10 +4235,11 @@ function facAbonosView(){
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin abonos en ${esc(periodo)}${showAnul?'':' (activos)'}</div>`;
   const report = S.fac.reportAb ? `<div class="card" style="background:var(--bg)"><div style="font-size:.78rem;font-weight:700;margin-bottom:.3rem">Última corrida</div><div style="font-size:.75rem;color:var(--ink2);line-height:1.6">${S.fac.reportAb}</div></div>` : '';
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="facShowAnulAb(this.checked)" ${showAnul?'checked':''}>Ver anulados${nAnul?(' ('+nAnul+')'):''}</label>`;
+  // Fase2: GENERAR ABONOS lee personas (antecedentes clínicos) → solo configurar_sistema/admin. El contable factura/cobra sobre los abonos ya generados.
+  const genBtn = puedeConfig() ? `<button class="btn-r" onclick="generarAbonos()" style="margin-bottom:.4rem">⚙️ GENERAR ABONOS</button>
+    <div style="font-size:.66rem;color:var(--ink3);margin:0 0 .7rem">Cuota mensual de cada socio activo con plan (precio congelado a la corrida). Idempotente por socio+período. Solo lee socios/planes/personas.</div>` : '';
   return `<div class="field" style="margin-bottom:.6rem"><label>Período</label><input id="fac-ab-periodo" type="month" value="${esc(periodo)}" onchange="facSetPeriodo(this.value)"></div>
-    <button class="btn-r" onclick="generarAbonos()" style="margin-bottom:.4rem">⚙️ GENERAR ABONOS</button>
-    <div style="font-size:.66rem;color:var(--ink3);margin:0 0 .7rem">Cuota mensual de cada socio activo con plan (precio congelado a la corrida). Idempotente por socio+período. Solo lee socios/planes/personas.</div>
-    ${report}${toggle}<div class="card">${rows}</div>`;
+    ${genBtn}${report}${toggle}<div class="card">${rows}</div>`;
 }
 
 async function generarAbonos(){
@@ -6809,6 +6823,20 @@ async function mapaVivoDibujar(eps){
 }
 
 /* ===================== PERMISOS por persona (lo configura el superadmin en la ficha) ===================== */
+// Fase2: plantillas de un click. ORTOGONALES al rol — se aplican a los tildes (sin guardar); después se retoca a mano.
+const CAP_PRESETS={
+  contable:{lbl:'Contable', caps:['facturar','gestionar_cobranza']},
+  medico:{lbl:'Médico', caps:['clinico']},
+  marketing:{lbl:'Marketing', caps:['marketing','curar_novedades']},
+  admin:{lbl:'Admin general', caps:['configurar_sistema','facturar','clinico','gestionar_afiliados','marketing','gestionar_cobranza','gestionar_personal','curar_novedades']}
+};
+function spAplicarPreset(nombre){
+  const p=CAP_PRESETS[nombre]; if(!p) return;
+  const set=new Set(p.caps);
+  document.querySelectorAll('.sp-cap').forEach(c=>{ c.checked=set.has(c.dataset.cap); });
+  const e=document.getElementById('sp-err-perm'); if(e){ e.textContent='Plantilla "'+p.lbl+'" aplicada a los tildes. Revisá y guardá.'; e.style.display='block'; e.style.color='var(--ink3)'; }
+  const c=document.getElementById('sp-confirm'); if(c) c.innerHTML=''; // invalida una confirmación pendiente
+}
 function spCardPermisos(u){
   const esSelf=u.uid===S.user.uid;
   if(esSelf){
@@ -6819,24 +6847,64 @@ function spCardPermisos(u){
     const on=!!(u.permisos && u.permisos[k]===true);
     return `<label style="display:flex;align-items:center;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid var(--border)"><span style="font-size:.85rem">${lbl}</span><input type="checkbox" class="sp-cap" data-cap="${k}" ${on?'checked':''}></label>`;
   }).join('');
+  const presets=Object.entries(CAP_PRESETS).map(([id,p])=>`<button class="btn-o" style="flex:1;min-width:80px;padding:.35rem .4rem;font-size:.7rem" onclick="spAplicarPreset('${id}')">${esc(p.lbl)}</button>`).join('');
   return `<div class="card"><div class="ch">Permisos</div>
     <div style="font-size:.68rem;color:var(--ink3);margin-bottom:.4rem">Capacidades de esta persona (capa del centro de mando; no afecta el control por rol del despacho/clínica).</div>
+    <div style="font-size:.66rem;color:var(--ink3);margin-bottom:.25rem">Plantillas (aplican a los tildes; no guardan):</div>
+    <div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.6rem">${presets}</div>
     ${items}
     <div id="sp-err-perm" class="err" style="display:none;margin:.5rem 0"></div>
+    <div id="sp-confirm" style="margin:.5rem 0"></div>
     <button class="btn-r" style="margin-top:.6rem" onclick="spGuardarPermisos('${u.uid}')">Guardar permisos</button>
   </div>`;
 }
-async function spGuardarPermisos(uid){
+// Paso 1: mostrar el DIFF y pedir confirmación in-page (NO window.confirm). No escribe todavía.
+function spGuardarPermisos(uid){
   const e=document.getElementById('sp-err-perm');
-  const msg=(t,ok)=>{ if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; e.style.color=ok?'var(--g,#1D9E75)':''; } };
+  const msg=(t,ok)=>{ if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; e.style.color=ok?'var(--g,#1D9E75)':'var(--r)'; } };
   msg('');
   if(uid===S.user.uid){ msg('No podés configurar tus propios permisos.'); return; } // anti-lockout (UI; reglas también)
+  const LBL=Object.fromEntries(CAPS);
+  const u=((S.sp&&S.sp.users)||[]).find(x=>x.uid===uid); const actual=(u&&u.permisos)||{};
+  const activar=[], desactivar=[];
+  document.querySelectorAll('.sp-cap').forEach(c=>{ const k=c.dataset.cap, era=actual[k]===true;
+    if(c.checked && !era) activar.push(LBL[k]||k);
+    if(!c.checked && era) desactivar.push(LBL[k]||k); });
+  const cont=document.getElementById('sp-confirm'); if(!cont) return;
+  if(!activar.length && !desactivar.length){ msg('No hay cambios para guardar.'); cont.innerHTML=''; return; }
+  const linea=(t,arr,color)=>arr.length?`<div style="font-size:.74rem;color:${color}"><b>${t}:</b> ${arr.map(esc).join(', ')}</div>`:'';
+  cont.innerHTML=`<div style="border:1.5px solid var(--border2);border-radius:10px;padding:.6rem;background:var(--bg)">
+    <div style="font-size:.72rem;color:var(--ink2);margin-bottom:.35rem">Vas a cambiar los permisos de <b>${esc((u&&u.email)||uid)}</b>:</div>
+    ${linea('Activar', activar, 'var(--g,#1D9E75)')}${linea('Desactivar', desactivar, 'var(--r)')}
+    <div style="display:flex;gap:.4rem;margin-top:.55rem">
+      <button class="btn-r" style="flex:1" onclick="spGuardarPermisosConfirmar('${uid}')">Confirmar cambios</button>
+      <button class="btn-o" style="flex:1" onclick="document.getElementById('sp-confirm').innerHTML=''">Cancelar</button>
+    </div></div>`;
+}
+// Paso 2: escribe (update -> reemplaza el mapa entero con las 12 caps, sin merge; no deja caps colgadas) + READ-BACK.
+async function spGuardarPermisosConfirmar(uid){
+  const e=document.getElementById('sp-err-perm'); const cont=document.getElementById('sp-confirm');
+  const msg=(t,ok)=>{ if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; e.style.color=ok?'var(--g,#1D9E75)':'var(--r)'; } };
+  if(uid===S.user.uid){ msg('No podés configurar tus propios permisos.'); return; }
   const permisos={};
+  CAPS.forEach(([k])=>{ permisos[k]=false; }); // arranca en false las 12 -> el update fija el mapa completo
   document.querySelectorAll('.sp-cap').forEach(c=>{ permisos[c.dataset.cap]=c.checked; });
+  if(cont) cont.innerHTML='<div style="font-size:.74rem;color:var(--ink3)">Guardando…</div>';
   try{
-    await db.collection('usuarios').doc(uid).set({ permisos }, { merge:true });
-    msg('✓ Permisos guardados.', true);
-  }catch(err){ msg('No se pudo guardar: '+spErr(err)); }
+    await db.collection('usuarios').doc(uid).update({ permisos }); // update: reemplaza el campo permisos (anti-stale)
+    // READ-BACK: re-leo el doc y comparo con lo que quise escribir
+    const snap=await db.collection('usuarios').doc(uid).get();
+    const srv=(snap.exists && snap.data().permisos)||{};
+    const okKeys=Object.keys(permisos).filter(k=>permisos[k]===true);
+    const coincide=okKeys.every(k=>srv[k]===true) && Object.keys(srv).filter(k=>srv[k]===true).length===okKeys.length;
+    if(cont) cont.innerHTML='';
+    if(coincide){
+      const u=((S.sp&&S.sp.users)||[]).find(x=>x.uid===uid); if(u) u.permisos=permisos; // refresca cache local (sin esperar el snapshot)
+      msg('✓ Permisos guardados y confirmados en el servidor.', true);
+    } else {
+      msg('⚠ Se guardó pero el read-back NO coincide. Recargá y verificá.');
+    }
+  }catch(err){ if(cont) cont.innerHTML=''; msg('No se pudo guardar: '+spErr(err)); }
 }
 
 /* ===================== GUARDIAS — Bloque 1 (BASE: modelo + validación cliente) =====================
