@@ -787,7 +787,15 @@ async function cargarCredencial(uid){
   const uDoc = await db.collection('usuarios').doc(uid).get();
   if(!uDoc.exists) return { estado:'sin-vinculo', u:null };
   const u = uDoc.data();
-  if(u.rol !== 'afiliado') return { estado:'no-afiliado', u };
+  // Multi-rol (espejo de /app/): quien tiene 'afiliado' se queda acá (incluido el doble-rol afiliado+staff).
+  // Staff PURO (sin afiliado) → redirige silencioso a /app/ (en vez del cartel noAfiliadoView). Sin loop:
+  // /app/ solo manda a /socio/ al afiliado-PURO, así que un staff-puro rebotado acá se queda en /app/.
+  const roles = (Array.isArray(u.roles)&&u.roles.length) ? u.roles.filter(Boolean) : (u.rol?[u.rol]:[]);
+  const STAFF = ['medico','despachante','admin','chofer','contable','superadmin'];
+  if(!roles.includes('afiliado')){
+    if(roles.some(r=>STAFF.includes(r))) return { estado:'staff', u }; // → /app/
+    return { estado:'no-afiliado', u };                                 // sin rol válido → cartel honesto (no redirige, no loop)
+  }
   const personaId = u.personaId;
   if(!personaId) return { estado:'sin-vinculo', u };
 
@@ -874,6 +882,7 @@ auth.onAuthStateChanged(async user => {
   set({ view:'boot' });
   try{
     const cred = await cargarCredencial(user.uid);
+    if(cred.estado === 'staff'){ window.location.replace('../app/'); return; } // staff puro → panel, silencioso (espejo de /app/)
     if(cred.estado === 'no-afiliado'){ set({ view:'no-afiliado', cred }); return; }
     if(cred.estado === 'sin-vinculo'){ set({ view:'sin-vinculo', cred }); return; }
     set({ view:'home', cred }); navReplace();
