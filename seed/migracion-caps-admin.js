@@ -14,9 +14,10 @@ admin.initializeApp({ credential: admin.credential.cert(require('./serviceAccoun
 const db = admin.firestore();
 
 const APPLY = process.argv.includes('--apply');
-const ADMIN_PRESET = ['configurar_sistema','facturar','clinico','gestionar_afiliados','marketing','gestionar_cobranza','gestionar_personal','curar_novedades'];
+// 11 caps (el admin administra TODO lo operativo: +móviles/guardias/agenda). Solo ENSANCHA (agrega); nadie pierde.
+const ADMIN_PRESET = ['configurar_sistema','facturar','clinico','gestionar_afiliados','marketing','gestionar_cobranza','gestionar_personal','curar_novedades','gestionar_moviles','gestionar_guardias','gestionar_agenda_turnos'];
 const HUERFANAS = ['ver_dashboard','ver_auditoria']; // borradas de CAPS: se limpian del doc
-const CAPS_VIGENTES = new Set([...ADMIN_PRESET,'gestionar_moviles','gestionar_guardias','gestionar_agenda_turnos','despachar_episodios']);
+const CAPS_VIGENTES = new Set([...ADMIN_PRESET,'despachar_episodios']);
 
 (async () => {
   const snap = await db.collection('usuarios').get();

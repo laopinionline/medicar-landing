@@ -2,7 +2,7 @@
 const fs=require('fs'), vm=require('vm'), path=require('path');
 const lines=fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8').split('\n');
 const sl=(a,b)=>lines.slice(a-1,b).join('\n');
-const CAPS=sl(862,875), PRESETS=sl(6825,6830), spCard=sl(6838,6858);
+const CAPS=sl(862,875), PRESETS=sl(6849,6854), spCard=sl(6862,6882);
 
 const src=`
   function esc(s){ return String(s); }
@@ -31,7 +31,7 @@ for(const [id,p] of Object.entries(PRESETS_O)){
 t('preset contable = facturar+gestionar_cobranza', JSON.stringify(PRESETS_O.contable.caps.sort())===JSON.stringify(['facturar','gestionar_cobranza'].sort()));
 t('preset medico = clinico', JSON.stringify(PRESETS_O.medico.caps)===JSON.stringify(['clinico']));
 t('preset marketing = marketing+curar_novedades', JSON.stringify(PRESETS_O.marketing.caps.sort())===JSON.stringify(['curar_novedades','marketing']));
-t('preset admin = las 8 de la migración', PRESETS_O.admin.caps.length===8 && !PRESETS_O.admin.caps.some(c=>['gestionar_moviles','gestionar_guardias','gestionar_agenda_turnos','despachar_episodios'].includes(c)));
+t('preset admin = 11 caps (incluye móviles/guardias/agenda; NO despachar_episodios)', PRESETS_O.admin.caps.length===11 && ['gestionar_moviles','gestionar_guardias','gestionar_agenda_turnos'].every(c=>PRESETS_O.admin.caps.includes(c)) && !PRESETS_O.admin.caps.includes('despachar_episodios'));
 
 // 4) render: self (superadmin) NO configura; otro usuario -> 12 checkboxes + 4 botones de preset + confirm div
 const rSelf=sandbox.__render__({uid:'super'});
