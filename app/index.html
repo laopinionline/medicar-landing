@@ -738,10 +738,20 @@ async function enterWithFbUser(fbUser){
     data=snap.exists?snap.data():{};
   }catch(_){ data={}; }
   // Multi-rol (Tramo 2): roles[] del doc; fallback al campo rol viejo (docs no migrados).
-  const roles=(Array.isArray(data.roles)&&data.roles.length)?data.roles.filter(Boolean):(data.rol?[data.rol]:[]);
-  if(!roles.length){
+  const rolesRaw=(Array.isArray(data.roles)&&data.roles.length)?data.roles.filter(Boolean):(data.rol?[data.rol]:[]);
+  if(!rolesRaw.length){
     S.loginErr='Tu cuenta no tiene rol asignado. Contactá al administrador.';
     await auth.signOut();   /* dispara onAuthStateChanged(null) -> login con el mensaje */
+    return;
+  }
+  // El PANEL (/app/) es SOLO para staff. La experiencia del afiliado vive en el PWA (../socio/), que está limpio.
+  // 'afiliado' NO es una identidad de panel: se filtra del array de sesión (no afecta permisos, que salen del doc en reglas).
+  // - afiliado PURO -> el panel no es su puerta: redirección dura al PWA (nunca ve historia/turnos mock).
+  // - afiliado + rol de staff (doble rol) -> entra al panel con su rol de staff; para lo suyo de afiliado usa el PWA.
+  const roles=rolesRaw.filter(r=>r!=='afiliado');
+  if(!roles.length){
+    try{ sessionStorage.removeItem('medicar_rol'); }catch(_){}
+    window.location.replace('../socio/'); // afiliado puro -> PWA
     return;
   }
   const u={
@@ -774,6 +784,7 @@ async function enterWithFbUser(fbUser){
 // EXACTAMENTE como hoy. NO cambia permisos: el rol de sesión es elección de VISTA (caps-unión en reglas).
 function entrarConRol(rol){
   if(!S.user) return;
+  if(rol==='afiliado'){ try{ sessionStorage.removeItem('medicar_rol'); }catch(_){} window.location.replace('../socio/'); return; } // defensa: el afiliado nunca rutea en el panel
   S.user.rol=rol;
   try{ sessionStorage.setItem('medicar_rol',rol); }catch(_){}
   set({roleSelect:false,tab:(rol==='despachante'?'bandeja':'home'),step:0}); navReplace(); // baseline de sesión: atrás desde el home base SALE (no re-entra a login/selector)
@@ -884,13 +895,13 @@ function getTabs(rol){
   const audTab = puedeConfig() ? [{id:'auditoria',icon:'history',lbl:'Auditoría'}] : [];
   const estTab = puedeConfig() ? [{id:'estadisticas',icon:'chart',lbl:'Estadísticas'}] : [];
   const monTab = puedeConfig() ? [{id:'monitoreo',icon:'register',lbl:'Monitoreo'}] : [];
-  if(rol==='afiliado')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'historia',icon:'history',lbl:'Historia'},{id:'plan',icon:'plan',lbl:'Mi plan'},{id:'turnos',icon:'dispatch',lbl:'Turnos'},{id:'perfil',icon:'user',lbl:'Perfil'}];
+  if(rol==='afiliado')return[{id:'perfil',icon:'user',lbl:'Perfil'}]; // el afiliado se atiende en el PWA (../socio/); en el panel no hay vistas suyas (historia/turnos eran mock demo-v1). Inalcanzable: enterWithFbUser/entrarConRol lo redirigen antes.
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}]; // D-1: 'despacho'/'registro' retirados del nav (desp()/reg() quedan como banco de pruebas)
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
   if(rol==='superadmin')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
   // chofer: rol NO-operativo, sin vista propia todavía (bloque futuro). Solo Inicio (placeholder) + Perfil.
   if(rol==='chofer')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'perfil',icon:'user',lbl:'Perfil'}];
-  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'guardias',icon:'dispatch',lbl:'Guardias'},{id:'afiliados',icon:'users',lbl:'Afiliados'},{id:'atenciones',icon:'chart',lbl:'Atenciones'},...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...cobTab,...novTab,...mktTab,...audTab,...estTab,...monTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
+  return[{id:'home',icon:'home',lbl:'Inicio'},{id:'afiliados',icon:'users',lbl:'Afiliados'},...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...cobTab,...novTab,...mktTab,...audTab,...estTab,...monTab,{id:'perfil',icon:'user',lbl:'Perfil'}]; // 'Guardias' y 'Atenciones' RETIRADAS (eran mock: cronoPanel real ya cubre guardias; adAtenc tenía números fabricados). Cronograma real sigue en cronoTab.
 }
 
 function pg(){
@@ -900,10 +911,10 @@ function pg(){
   // goTab→set→render→pg, que NO pasa por verBandeja. Sin este guard, un reporteId rancio vincularía un episodio ajeno.
   if(S.pedidoReporteId && !(r==='despachante' && t==='despacho')) pedLimpiarVinculo();
   if(t!=='bandeja'&&t!=='episodios') S.epView=null; // salir de la bandeja cierra el detalle abierto
-  if(r==='afiliado'){if(t==='home')return aHome();if(t==='historia')return hist();if(t==='plan')return plan();if(t==='turnos')return turnos();if(t==='perfil')return miPerfil();}
+  if(r==='afiliado'){if(t==='perfil')return miPerfil();return '';} // afiliado se atiende en el PWA (redirigido antes de llegar acá). aHome/hist/plan/turnos eran mock demo-v1: quedan definidos pero SIN ruta.
   if(r==='medico'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='home')return mHome();if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='perfil')return miPerfil();} // D-1: dispatch de 'despacho'/'registro' retirado (desp()/reg() siguen definidos, no ruteados)
   if(r==='despachante'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='perfil')return miPerfil();if(t==='despacho')return dDesp();return bandeja();}
-  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='cobranza')return cobPanel();if(t==='novedades')return novPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='guardias')return adGuardias();if(t==='atenciones')return adAtenc();if(t==='perfil')return miPerfil();}
+  if(r==='admin'){if(t==='moviles')return movPanel();if(t==='cronograma')return cronoPanel();if(t==='agendaturnos')return agendaTurnosPanel();if(t==='catalogo')return catPanel();if(t==='afiliados')return afPanel();if(t==='facturacion')return facPanel();if(t==='cobranza')return cobPanel();if(t==='novedades')return novPanel();if(t==='marketing')return mktPanel();if(t==='auditoria')return audPanel();if(t==='estadisticas')return estPanel();if(t==='monitoreo')return monPanel();if(t==='home')return adHome();if(t==='perfil')return miPerfil();} // 'guardias'/'atenciones' RETIRADOS: eran mock (adGuardias duplica cronoPanel real; adAtenc con números fabricados). Quedan definidos, sin ruta.
   if(r==='superadmin'){if(t==='perfil')return miPerfil();return superView();}
   if(r==='chofer'){if(t==='perfil')return miPerfil();return choferHome();}
   return '';
