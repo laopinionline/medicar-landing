@@ -2,7 +2,7 @@
 const fs=require('fs'), vm=require('vm'), path=require('path');
 const lines=fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8').split('\n');
 const sl=(a,b)=>lines.slice(a-1,b).join('\n');
-const puedes=sl(876,881), getTabs=sl(883,907); // puede/puedeConfig/puedeCobrar/puedeAfil + getTabs
+const puedes=sl(876,881), getTabs=sl(883,911); // puede/puedeConfig/puedeCobrar/puedeAfil + getTabs
 
 const src=`
   const IC={home:'',history:'',plan:'',dispatch:'',user:'',chart:'',users:'',register:'',settings:''};
@@ -69,6 +69,26 @@ for(const [cap,tab] of MAP){
   t('contable NO ve catalogo/monitoreo/marketing/novedades/afiliados', !['catalogo','monitoreo','marketing','novedades','afiliados','moviles','cronograma'].some(x=>has(T,x)), JSON.stringify(T)); }
 { const T=tabsFor('contable',{});
   t('contable SIN caps → solo Perfil', JSON.stringify(T)==='["perfil"]', JSON.stringify(T)); }
+
+// ★ CAP-DRIVEN off-rol: la cap enciende su tab en CUALQUIER rol
+{ const T=tabsFor('contable',{ facturar:true, gestionar_cobranza:true, gestionar_moviles:true });
+  t('★ contable + gestionar_moviles VE Móviles', has(T,'moviles'), JSON.stringify(T)); }
+{ const T=tabsFor('medico',{ gestionar_cobranza:true });
+  t('★ medico + gestionar_cobranza VE Cobranza', has(T,'cobranza'), JSON.stringify(T)); }
+{ const T=tabsFor('despachante',{ gestionar_afiliados:true });
+  t('★ despachante + gestionar_afiliados VE Afiliados (antes hardcodeada a admin)', has(T,'afiliados'), JSON.stringify(T)); }
+{ const T=tabsFor('contable',{ clinico:true });
+  t('★ contable + clinico VE Monitoreo', has(T,'monitoreo'), JSON.stringify(T)); }
+{ const T=tabsFor('chofer',{ marketing:true });
+  t('★ chofer + marketing VE Marketing', has(T,'marketing'), JSON.stringify(T)); }
+// afiliados YA NO es hardcodeada: admin sin la cap NO la ve
+{ const T=tabsFor('admin',{ configurar_sistema:true });
+  t('★ admin SIN gestionar_afiliados NO ve Afiliados (ya no hardcodeada)', !has(T,'afiliados'), JSON.stringify(T)); }
+// estructurales del rol se conservan
+{ const T=tabsFor('despachante',{});
+  t('despachante conserva bandeja+despacho estructurales', has(T,'bandeja')&&has(T,'despacho'), JSON.stringify(T)); }
+{ const T=tabsFor('medico',{});
+  t('medico conserva home+episodios+alertas estructurales', ['home','episodios','alertas'].every(x=>has(T,x)), JSON.stringify(T)); }
 
 console.log(`\n${ok}/${ok+fail} checks OK`);
 process.exit(fail?1:0);
