@@ -2866,7 +2866,7 @@ async function spCrear(){
       try{
         const np=parseNombre(nombre);
         await db.collection('personas').doc(uid).set({ apellido:np.apellido, nombre:np.nombre, dni:'', fechaNacimiento:'', telefono:'', email, direccion:'', antecedentesCronicos:[], antecedentesOtros:'', creadoEn:FV() },{merge:true});
-        await db.collection('staff').doc(uid).set({ personaId:uid, rol:staffRolDe(rol), matricula:'', activo:true, creadoEn:FV() },{merge:true});
+        await db.collection('staff').doc(uid).set({ personaId:uid, rol:staffRolDe(rol), matricula:'', activo:true, nombre:nombreStaff(np.apellido, np.nombre), creadoEn:FV() },{merge:true});
         await db.collection('usuarios').doc(uid).set({ personaId:uid },{merge:true});
       }catch(e2){ console.warn('[spCrear] enganche staff/persona falló (la cuenta se creó OK):',e2); }
     }
@@ -3061,13 +3061,17 @@ function spStaffPersonaCards(u){
   </div>`;
 }
 function spStMsg(id,t){ const e=document.getElementById(id); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
+// Fase-usuarios-hardening: nombre denormalizado en `staff` (fuente NO sensible para los selectores de Móviles/Cronograma).
+// Formato "Apellido, Nombre" (calca el socioNombre de generarAbonos; el chip muestra la primera palabra = apellido).
+function nombreStaff(ape,nom){ return ((ape||'')+', '+(nom||'')).replace(/^, /,'').replace(/, $/,'')||''; }
 async function spGuardarStaff(uid){
   spStMsg('sp-st-err','');
   const rol=document.getElementById('sp-st-rol')?.value||'administrativo';
   const matricula=(document.getElementById('sp-st-mat')?.value||'').trim();
   const activo=(document.getElementById('sp-st-activo')?.value||'si')==='si';
   const exists=!!(S.sp.staffDocs||{})[uid];
-  const data={ personaId:uid, rol, matricula, activo, actualizadoEn:FV() };
+  const per=((S.sp&&S.sp.personas)||{})[uid]||{}; // nombre desde la persona ya cargada
+  const data={ personaId:uid, rol, matricula, activo, nombre:nombreStaff(per.apellido, per.nombre), actualizadoEn:FV() };
   if(!exists) data.creadoEn=FV();
   try{
     await db.collection('staff').doc(uid).set(data,{merge:true});
@@ -3092,6 +3096,10 @@ async function spGuardarPersona(uid){
   if(!exists){ data.antecedentesCronicos=[]; data.antecedentesOtros=''; data.creadoEn=FV(); }
   try{
     await db.collection('personas').doc(uid).set(data,{merge:true});
+    // Sync del nombre denormalizado en staff (si existe): el selector de Móviles/Cronograma no queda con nombre viejo.
+    if((S.sp.staffDocs||{})[uid]){
+      try{ await db.collection('staff').doc(uid).set({ nombre:nombreStaff(apellido, nombre), actualizadoEn:FV() },{merge:true}); if(S.sp.staffDocs[uid]) S.sp.staffDocs[uid].nombre=nombreStaff(apellido, nombre); }catch(_){}
+    }
     S.sp.personas[uid]=Object.assign({}, S.sp.personas[uid]||{}, data); // optimista
     render();
   }catch(e){ spStMsg('sp-pe-err','No se pudo guardar la identidad: '+spErr(e)); }
@@ -3119,7 +3127,8 @@ async function migrarStaffUno(uid, uData){
   else{
     let activo=true;
     if(u.rol==='medico'){ const sm=await db.collection('staff_medico').doc(uid).get(); if(sm.exists) activo=sm.data().activo!==false; }
-    await stRef.set({ personaId:uid, rol:staffRolDe(u.rol), matricula:'', activo, creadoEn:FV() });
+    const npS=parseNombre(u.nombre);
+    await stRef.set({ personaId:uid, rol:staffRolDe(u.rol), matricula:'', activo, nombre:nombreStaff(npS.apellido, npS.nombre), creadoEn:FV() });
     out.staff=uid;
   }
   // 3) backfill usuarios/{uid}.personaId = uid (cierra el enlace; la regla de usuarios exige superadmin).
@@ -3415,11 +3424,12 @@ function movAttach(){
 function movDetach(){ if(S.movUnsub){ S.movUnsub.forEach(u=>{ try{u();}catch(_){} }); S.movUnsub=null; } }
 function movErr(t){ const e=document.getElementById('mov-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
 
-// Choferes para el selector: personal con rol 'chofer'. La regla usuarios solo deja LISTAR la
-// colección a superadmin/admin; para el resto el listado no está disponible (choferes='denied').
+// Choferes para el selector: se leen de `staff` (rol==chofer), fuente NO sensible (nombre+activo denormalizados),
+// legible por esInterno → los cap-holders de gestionar_moviles ya no reciben 'denied'. NO se lee `usuarios`
+// (permisos de todos) ni `personas` (antecedentes clínicos). Ver endurecimiento del read de usuarios.
 function movLoadChoferes(){
-  db.collection('usuarios').where('rol','==','chofer').get()
-    .then(s=>{ if(!S.mov) return; S.mov.choferes=s.docs.map(d=>({uid:d.id,...d.data()})).filter(c=>c.activo!==false); if(!movFormOpen()) render(); })
+  db.collection('staff').where('rol','==','chofer').get()
+    .then(s=>{ if(!S.mov) return; S.mov.choferes=s.docs.map(d=>({uid:d.id, nombre:d.data().nombre||'', activo:d.data().activo})).filter(c=>c.activo!==false); if(!movFormOpen()) render(); })
     .catch(()=>{ if(S.mov) S.mov.choferes='denied'; });
 }
 
@@ -7045,10 +7055,17 @@ function cronoAttach(){
   db.collection('moviles').where('activo','==',true).get()
     .then(s=>{ if(!S.crono) return; S.crono.moviles=s.docs.map(d=>({id:d.id,...d.data()})); if(!cronoFormOpen()) render(); })
     .catch(()=>{ if(S.crono) S.crono.moviles=[]; });
-  // personas para selector/filtros: solo choferes y médicos. La regla usuarios solo deja listar a superadmin/admin.
-  db.collection('usuarios').where('rol','in',['chofer','medico']).get()
-    .then(s=>{ if(!S.crono) return; S.crono.personas=s.docs.map(d=>({uid:d.id,...d.data()})).filter(p=>p.activo!==false); if(!cronoFormOpen()) render(); })
-    .catch(()=>{ if(S.crono) S.crono.personas='denied'; });
+  // personas para el selector: médicos de `staff_medico` (nombre+activo) + choferes de `staff` (rol==chofer).
+  // Fuentes NO sensibles, legibles por esInterno → los cap-holders de gestionar_guardias ya no reciben 'denied'.
+  // NO se lee `usuarios` (permisos de todos) ni `personas` (antecedentes clínicos).
+  Promise.all([
+    db.collection('staff_medico').get(),
+    db.collection('staff').where('rol','==','chofer').get()
+  ]).then(([med, chof])=>{ if(!S.crono) return;
+    const medicos=med.docs.map(d=>({uid:d.id, nombre:d.data().nombre||'', activo:d.data().activo, rol:'medico'})).filter(p=>p.activo!==false);
+    const choferes=chof.docs.map(d=>({uid:d.id, nombre:d.data().nombre||'', activo:d.data().activo, rol:'chofer'})).filter(p=>p.activo!==false);
+    S.crono.personas=[...medicos, ...choferes]; if(!cronoFormOpen()) render();
+  }).catch(()=>{ if(S.crono) S.crono.personas='denied'; });
 }
 function cronoDetach(){ if(S.cronoUnsub){ S.cronoUnsub.forEach(u=>{ try{u();}catch(_){} }); S.cronoUnsub=null; } }
 
