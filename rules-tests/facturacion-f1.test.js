@@ -23,8 +23,8 @@ const FACT = (over={}) => Object.assign({ periodo:'2099-01', personaId:'pA', soc
 async function seed(env) {
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
-    await db.doc('usuarios/adm').set({ rol:'admin', roles:['admin'] });
-    await db.doc('usuarios/cfg').set({ rol:'despachante', roles:['despachante'], permisos:{ configurar_sistema:true } });
+    await db.doc('usuarios/adm').set({ rol:'admin', roles:['admin'], permisos:{ facturar:true } }); // Tablero-Fase1: admin post-migración (sin bypass; factura por la cap)
+    await db.doc('usuarios/cfg').set({ rol:'despachante', roles:['despachante'], permisos:{ facturar:true } }); // facturador = cap 'facturar' (partida de configurar_sistema)
     await db.doc('usuarios/oper').set({ rol:'despachante', roles:['despachante'] }); // operativo SIN cap
     await db.doc('usuarios/socioU').set({ rol:'afiliado', roles:['afiliado'], personaId:'pA' });
     await db.doc('abonos/ab1').set(ABONO());

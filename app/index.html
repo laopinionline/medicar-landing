@@ -856,28 +856,28 @@ function shell(){
 </div>`;
 }
 
-// Capa de permisos del centro de mando (7 capacidades). Superadmin = todo, sin depender del campo.
+// Capa de permisos del centro de mando (Tablero-Fase1: 12 capacidades, sin bypass por rol — todo se resuelve
+// por permisos[cap]). Superadmin = todo, sin depender del campo. La cap vive en la PERSONA (usuarios/{uid}.permisos).
 const CAPS=[
+  ['gestionar_afiliados','Padrón de afiliados'],
+  ['marketing','Marketing (leads y campañas)'],
+  ['curar_novedades','Curar novedades (feed)'],
+  ['facturar','Facturar'],
+  ['gestionar_cobranza','Cobranza'],
+  ['clinico','Clínico (catálogo + monitoreo)'],
+  ['configurar_sistema','Configurar sistema (comercial + auditoría)'],
   ['gestionar_moviles','Gestionar móviles'],
-  ['gestionar_personal','Gestionar personal'],
-  ['despachar_episodios','Despachar episodios'],
-  ['ver_dashboard','Ver dashboard'],
-  ['ver_auditoria','Ver auditoría'],
-  ['gestionar_afiliados','Gestionar afiliados'],
-  ['configurar_sistema','Configurar sistema'],
   ['gestionar_guardias','Gestionar guardias'],
-  ['gestionar_agenda_turnos','Gestionar agenda de turnos'],
-  ['gestionar_cobranza','Gestionar cobranza']
+  ['gestionar_agenda_turnos','Agenda de turnos'],
+  ['gestionar_personal','Gestionar personal'],
+  ['despachar_episodios','Despachar episodios']
 ];
 function puede(cap){ return !!(S.user && (S.user.rol==='superadmin' || (S.user.permisos && S.user.permisos[cap]===true))); }
-// Acceso al catálogo (prestaciones/planes, Estructura 3). Roles admin/superadmin, o capacidad configurar_sistema.
-function puedeConfig(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('configurar_sistema'))); }
-// C-1 (Cobranza): gate del cobrador contable. Espejo del gate de reglas puedeCobrar() = isAdmin || cap.
-// configurar_sistema NO hereda el cobro: es la cap propia gestionar_cobranza (o admin/superadmin por bypass).
-// Sin superficie todavia (la UI de cobranza es C-2); se deja el helper listo y coherente con las reglas.
-function puedeCobrar(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('gestionar_cobranza'))); }
-// Acceso al padrón de afiliados (personas/socios, Estructura 3). Roles admin/superadmin, o capacidad gestionar_afiliados.
-function puedeAfil(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('gestionar_afiliados'))); }
+// Tablero-Fase1: SIN bypass por rol. Toda cap se resuelve por permisos[cap] (superadmin ya cortocircuita en puede()).
+// El admin arranca con un preset sembrado por el superadmin; recortarle una cap SÍ surte efecto (espejo del cambio en reglas).
+function puedeConfig(){ return puede('configurar_sistema'); } // catálogo comercial (prestaciones/planes/tarifas) + auditoría + estadísticas
+function puedeCobrar(){ return puede('gestionar_cobranza'); } // registrar/anular pagos
+function puedeAfil(){ return puede('gestionar_afiliados'); }  // padrón (personas/socios/empresas), SIN marketing
 
 function getTabs(rol){
   // Tabs para operativos NO-superadmin que tengan el permiso (consumo de la capa de permisos).
@@ -885,16 +885,16 @@ function getTabs(rol){
   const cronoTab = puede('gestionar_guardias') ? [{id:'cronograma',icon:'history',lbl:'Cronograma'}] : [];
   const agendaTab = puede('gestionar_agenda_turnos') ? [{id:'agendaturnos',icon:'history',lbl:'Agenda turnos'}] : [];
   const catTab = puedeConfig() ? [{id:'catalogo',icon:'plan',lbl:'Catálogo'}] : [];
-  const factTab = puedeConfig() ? [{id:'facturacion',icon:'chart',lbl:'Facturación'}] : [];
-  const cobTab = puedeCobrar() ? [{id:'cobranza',icon:'register',lbl:'Cobranza'}] : []; // C-2: cap propia gestionar_cobranza (el contable puro entra por acá)
-  // PWA-2a: Novedades (curaduría del feed) — gate por ROL admin/superadmin, NO por cap. Badge con pendientes por curar.
-  const esAdminRol = !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin'));
-  if(esAdminRol) novBadgeAttach();
-  const novTab = esAdminRol ? [{id:'novedades',icon:'history',lbl:'Novedades'+(S.novPendCount?(' ('+S.novPendCount+')'):'')}] : [];
-  const mktTab = puedeAfil() ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : [];
+  const factTab = (puede('facturar') || puedeConfig()) ? [{id:'facturacion',icon:'chart',lbl:'Facturación'}] : []; // Tablero-Fase1: 'facturar' (operaciones) O configurar_sistema (tarifas). El tab mezcla ambos; el gate fino es por acción.
+  const cobTab = puedeCobrar() ? [{id:'cobranza',icon:'register',lbl:'Cobranza'}] : []; // cap propia gestionar_cobranza (el contable entra por acá)
+  // Tablero-Fase1: Novedades (curaduría del feed) por CAP 'curar_novedades' (antes era rol admin). Badge con pendientes por curar.
+  const puedeNov = puede('curar_novedades');
+  if(puedeNov) novBadgeAttach();
+  const novTab = puedeNov ? [{id:'novedades',icon:'history',lbl:'Novedades'+(S.novPendCount?(' ('+S.novPendCount+')'):'')}] : [];
+  const mktTab = puede('marketing') ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : []; // Tablero-Fase1: cap propia 'marketing' (split del padrón)
   const audTab = puedeConfig() ? [{id:'auditoria',icon:'history',lbl:'Auditoría'}] : [];
   const estTab = puedeConfig() ? [{id:'estadisticas',icon:'chart',lbl:'Estadísticas'}] : [];
-  const monTab = puedeConfig() ? [{id:'monitoreo',icon:'register',lbl:'Monitoreo'}] : [];
+  const monTab = puede('clinico') ? [{id:'monitoreo',icon:'register',lbl:'Monitoreo'}] : []; // Tablero-Fase1: cap 'clinico' (catálogo clínico + monitoreo)
   if(rol==='afiliado')return[{id:'perfil',icon:'user',lbl:'Perfil'}]; // el afiliado se atiende en el PWA (../socio/); en el panel no hay vistas suyas (historia/turnos eran mock demo-v1). Inalcanzable: enterWithFbUser/entrarConRol lo redirigen antes.
   if(rol==='medico')return[{id:'home',icon:'home',lbl:'Inicio'},{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}]; // D-1: 'despacho'/'registro' retirados del nav (desp()/reg() quedan como banco de pruebas)
   if(rol==='despachante')return[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},...movTab,...cronoTab,...agendaTab,{id:'perfil',icon:'user',lbl:'Perfil'}];
@@ -2462,7 +2462,9 @@ function epRecursosCard(ep){
     <div class="field"><label>Chofer (de la guardia · snapshot)</label><div id="ep-chofer" style="font-size:.85rem;font-weight:600;color:var(--ink)">${esc(choferLbl)}</div></div>
     <div class="field"><label>Médico (pre-cargado de la guardia · editable)</label><select id="ep-medico">${medOpts}</select></div>
     ${flashHtml}
-    <button class="btn-o" onclick="epAsignar()">Guardar recursos</button>
+    ${puede('despachar_episodios')
+      ? `<button class="btn-o" onclick="epAsignar()">Guardar recursos</button>`
+      : `<div style="font-size:.72rem;color:var(--ink3)">Necesitás el permiso <b>Despachar episodios</b> para asignar recursos.</div>`}
   </div>`;
 }
 // Al elegir una guardia: actualiza el chofer derivado (label) y pre-carga el médico vigente (editable). Sin re-render.
@@ -3949,7 +3951,7 @@ function facMoney(n){ const v=Number(n)||0; return '$'+v.toLocaleString('es-AR')
 function facTipoLbl(t){ return t==='por_km'?'Por km':'Fija'; }
 
 function facPanel(){
-  if(!puedeConfig()) return `<div class="card"><div class="ch">Facturación</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para configurar facturación.</div></div>`;
+  if(!(puede('facturar') || puedeConfig())) return `<div class="card"><div class="ch">Facturación</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para facturar.</div></div>`;
   if(!S.fac){ S.fac={sub:'tarifas',tarifas:null,prest:null,cargos:null,abonos:null,facturas:null,empresas:null,edit:null,cedit:null,aedit:null,fedit:null,comprobante:null,showInact:false,showAnul:false,showAnulAb:false,showAnulF:false,periodo:facPeriodoActual(),err:'',report:null,reportAb:null,reportF:null}; facAttach(); }
   if(S.fac.err) return `<div class="card">No se pudo cargar facturación: ${esc(S.fac.err)}</div>`;
   if(S.fac.comprobante) return facComprobante(); // F-2: comprobante imprimible a pantalla completa (sin tabs)
@@ -4067,11 +4069,11 @@ function facCargosView(){
     ${report}${toggle}<div class="card">${rows}</div>`;
 }
 function facShowAnul(on){ if(!S.fac) return; S.fac.showAnul=!!on; render(); }
-function facCargoEditar(id){ if(!puedeConfig())return; S.fac.cedit=id; render(); }
+function facCargoEditar(id){ if(!puede('facturar'))return; S.fac.cedit=id; render(); }
 function facCargoCancelar(){ if(S.fac) S.fac.cedit=null; render(); }
 
 async function generarCargos(){
-  if(!puedeConfig()) return; // la regla es la defensa real
+  if(!puede('facturar')) return; // la regla es la defensa real
   facErr('');
   if(!Array.isArray(S.fac.tarifas)){ facErr('Esperá a que carguen las tarifas.'); return; }
   const rep={ generados:0, sinTarifa:0, sinCargo:0, yaTenian:0, sinAtribucion:0, errores:0 };
@@ -4162,7 +4164,7 @@ function facCargoForm(){
   </div>`;
 }
 async function facCargoGuardar(id){
-  if(!puedeConfig()) return;
+  if(!puede('facturar')) return;
   facCMsg('');
   const c=(S.fac.cargos||[]).find(x=>x.id===id); if(!c) return;
   if(c.facturaId){ facCMsg('Este cargo está facturado: anulá la factura primero.'); return; }
@@ -4183,7 +4185,7 @@ async function facCargoGuardar(id){
   catch(e){ facCMsg('No se pudo guardar: '+(e.message||e)); }
 }
 async function facCargoAnular(id){
-  if(!puedeConfig()) return;
+  if(!puede('facturar')) return;
   facCMsg('');
   const cg=(S.fac.cargos||[]).find(x=>x.id===id);
   if(cg && cg.facturaId){ facCMsg('Este cargo está facturado: anulá la factura primero.'); return; }
@@ -4201,7 +4203,7 @@ async function facCargoAnular(id){
 function facPeriodoActual(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
 function facSetPeriodo(v){ if(!S.fac) return; S.fac.periodo=v||facPeriodoActual(); render(); }
 function facShowAnulAb(on){ if(!S.fac) return; S.fac.showAnulAb=!!on; render(); }
-function facAbonoEditar(id){ if(!puedeConfig())return; S.fac.aedit=id; render(); }
+function facAbonoEditar(id){ if(!puede('facturar'))return; S.fac.aedit=id; render(); }
 function facAbonoCancelar(){ if(S.fac) S.fac.aedit=null; render(); }
 
 function facAbonosView(){
@@ -4227,7 +4229,7 @@ function facAbonosView(){
 }
 
 async function generarAbonos(){
-  if(!puedeConfig()) return; // la regla es la defensa real
+  if(!puede('facturar')) return; // la regla es la defensa real
   facErr('');
   const periodo=(document.getElementById('fac-ab-periodo')?.value||S.fac.periodo||'').trim();
   if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
@@ -4307,7 +4309,7 @@ function facAbonoForm(){
   </div>`;
 }
 async function facAbonoGuardar(id){
-  if(!puedeConfig()) return;
+  if(!puede('facturar')) return;
   facAbMsg('');
   const a=(S.fac.abonos||[]).find(x=>x.id===id); if(!a) return;
   if(a.facturaId){ facAbMsg('Este abono está facturado: anulá la factura primero.'); return; }
@@ -4321,7 +4323,7 @@ async function facAbonoGuardar(id){
   catch(e){ facAbMsg('No se pudo guardar: '+(e.message||e)); }
 }
 async function facAbonoAnular(id){
-  if(!puedeConfig()) return;
+  if(!puede('facturar')) return;
   facAbMsg('');
   const ab=(S.fac.abonos||[]).find(x=>x.id===id);
   if(ab && ab.facturaId){ facAbMsg('Este abono está facturado: anulá la factura primero.'); return; }
@@ -4339,7 +4341,7 @@ async function facAbonoAnular(id){
    mínima. El motor SOLO LEE abonos/cargos y escribe facturas + el facturaId de los ítems. NUNCA delete físico. */
 function facFacturaRef(fid){ const f=(S.fac.facturas||[]).find(x=>x.id===fid); return f?('la factura '+esc(f.periodo||'')+' de '+esc(f.nombre||'—')):('factura '+esc(fid)); }
 function facShowAnulF(on){ if(!S.fac) return; S.fac.showAnulF=!!on; render(); }
-function facFacturaVer(id){ if(!puedeConfig())return; S.fac.fedit=id; render(); navPush(); }
+function facFacturaVer(id){ if(!puede('facturar'))return; S.fac.fedit=id; render(); navPush(); }
 function facFacturaCerrar(){ if(S.fac) S.fac.fedit=null; render(); }
 function facEstBadge(e){ const m={emitida:['#3B82F6','Emitida'],pagada:['#1D9E75','Pagada'],anulada:['#E5484D','Anulada']}; const x=m[e]||['#888',e]; return `<span style="background:${x[0]};color:#fff;border-radius:6px;padding:.05rem .4rem;font-size:.62rem;font-weight:700">${x[1]}</span>`; }
 
@@ -4364,7 +4366,7 @@ function facFacturasView(){
 }
 
 async function generarFacturas(){
-  if(!puedeConfig()) return; // la regla es la defensa real
+  if(!puede('facturar')) return; // la regla es la defensa real
   facErr('');
   const periodo=(document.getElementById('fac-fc-periodo')?.value||S.fac.periodo||'').trim();
   if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
@@ -4514,7 +4516,7 @@ function facComprobante(){
   </div>`;
 }
 async function facFacturaPagar(id){
-  if(!puedeConfig()) return;
+  if(!puede('facturar')) return;
   facFcMsg('');
   const f=(S.fac.facturas||[]).find(x=>x.id===id); if(!f) return;
   if(f.estado!=='emitida'){ facFcMsg('Solo se puede marcar pagada una factura emitida.'); return; }
@@ -4522,7 +4524,7 @@ async function facFacturaPagar(id){
   catch(e){ facFcMsg('No se pudo marcar pagada: '+(e.message||e)); }
 }
 async function facFacturaAnular(id){
-  if(!puedeConfig()) return;
+  if(!puede('facturar')) return;
   facFcMsg('');
   const f=(S.fac.facturas||[]).find(x=>x.id===id); if(!f) return;
   if(f.estado==='pagada'){ facFcMsg('Una factura pagada no se anula directo (decisión manual futura).'); return; }
@@ -4740,7 +4742,7 @@ async function cobAnularPago(pid, motivo){
 /* ===================== NOVEDADES (PWA-2a — curaduría del feed "Para vos") =====================
    Gate por ROL admin/superadmin. Cola de aprobación: la CF ingesta deja docs en 'pendiente'; nada se publica solo.
    Badge de pendientes en la tab (listener global). Sub-tabs: Pendientes / Publicados / + Nueva (alta manual 'interno'). */
-function novEsAdmin(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin')); }
+function novEsAdmin(){ return puede('curar_novedades'); } // Tablero-Fase1: curaduría por cap (antes rol admin)
 function novBadgeAttach(){ // listener GLOBAL del contador de pendientes (para el badge de la tab, siempre-on para admins)
   if(S.novBadgeUnsub) return;
   S.novBadgeUnsub = db.collection('feed_posts').where('estado','==','pendiente').onSnapshot(
@@ -5611,7 +5613,7 @@ function mktDetach(){ if(S.mktUnsub){ S.mktUnsub.forEach(u=>{ try{u();}catch(_){
 function mktErr(t){ const e=document.getElementById('mkt-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
 
 function mktPanel(){
-  if(!puedeAfil()) return `<div class="card"><div class="ch">Marketing</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para gestionar marketing.</div></div>`;
+  if(!puede('marketing')) return `<div class="card"><div class="ch">Marketing</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para gestionar marketing.</div></div>`;
   if(!S.mkt){ S.mkt={sub:'leads',leads:null,campanas:null,edit:null,cedit:null,showAll:false,showInactC:false,metrics:null,err:''}; mktAttach(); }
   if(S.mkt.err) return `<div class="card">No se pudo cargar marketing: ${esc(S.mkt.err)}</div>`;
   const sub=S.mkt.sub||'leads';
@@ -5641,8 +5643,8 @@ function mktLeadsView(){
   return `<button class="btn-r" onclick="mktNuevo()" style="margin-bottom:.7rem">+ Nuevo lead</button>${toggle}<div class="card">${rows}</div>`;
 }
 function mktShowAll(on){ if(!S.mkt) return; S.mkt.showAll=!!on; render(); }
-function mktNuevo(){ if(!puedeAfil())return; S.mkt.edit='new'; render(); }
-function mktEditar(id){ if(!puedeAfil())return; S.mkt.edit=id; render(); }
+function mktNuevo(){ if(!puede('marketing'))return; S.mkt.edit='new'; render(); }
+function mktEditar(id){ if(!puede('marketing'))return; S.mkt.edit=id; render(); }
 function mktCancelar(){ if(S.mkt) S.mkt.edit=null; render(); }
 function mktSocioRef(sid){ return 'socio ('+esc(sid)+')'; }
 
@@ -5683,7 +5685,7 @@ function mktLeadForm(){
   </div>`;
 }
 async function mktGuardar(id){
-  if(!puedeAfil()) return; // la regla es la defensa real
+  if(!puede('marketing')) return; // la regla es la defensa real
   mktErr('');
   const nombre=(document.getElementById('mkt-l-nombre')?.value||'').trim();
   const telefono=(document.getElementById('mkt-l-tel')?.value||'').trim();
@@ -5701,26 +5703,26 @@ async function mktGuardar(id){
   }catch(e){ mktErr('No se pudo guardar: '+(e.message||e)); }
 }
 async function mktContactar(id){
-  if(!puedeAfil()) return; mktErr('');
+  if(!puede('marketing')) return; mktErr('');
   try{ await db.collection('leads').doc(id).set({ estado:'contactado', actualizadoEn:FV() },{merge:true}); }
   catch(e){ mktErr('No se pudo actualizar: '+(e.message||e)); }
 }
 async function mktDescartar(id){
-  if(!puedeAfil()) return; mktErr('');
+  if(!puede('marketing')) return; mktErr('');
   const motivo=(document.getElementById('mkt-l-desc')?.value||'').trim();
   if(!motivo){ mktErr('El motivo de descarte es requerido.'); return; }
   try{ await db.collection('leads').doc(id).set({ estado:'descartado', motivoDescarte:motivo, actualizadoEn:FV() },{merge:true}); audit('lead_descartado','lead',id,motivo); S.mkt.edit=null; render(); }
   catch(e){ mktErr('No se pudo descartar: '+(e.message||e)); }
 }
 async function mktReactivar(id){
-  if(!puedeAfil()) return; mktErr('');
+  if(!puede('marketing')) return; mktErr('');
   try{ await db.collection('leads').doc(id).set({ estado:'contactado', motivoDescarte:null, actualizadoEn:FV() },{merge:true}); }
   catch(e){ mktErr('No se pudo reactivar: '+(e.message||e)); }
 }
 // Conversión lead -> socio: salta al alta de Afiliados existente (S.convLeadId + pre-carga). El alta reusa su
 // propia lógica (búsqueda DNI: reusa persona o crea persona+socio). El callback en afGuardarNuevo cierra el lead.
 function mktConvertir(id){
-  if(!puedeAfil()) return;
+  if(!puede('marketing')) return;
   const l=((S.mkt&&S.mkt.leads)||[]).find(x=>x.id===id); if(!l) return;
   if(l.estado==='convertido'){ mktErr('Este lead ya está convertido.'); return; }
   S.convLeadId=id; S.convPrefill={ nombre:l.nombre||'', telefono:l.telefono||'' }; S.convOpenAlta=true;
@@ -5750,8 +5752,8 @@ function mktCampanasView(){
   return `<button class="btn-r" onclick="mktCampNuevo()" style="margin-bottom:.7rem">+ Nueva campaña</button>${toggle}<div class="card">${rows}</div>`;
 }
 function mktShowInactC(on){ if(!S.mkt) return; S.mkt.showInactC=!!on; render(); }
-function mktCampNuevo(){ if(!puedeAfil())return; S.mkt.cedit='new'; render(); }
-function mktCampEditar(id){ if(!puedeAfil())return; S.mkt.cedit=id; render(); }
+function mktCampNuevo(){ if(!puede('marketing'))return; S.mkt.cedit='new'; render(); }
+function mktCampEditar(id){ if(!puede('marketing'))return; S.mkt.cedit=id; render(); }
 function mktCampCancelar(){ if(S.mkt) S.mkt.cedit=null; render(); }
 function mktCampanaForm(){
   const isNew=S.mkt.cedit==='new';
@@ -5771,7 +5773,7 @@ function mktCampanaForm(){
   </div>`;
 }
 async function mktCampGuardar(id){
-  if(!puedeAfil()) return; // la regla es la defensa real
+  if(!puede('marketing')) return; // la regla es la defensa real
   mktErr('');
   const nombre=(document.getElementById('mkt-c-nombre')?.value||'').trim();
   if(!nombre){ mktErr('El nombre es requerido.'); return; }
@@ -5785,14 +5787,14 @@ async function mktCampGuardar(id){
   }catch(e){ mktErr('No se pudo guardar: '+(e.message||e)); }
 }
 async function mktCampBaja(id,reactivar){
-  if(!puedeAfil()) return; mktErr('');
+  if(!puede('marketing')) return; mktErr('');
   try{ await db.collection('campanas').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); }
   catch(e){ mktErr('No se pudo actualizar: '+(e.message||e)); }
 }
 
 /* ---- Métricas (panel de solo lectura; cálculo on-demand, cruce con Contable) ---- */
 async function mktMetricasActualizar(){
-  if(!puedeAfil()) return;
+  if(!puede('marketing')) return;
   const leads=S.mkt.leads||[], campanas=S.mkt.campanas||[];
   // Cruce con Contable: facturado por socioId (facturas emitida|pagada). Permiso-gated → try/catch.
   let facBySocio=null, facError=false;
@@ -5857,7 +5859,7 @@ function audAttach(){
 }
 function audDetach(){ if(S.audUnsub){ S.audUnsub.forEach(u=>{ try{u();}catch(_){} }); S.audUnsub=null; } }
 function audFiltro(v){ if(S.aud){ S.aud.q=v||''; render(); } }
-function audPuede(){ return !!(S.user && (S.user.rol==='admin' || S.user.rol==='superadmin' || puede('configurar_sistema'))); }
+function audPuede(){ return puede('configurar_sistema'); } // Tablero-Fase1: sin bypass de rol (la regla de auditoría ya exige configurar_sistema)
 function audFmt(t){ const ms=tms(t); if(ms==null) return '—'; const d=new Date(ms); return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
 function audPanel(){
   if(!audPuede()) return `<div class="card"><div class="ch">Auditoría</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para ver la auditoría.</div></div>`;
@@ -6070,7 +6072,7 @@ function monAttach(){
 function monDetach(){ if(S.monUnsub){ S.monUnsub.forEach(u=>{ try{u();}catch(_){} }); S.monUnsub=null; } }
 
 function monPanel(){
-  if(!puedeConfig()) return `<div class="card"><div class="ch">Monitoreo</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para ver el monitoreo.</div></div>`;
+  if(!puede('clinico')) return `<div class="card"><div class="ch">Monitoreo</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para ver el monitoreo.</div></div>`;
   if(!S.mon){ S.mon={sub:'cuestionarios',cuest:null,resp:null,cedit:null,draft:null,err:'',respErr:'',showInact:false,rDesde:estHaceStr(30),rHasta:estHoyStr(),rExp:{}}; monAttach(); }
   if(S.mon.err) return `<div class="card">No se pudo cargar Monitoreo: ${esc(S.mon.err)}</div>`;
   const sub=S.mon.sub||'cuestionarios';
@@ -6164,11 +6166,11 @@ function monCuestForm(){
 function monPregAdd(tipo){ if(!S.mon||!S.mon.draft)return; monDraftSync(); S.mon.draft.preguntas.push({id:monPregNewId(),texto:'',tipo:(['si_no','escala','texto'].includes(tipo)?tipo:'si_no')}); render(); }
 function monPregDel(i){ if(!S.mon||!S.mon.draft)return; monDraftSync(); S.mon.draft.preguntas.splice(i,1); render(); }
 function monPregMove(i,dir){ if(!S.mon||!S.mon.draft)return; monDraftSync(); const a=S.mon.draft.preguntas,j=i+dir; if(j<0||j>=a.length)return; const t=a[i];a[i]=a[j];a[j]=t; render(); }
-function monCuestNuevo(){ if(!puedeConfig())return; S.mon.cedit='new'; S.mon.draft={nombre:'',activo:true,incluirWHO5:false,preguntas:[]}; render(); }
-function monCuestEditar(id){ if(!puedeConfig())return; const c=(S.mon.cuest||[]).find(x=>x.id===id); if(!c)return; S.mon.cedit=id; S.mon.draft={nombre:c.nombre||'',activo:c.activo!==false,incluirWHO5:c.incluirWHO5===true,preguntas:(c.preguntas||[]).map(q=>({id:q.id||monPregNewId(),texto:q.texto||'',tipo:(['si_no','escala','texto'].includes(q.tipo)?q.tipo:'si_no')}))}; render(); }
+function monCuestNuevo(){ if(!puede('clinico'))return; S.mon.cedit='new'; S.mon.draft={nombre:'',activo:true,incluirWHO5:false,preguntas:[]}; render(); }
+function monCuestEditar(id){ if(!puede('clinico'))return; const c=(S.mon.cuest||[]).find(x=>x.id===id); if(!c)return; S.mon.cedit=id; S.mon.draft={nombre:c.nombre||'',activo:c.activo!==false,incluirWHO5:c.incluirWHO5===true,preguntas:(c.preguntas||[]).map(q=>({id:q.id||monPregNewId(),texto:q.texto||'',tipo:(['si_no','escala','texto'].includes(q.tipo)?q.tipo:'si_no')}))}; render(); }
 function monCuestCancelar(){ if(S.mon){ S.mon.cedit=null; S.mon.draft=null; } render(); }
 async function monCuestGuardar(){
-  if(!puedeConfig()) return; // la regla es la defensa real
+  if(!puede('clinico')) return; // la regla es la defensa real
   monCErr('');
   monDraftSync();
   const d=S.mon.draft; if(!d) return;
@@ -6193,7 +6195,7 @@ async function monCuestGuardar(){
   }catch(e){ monCErr('No se pudo guardar: '+(e.message||e)); }
 }
 async function monCuestBaja(id,reactivar){
-  if(!puedeConfig())return;
+  if(!puede('clinico'))return;
   monErr('');
   try{ await db.collection('cuestionarios').doc(id).set({activo:!!reactivar,actualizadoEn:FV()},{merge:true}); audit(reactivar?'cuestionario_alta':'cuestionario_baja','cuestionario',id,''); }
   catch(e){ monErr('No se pudo actualizar: '+(e.message||e)); }
@@ -6569,11 +6571,11 @@ function monSintForm(){
     <button class="btn-o" onclick="monSintCancelar()">Cancelar</button>
   </div>`;
 }
-function monSintNuevo(){ if(!puedeConfig())return; S.mon.sedit='new'; S.mon.sdraft={nombre:'',banderaRoja:false}; render(); }
-function monSintEditar(id){ if(!puedeConfig())return; S.mon.sedit=id; S.mon.sdraft=null; render(); }
+function monSintNuevo(){ if(!puede('clinico'))return; S.mon.sedit='new'; S.mon.sdraft={nombre:'',banderaRoja:false}; render(); }
+function monSintEditar(id){ if(!puede('clinico'))return; S.mon.sedit=id; S.mon.sdraft=null; render(); }
 function monSintCancelar(){ if(S.mon){ S.mon.sedit=null; S.mon.sdraft=null; } render(); }
 async function monSintGuardar(){
-  if(!puedeConfig())return; monSErr('');
+  if(!puede('clinico'))return; monSErr('');
   const nombre=(document.getElementById('mon-s-nombre')?.value||'').trim().slice(0,80);
   const banderaRoja=!!(document.getElementById('mon-s-bandera')&&document.getElementById('mon-s-bandera').checked);
   if(!nombre){ monSErr('El nombre es requerido.'); return; }
@@ -6592,17 +6594,17 @@ async function monSintGuardar(){
   }catch(e){ monSErr('No se pudo guardar: '+(e.message||e)); }
 }
 async function monSintBandera(id,val){
-  if(!puedeConfig())return; monErr('');
+  if(!puede('clinico'))return; monErr('');
   try{ await db.collection('sintomas_catalogo').doc(id).set({ banderaRoja:!!val, actualizadoEn:FV() },{merge:true}); audit(val?'sintoma_bandera_on':'sintoma_bandera_off','sintoma_catalogo',id,''); }
   catch(e){ monErr('No se pudo actualizar: '+(e.message||e)); }
 }
 async function monSintBaja(id,reactivar){
-  if(!puedeConfig())return; monErr('');
+  if(!puede('clinico'))return; monErr('');
   try{ await db.collection('sintomas_catalogo').doc(id).set({ activo:!!reactivar, actualizadoEn:FV() },{merge:true}); }
   catch(e){ monErr('No se pudo actualizar: '+(e.message||e)); }
 }
 async function monSintMover(id,dir){
-  if(!puedeConfig())return; monErr('');
+  if(!puede('clinico'))return; monErr('');
   const all=monSintVisible(); const i=all.findIndex(s=>s.id===id); const j=i+dir;
   if(i<0||j<0||j>=all.length) return;
   const a=all[i], b=all[j], oa=(a.orden!=null)?a.orden:i, ob=(b.orden!=null)?b.orden:j;

@@ -281,9 +281,10 @@ service cloud.firestore {
     // reglas de episodios (medicoId == request.auth.uid), que no cambian.
     match /staff_medico/{uid} {
       allow read:           if esOperativo();
-      allow create, delete: if isAdmin() || esSuperadmin();
+      // Tablero-Fase1: gestión del padrón de médicos = cap 'gestionar_personal' (calco de /staff). SIN bypass isAdmin.
+      allow create, delete: if tienePermiso('gestionar_personal');
       // Mi perfil: el propio médico puede actualizar SOLO su nombre en su ficha; nada mas.
-      allow update: if isAdmin() || esSuperadmin()
+      allow update: if tienePermiso('gestionar_personal')
                        || ( esMedico()
                             && request.auth.uid == uid
                             && tocadas().hasOnly(['nombre']) );
@@ -376,9 +377,9 @@ service cloud.firestore {
     match /feed_posts/{id} {
       // FIX PWA-2a: el admin lee TODO (necesita la cola de pendientes/descartados para curar). El socio NO-admin
       // sigue viendo SOLO 'publicado' — nunca pendientes ni descartados (invariante que NO se relaja).
-      allow read:            if isAdmin() || (isSignedIn() && resource.data.estado == 'publicado');
-      allow create, update:  if isAdmin();
-      allow delete:          if isAdmin(); // el admin puede purgar; la retención automática la hace la CF (Admin SDK)
+      allow read:            if tienePermiso('curar_novedades') || (isSignedIn() && resource.data.estado == 'publicado'); // Tablero-Fase1: cap 'curar_novedades' (antes era rol admin)
+      allow create, update:  if tienePermiso('curar_novedades');
+      allow delete:          if tienePermiso('curar_novedades'); // el curador puede purgar; la retención automática la hace la CF (Admin SDK)
     }
 
     // turnos/{id} — reserva de un turno de videollamada por el SOCIO. Calca el patrón crea-lo-suyo
@@ -409,7 +410,7 @@ service cloud.firestore {
     //  - Sin delete desde la app (baja logica). Superadmin conserva borrado por el catch-all.
     match /prestaciones/{id} {
       allow read:           if esInterno();
-      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+      allow create, update: if tienePermiso('configurar_sistema');
     }
 
     // planes/{id}: catalogo comercial de planes + mapa coberturas{prestacionId:bool}. Estructura 3 (Admin).
@@ -419,11 +420,11 @@ service cloud.firestore {
     //  - Escritura: admin/superadmin o configurar_sistema. Baja logica via 'activo', sin delete desde la app.
     match /planes/{id} {
       allow read:           if isSignedIn();
-      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+      allow create, update: if tienePermiso('configurar_sistema');
       // historialPrecios (Tramo 5a): append-only. Lo escribe quien edita planes; no se actualiza ni borra.
       match /historialPrecios/{hid} {
         allow read:   if isSignedIn();
-        allow create: if isAdmin() || tienePermiso('configurar_sistema');
+        allow create: if tienePermiso('configurar_sistema');
         allow update, delete: if false;
       }
     }
@@ -440,14 +441,14 @@ service cloud.firestore {
     // (la landing es estática, sin login). Solo campos de marketing; el catálogo interno vive en /planes.
     match /planes_publicos/{id} {
       allow read:  if true;
-      allow write: if isAdmin() || tienePermiso('configurar_sistema');
+      allow write: if tienePermiso('configurar_sistema');
     }
 
     match /personas/{id} {
       allow read:           if isAdmin() || esSuperadmin()
                                || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema')
                                || (isSignedIn() && id == miPersonaId());
-      allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
+      allow create, update: if tienePermiso('gestionar_afiliados'); // Tablero-Fase1: sin bypass isAdmin (el read mantiene el rol para el despacho)
     }
 
     // socios/{id}: padron de afiliados (Estructura 3, Admin). Apunta a personas via personaId; planId a planes.
@@ -485,7 +486,7 @@ service cloud.firestore {
                                || (isSignedIn() && miPersonaId() != null && resource.data.personaId == miPersonaId())
                                || (isSignedIn() && miPersonaId() != null && resource.data.titularPersonaId == miPersonaId()); // F2: el TITULAR lee sus dependientes (titularPersonaId denorm en F1)
       // E-1: gate intacto + validacion de forma de facturarA (solo cuando esta presente; no impone whitelist total).
-      allow create, update: if (isAdmin() || tienePermiso('gestionar_afiliados')) && facturarAOk();
+      allow create, update: if tienePermiso('gestionar_afiliados') && facturarAOk(); // Tablero-Fase1: sin bypass isAdmin
     }
 
     // empresas/{id}: raíz corporativa / área protegida (alta de socio) + convenio de cobro (E-1).
@@ -497,8 +498,8 @@ service cloud.firestore {
       allow read:           if esDespachante() || isAdmin() || esSuperadmin()
                                || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema');
       // create: empGuardarNuevo + asignarNumeroRaiz (shape completo). Si trae 'convenio' -> exige gate contable.
-      allow create: if (isAdmin() || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema'))
-                       && ( !('convenio' in request.resource.data) || isAdmin() || tienePermiso('configurar_sistema') )
+      allow create: if (tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema'))
+                       && ( !('convenio' in request.resource.data) || tienePermiso('configurar_sistema') )
                        && request.resource.data.keys().hasOnly(['razonSocial','cuit','contacto','telefono','email','tipo','planIdDefault','activo','creadoEn','numeroConvenio','ultimoSufijo','convenio'])
                        && request.resource.data.keys().hasAll(['razonSocial','tipo','numeroConvenio'])
                        && request.resource.data.tipo in ['corporativo','area_protegida']
@@ -506,8 +507,8 @@ service cloud.firestore {
                        && convenioOk();
       // update: edicion del ABM (empGuardarEdit) + bump ultimoSufijo (asignarSufijo) + carga del convenio (E-2, contable).
       // Si 'convenio' esta entre los campos TOCADOS -> exige gate contable; gestionar_afiliados solo toca identidad.
-      allow update: if (isAdmin() || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema'))
-                       && ( !tocadas().hasAny(['convenio']) || isAdmin() || tienePermiso('configurar_sistema') )
+      allow update: if (tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema'))
+                       && ( !tocadas().hasAny(['convenio']) || tienePermiso('configurar_sistema') )
                        && tocadas().hasOnly(['razonSocial','cuit','contacto','telefono','email','planIdDefault','activo','actualizadoEn','ultimoSufijo','convenio'])
                        && convenioOk();
     }
@@ -519,7 +520,7 @@ service cloud.firestore {
     //    delete desde la app. NO altera las reglas de usuarios (cuentas) ni staff_medico (intactas).
     match /staff/{id} {
       allow read:           if esInterno();
-      allow create, update: if isAdmin() || tienePermiso('gestionar_personal');
+      allow create, update: if tienePermiso('gestionar_personal'); // Tablero-Fase1: sin bypass isAdmin
     }
 
     // tarifas/{id}: catalogo de tarifas de facturacion (Estructura 1, Contable). tipoCalculo fija|por_km,
@@ -529,17 +530,18 @@ service cloud.firestore {
     //    Sin delete desde la app. Superadmin conserva borrado por el catch-all.
     match /tarifas/{id} {
       allow read:           if esInterno();
-      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+      allow create, update: if tienePermiso('configurar_sistema');
     }
 
-    // Gate financiero del carril (Contable): SOLO admin/superadmin o configurar_sistema (NO esInterno).
-    function puedeFacturar() { return isAdmin() || tienePermiso('configurar_sistema'); }
+    // Gate financiero del carril (Contable): cap PROPIA 'facturar' (Tablero-Fase1: partida de configurar_sistema).
+    // SIN bypass isAdmin() — el admin factura SOLO si tiene la cap sembrada. Superadmin sigue por cortocircuito de tienePermiso.
+    function puedeFacturar() { return tienePermiso('facturar'); }
 
     // Gate de COBRANZA (C-1, Contable-cobros): registra pagos. admin/superadmin o la cap gestionar_cobranza.
     // OJO — es un permiso DISTINTO de facturar: configurar_sistema NO hereda el cobro. Solo admin (isAdmin)
     // y superadmin (cortocircuita tienePermiso) entran por sus bypasses normales; el contable puro necesita
     // la cap explicita gestionar_cobranza. Calco exacto de puedeConfig()/puedeCobrar() del cliente (app).
-    function puedeCobrar() { return isAdmin() || tienePermiso('gestionar_cobranza'); }
+    function puedeCobrar() { return tienePermiso('gestionar_cobranza'); } // Tablero-Fase1: SIN bypass isAdmin (superadmin sigue por cortocircuito)
 
     // cargos/{id}: cargos de facturacion generados por episodio (Estructura 1, Contable). DATA FINANCIERA.
     // F-1 (blindaje): la integridad pasa de candado-en-cliente a reglas. Whitelists calcadas al motor real
@@ -674,16 +676,16 @@ service cloud.firestore {
     //  - Lectura Y escritura: SOLO admin/superadmin o gestionar_afiliados (quien convierte da altas).
     //  - Descarte LOGICO via estado:'descartado'; conversion via estado:'convertido'; NUNCA delete desde la app.
     match /leads/{id} {
-      allow read:           if isAdmin() || tienePermiso('gestionar_afiliados');
-      allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
+      allow read:           if tienePermiso('marketing'); // Tablero-Fase1: split de gestionar_afiliados; marketing sin el padrón
+      allow create, update: if tienePermiso('marketing');
     }
 
     // campanas/{id}: campanas de captacion (Estructura 2, Marketing — Bloque 3). Datos de marketing.
     //  - Lectura Y escritura: SOLO admin/superadmin o gestionar_afiliados (mismo gateo que leads).
     //  - Baja LOGICA via 'activo'; NUNCA delete desde la app.
     match /campanas/{id} {
-      allow read:           if isAdmin() || tienePermiso('gestionar_afiliados');
-      allow create, update: if isAdmin() || tienePermiso('gestionar_afiliados');
+      allow read:           if tienePermiso('marketing'); // Tablero-Fase1: split de gestionar_afiliados
+      allow create, update: if tienePermiso('marketing');
     }
 
     // auditoria/{id}: registro transversal INMUTABLE de mutaciones (fire-and-forget desde la app).
@@ -693,7 +695,7 @@ service cloud.firestore {
     //    del superadmin igual podria, es intencional como valvula, pero desde la app nunca se toca).
     match /auditoria/{id} {
       allow create: if esInterno();
-      allow read:   if isAdmin() || tienePermiso('configurar_sistema');
+      allow read:   if tienePermiso('configurar_sistema');
     }
 
     // cuestionarios/{id}: plantillas del Nivel 1 de Monitoreo (cuestionario semanal). Eje transversal (Etapa 24).
@@ -701,7 +703,7 @@ service cloud.firestore {
     //  - Escritura (alta/edicion; baja LOGICA via 'activo'): admin/superadmin o configurar_sistema. Sin delete.
     match /cuestionarios/{id} {
       allow read:           if isSignedIn();
-      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+      allow create, update: if tienePermiso('clinico'); // Tablero-Fase1: catálogo clínico + monitoreo = cap 'clinico' (habilita datos de salud reales)
     }
 
     // respuestas_cuestionario/{id}: respuestas del socio al cuestionario semanal (Etapa 24). INMUTABLES.
@@ -736,7 +738,7 @@ service cloud.firestore {
     //    admin/superadmin o configurar_sistema. Sin delete.
     match /sintomas_catalogo/{id} {
       allow read:           if isSignedIn();
-      allow create, update: if isAdmin() || tienePermiso('configurar_sistema');
+      allow create, update: if tienePermiso('clinico'); // Tablero-Fase1: catálogo clínico = cap 'clinico'
     }
 
     // reportes_sintomas/{id}: auto-reporte declarativo de síntomas del socio (Etapa 30, N2). INMUTABLE,
