@@ -20,11 +20,13 @@ const { setGlobalOptions, logger } = require('firebase-functions/v2');
 const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { onDocumentUpdated, onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { onTaskDispatched } = require('firebase-functions/v2/tasks'); // A2-b: recordatorio vía Cloud Tasks
+const { getFunctions } = require('firebase-admin/functions');         // A2-b: encolar/cancelar la task
 const admin = require('firebase-admin');
 admin.initializeApp();
 const db = admin.firestore();
 const { ingestarFeeds } = require('./feed-ingesta'); // PWA-2a: núcleo de la ingesta del feed (compartido con el runner manual)
-const { textoAvisoTurno } = require('./push-turno'); // A2: texto N3 de las push de turno (módulo puro, testeable por smoke)
+const { textoAvisoTurno, textoRecordatorioTurno, planRecordatorio, debeRecordar } = require('./push-turno'); // A2: texto N3 + plan/decisión del recordatorio (módulo puro, testeable por smoke)
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -39,6 +41,13 @@ const ROLES = ['superadmin', 'admin', 'despachante', 'medico', 'chofer', 'afilia
 // ── Helpers Turnos (T-B.1) ──
 const FV = () => admin.firestore.FieldValue.serverTimestamp();
 const toMin = (s) => { const p = String(s || '').split(':'); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); };
+// A2-b — cola del recordatorio. Path completo (forma probada con el probe). El task ID se deriva del
+// turnoId INVERTIDO: determinístico (→ cancelable sin leer nada) y bien distribuido (los IDs secuenciales
+// degradan la cola; reversed = distribución ideal, recomendación del SDK). Un turnoId ⇒ un task ID único
+// ⇒ reprogramar (cancelar+reservar) nunca cruza tasks (turno nuevo = id nuevo).
+const RECORDATORIO_QUEUE = 'locations/southamerica-east1/functions/recordarTurno';
+const colaRecordatorio = () => getFunctions().taskQueue(RECORDATORIO_QUEUE);
+const taskIdDeTurno = (turnoId) => String(turnoId).split('').reverse().join('');
 const nombreDe = (p) => (((((p && p.apellido) || '') + ', ' + ((p && p.nombre) || '')).replace(/^, /, '').replace(/, $/, '')) || (p && p.dni) || '');
 // "Hoy" y ventana de reserva en horario de Argentina (NO el reloj UTC del runtime): un socio a las 22hs
 // no debe caer del otro lado de la medianoche UTC. Devuelve strings 'YYYY-MM-DD' comparables.
@@ -324,6 +333,10 @@ exports.reservarTurno = onCall(async (request) => {
 
   // (5) TX atómica: slot libre + máx-1-activo del destino + escribir
   const turnoRef = db.collection('turnos').doc();
+  // A2-b: plan del recordatorio (2hs antes). Se decide ANTES de la tx (ya tengo fecha+hora). Borde <2hs →
+  // enviar:false (no se encola). Task ID determinístico del turnoId → va en el MISMO set (sin write extra).
+  const plan = planRecordatorio(franja.fecha, hora, new Date());
+  const recordatorioTaskId = plan.enviar ? taskIdDeTurno(turnoRef.id) : null;
   await db.runTransaction(async (tx) => {
     const fr = await tx.get(franjaRef);
     const slots = (fr.data() || {}).slotsTomados || [];
@@ -341,9 +354,23 @@ exports.reservarTurno = onCall(async (request) => {
       // construcción. La CF de push (onDocumentCreated) rutea por ESTE campo — va en el MISMO set que crea el turno
       // (misma tx) → el trigger ve el doc completo, sin race ni update posterior.
       reservadoPorUid: request.auth.uid,
+      // A2-b: si se va a encolar recordatorio, guardo el task ID acá para poder cancelarlo. null = sin recordatorio (turno <2hs).
+      recordatorioTaskId,
       estado: 'creado', creadoEn: FV(),
     });
   });
+  // A2-b: encolar DESPUÉS del commit (si la tx falla, no queda task zombie). Best-effort: el recordatorio
+  // no puede voltear una reserva ya hecha. Si falla el enqueue, el turno vale igual (queda sin recordatorio).
+  if (recordatorioTaskId) {
+    try {
+      await colaRecordatorio().enqueue({ turnoId: turnoRef.id }, { id: recordatorioTaskId, scheduleTime: plan.cuando });
+      logger.info('[reservarTurno] recordatorio encolado', { turnoId: turnoRef.id, cuando: plan.cuando.toISOString() });
+    } catch (e) {
+      logger.error('[reservarTurno] no se pudo encolar el recordatorio (el turno queda sin él)', { turnoId: turnoRef.id, error: e.message || String(e) });
+    }
+  } else {
+    logger.info('[reservarTurno] sin recordatorio', { turnoId: turnoRef.id, razon: plan.razon });
+  }
   return { turnoId: turnoRef.id };
 });
 
@@ -369,35 +396,74 @@ exports.cancelarTurno = onCall(async (request) => {
     if (fr.exists) { const slots = (fr.data() || {}).slotsTomados || []; tx.update(franjaRef, { slotsTomados: slots.filter((s) => s !== turno.hora) }); }
     tx.update(turnoRef, { estado: 'cancelado', canceladoEn: FV() });
   });
+  // A2-b: cancelar la task del recordatorio (best-effort). Si falla, NO importa: recordarTurno revalida el
+  // estado al disparar (turno cancelado → no manda). Pero la borramos igual para no dejar tasks zombie.
+  // Solo turnos reservados POST-deploy tienen recordatorioTaskId (null = nunca se encoló → nada que cancelar).
+  const taskId = turno.recordatorioTaskId;
+  if (taskId) {
+    try { await colaRecordatorio().delete(taskId); logger.info('[cancelarTurno] recordatorio cancelado', { turnoId, taskId }); }
+    catch (e) { logger.warn('[cancelarTurno] no se pudo cancelar el recordatorio (la revalidación cubre)', { turnoId, taskId, error: e.message || String(e) }); }
+  }
   return { ok: true };
 });
 
-/* ===================== A2-a — Push nativa: aviso al reservar =====================
-   onDocumentCreated('turnos/{id}'): dispara cuando reservarTurno comitea el turno (el doc ya trae
-   reservadoPorUid del mismo set). Rutea por reservadoPorUid (el que TIENE la app; para un turno de
-   dependiente es el titular). Envía a TODOS los dispositivos del uid. N3: texto solo fecha/hora/médico.
-   Token muerto (unregistered) → borra ese dispositivo. Región heredada de setGlobalOptions (sae1). */
-exports.avisarTurno = onDocumentCreated('turnos/{id}', async (event) => {
-  const turno = event.data && event.data.data();
-  if (!turno || turno.estado !== 'creado') return null; // solo reservas nuevas
-  const uid = turno.reservadoPorUid;
-  if (!uid) { logger.warn('[avisarTurno] turno sin reservadoPorUid — no se puede rutear', { id: event.params.id }); return null; }
+/* ===================== A2 — Push nativa a los dispositivos de un uid =====================
+   Helper compartido por avisarTurno (A2-a) y recordarTurno (A2-b): envía { title, body } a TODOS los
+   dispositivos del uid. Token muerto (unregistered/invalid) → borra ese dispositivo. La garantía N3 vive
+   fuera de acá: el texto ya llega armado por push-turno.js (solo fecha/hora/médico). Devuelve el conteo. */
+async function pushATurno(uid, texto) {
   const disp = await db.collection('push_tokens').doc(uid).collection('dispositivos').get();
-  if (disp.empty) return null; // sin tokens (no instaló la app / permiso negado) — degradación limpia
-  const { title, body } = textoAvisoTurno(turno); // N3: SOLO fecha/hora/medico/nombreVista
+  if (disp.empty) return { dispositivos: 0, enviados: 0, muertos: 0 }; // sin tokens → degradación limpia
   let enviados = 0, muertos = 0;
   for (const d of disp.docs) {
     const token = (d.data() || {}).token;
     if (!token) continue;
-    try { await admin.messaging().send({ token, notification: { title, body } }); enviados++; }
+    try { await admin.messaging().send({ token, notification: { title: texto.title, body: texto.body } }); enviados++; }
     catch (e) {
       const code = (e && (e.code || (e.errorInfo && e.errorInfo.code))) || '';
       if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') { await d.ref.delete().catch(() => {}); muertos++; } // token muerto → borrar el dispositivo
     }
   }
-  logger.info('[avisarTurno]', { id: event.params.id, uid, dispositivos: disp.size, enviados, muertos });
+  return { dispositivos: disp.size, enviados, muertos };
+}
+
+/* ===================== A2-a — Push nativa: aviso al reservar =====================
+   onDocumentCreated('turnos/{id}'): dispara cuando reservarTurno comitea el turno (el doc ya trae
+   reservadoPorUid del mismo set). Rutea por reservadoPorUid (el que TIENE la app; para un turno de
+   dependiente es el titular). N3: texto solo fecha/hora/médico. Región heredada de setGlobalOptions (sae1). */
+exports.avisarTurno = onDocumentCreated('turnos/{id}', async (event) => {
+  const turno = event.data && event.data.data();
+  if (!turno || turno.estado !== 'creado') return null; // solo reservas nuevas
+  const uid = turno.reservadoPorUid;
+  if (!uid) { logger.warn('[avisarTurno] turno sin reservadoPorUid — no se puede rutear', { id: event.params.id }); return null; }
+  const r = await pushATurno(uid, textoAvisoTurno(turno)); // N3: SOLO fecha/hora/medico/nombreVista
+  logger.info('[avisarTurno]', { id: event.params.id, uid, ...r });
   return null;
 });
+
+/* ===================== A2-b — Push nativa: recordatorio ~2hs antes (Cloud Tasks) =====================
+   onTaskDispatched: la task encolada en reservarTurno dispara acá con { turnoId }.
+   ⚠️ REVALIDA al momento del envío (relee el turno): solo manda si estado ∈ {creado, confirmado}.
+      cancelado/atendido/inexistente → NO manda, sale limpio. Es la RED DE SEGURIDAD ante una cancelación
+      cuya task no se pudo borrar. IDEMPOTENCIA: recordatorioEnviadoEn — si ya está, no re-manda (reintentos
+      de Cloud Tasks). Mismo resolver (reservadoPorUid) y mismo N3 (push-turno) que A2-a. Región: sae1. */
+exports.recordarTurno = onTaskDispatched(
+  { retryConfig: { maxAttempts: 3, minBackoffSeconds: 60 }, rateLimits: { maxConcurrentDispatches: 6 } },
+  async (req) => {
+    const turnoId = (req && req.data && req.data.turnoId) || '';
+    if (!turnoId) { logger.warn('[recordarTurno] task sin turnoId'); return; }
+    const ref = db.collection('turnos').doc(turnoId);
+    const snap = await ref.get();
+    const turno = snap.exists ? (snap.data() || {}) : null; // releído al momento de disparar
+    const decision = debeRecordar(turno); // revalida estado + idempotencia + uid (pura, smoke-testeada)
+    if (!decision.mandar) { logger.info('[recordarTurno] no manda', { turnoId, razon: decision.razon }); return; }
+    const uid = turno.reservadoPorUid;
+    const r = await pushATurno(uid, textoRecordatorioTurno(turno)); // N3: SOLO fecha/hora/medico/nombreVista
+    if (r.dispositivos === 0) { logger.info('[recordarTurno] sin dispositivos — no-op', { turnoId, uid }); return; } // no marcar: no se envió nada
+    await ref.update({ recordatorioEnviadoEn: FV() }).catch(() => {}); // sello de idempotencia tras enviar
+    logger.info('[recordarTurno]', { turnoId, uid, ...r });
+  }
+);
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================
    onSchedule (Cloud Scheduler auto-aprovisionado). TIMEZONE EXPLÍCITO: sin timeZone, '06:00' dispararía 03:00 AR.
