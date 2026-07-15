@@ -892,6 +892,7 @@ auth.onAuthStateChanged(async user => {
     if(cred.estado === 'no-afiliado'){ set({ view:'no-afiliado', cred }); return; }
     if(cred.estado === 'sin-vinculo'){ set({ view:'sin-vinculo', cred }); return; }
     set({ view:'home', cred }); navReplace();
+    registrarPush(user.uid); // A2: registra el token FCM (fire-and-forget; no-op en web/permiso negado)
   }catch(e){
     set({ view:'error-carga', err:(e&&e.message)||String(e) });
   }
@@ -969,6 +970,34 @@ function noAfiliadoView(){
 function esAppNativa(){ return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform==='function' && window.Capacitor.isNativePlatform()); }
 // Link de WhatsApp a la línea de atención de MEDICAR. Normaliza a wa.me/549<numero> (quita 54/549 y no-dígitos). Sin número → ''.
 function waLink(num){ let d=String(num||'').replace(/\D/g,'').replace(/^54(9)?/, ''); return d ? ('https://wa.me/549'+d) : ''; }
+// A2 — registro del token FCM (SOLO nativo). deviceId = UUID persistido (multi-dispositivo). Maneja rotación (update
+// del mismo doc) y permiso negado (no rompe la app). Escribe push_tokens/{uid}/dispositivos/{deviceId}.
+function medicarDeviceId(){
+  let id=null; try{ id=localStorage.getItem('medicar_device_id'); }catch(_){}
+  if(!id){ id=(window.crypto&&crypto.randomUUID)?crypto.randomUUID():('dev-'+Date.now()+'-'+Math.floor(Math.random()*1e9)); try{ localStorage.setItem('medicar_device_id',id); }catch(_){} }
+  return id;
+}
+async function registrarPush(uid){
+  if(!esAppNativa() || !uid) return;                              // solo dentro de la app nativa
+  const PN = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.PushNotifications;
+  if(!PN) return;
+  try{
+    let perm = await PN.checkPermissions();
+    if(perm.receive === 'prompt' || perm.receive === 'prompt-with-rationale') perm = await PN.requestPermissions();
+    if(perm.receive !== 'granted') return;                        // permiso negado → sin push, la app sigue igual
+    const deviceId = medicarDeviceId();
+    const plataforma = (window.Capacitor.getPlatform && window.Capacitor.getPlatform()) || 'desconocida';
+    if(!S.pushWired){                                             // listeners una sola vez
+      S.pushWired = true;
+      PN.addListener('registration', async (t)=>{
+        try{ await db.collection('push_tokens').doc(uid).collection('dispositivos').doc(deviceId)
+          .set({ token: t.value, plataforma, actualizadoEn: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true }); }catch(_){}
+      });
+      PN.addListener('registrationError', ()=>{});               // no rompe nada
+    }
+    await PN.register();                                          // dispara 'registration' (también al rotar el token)
+  }catch(_){}
+}
 // Staff puro en la app NATIVA: no hay panel empaquetado → mensaje con la URL del panel web (en vez del redirect roto a ../app/).
 function staffNativoView(){
   return `<div class="center">

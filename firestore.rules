@@ -785,6 +785,13 @@ service cloud.firestore {
       allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId()); // NO se abre a clinico (fuera de la lista de Lucas; sigue esInterno/afiliado propio)
     }
 
+    // push_tokens/{uid}/dispositivos/{deviceId}: tokens FCM del socio (A2 — push nativas). Multi-dispositivo.
+    //  - El DUEÑO (uid propio) escribe/lee SUS dispositivos; NADIE más (un socio NO lee/escribe los de otro).
+    //  - La CF de push lee por Admin SDK (saltea reglas). deviceId = UUID persistido del cliente (no el token).
+    match /push_tokens/{uid}/dispositivos/{deviceId} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+
     // configuracion/{id}: datos institucionales de MEDICAR (ej. configuracion/club.whatsapp = línea de atención
     // para la videollamada de turnos). UN solo lugar; si el número cambia, vale para TODOS los turnos (viejos y nuevos).
     //  - read: cualquier AUTENTICADO (la línea de atención NO es dato sensible; el socio la necesita).

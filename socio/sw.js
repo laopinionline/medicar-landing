@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v11'; // App nativa (Capacitor): guarda del redirect staff en nativo (staffNativoView, esAppNativa)
+const CACHE = 'medicar-socio-v12'; // A2-a: registro de token FCM (push nativa) tras login
 const SHELL = [
   './',
   './index.html',

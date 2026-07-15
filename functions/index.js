@@ -18,12 +18,13 @@
  */
 const { setGlobalOptions, logger } = require('firebase-functions/v2');
 const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
-const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onDocumentUpdated, onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 admin.initializeApp();
 const db = admin.firestore();
 const { ingestarFeeds } = require('./feed-ingesta'); // PWA-2a: núcleo de la ingesta del feed (compartido con el runner manual)
+const { textoAvisoTurno } = require('./push-turno'); // A2: texto N3 de las push de turno (módulo puro, testeable por smoke)
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -336,6 +337,10 @@ exports.reservarTurno = onCall(async (request) => {
       fecha: franja.fecha, hora, agendaId,
       personaId: destino.personaId, nombreVista: destino.nombreVista,
       medicoId: franja.medicoId || '', medicoNombre: franja.medicoNombre || '',
+      // A2: uid de AUTH de quien reserva (el que tiene la app). Para un turno de DEPENDIENTE es el TITULAR por
+      // construcción. La CF de push (onDocumentCreated) rutea por ESTE campo — va en el MISMO set que crea el turno
+      // (misma tx) → el trigger ve el doc completo, sin race ni update posterior.
+      reservadoPorUid: request.auth.uid,
       estado: 'creado', creadoEn: FV(),
     });
   });
@@ -365,6 +370,33 @@ exports.cancelarTurno = onCall(async (request) => {
     tx.update(turnoRef, { estado: 'cancelado', canceladoEn: FV() });
   });
   return { ok: true };
+});
+
+/* ===================== A2-a — Push nativa: aviso al reservar =====================
+   onDocumentCreated('turnos/{id}'): dispara cuando reservarTurno comitea el turno (el doc ya trae
+   reservadoPorUid del mismo set). Rutea por reservadoPorUid (el que TIENE la app; para un turno de
+   dependiente es el titular). Envía a TODOS los dispositivos del uid. N3: texto solo fecha/hora/médico.
+   Token muerto (unregistered) → borra ese dispositivo. Región heredada de setGlobalOptions (sae1). */
+exports.avisarTurno = onDocumentCreated('turnos/{id}', async (event) => {
+  const turno = event.data && event.data.data();
+  if (!turno || turno.estado !== 'creado') return null; // solo reservas nuevas
+  const uid = turno.reservadoPorUid;
+  if (!uid) { logger.warn('[avisarTurno] turno sin reservadoPorUid — no se puede rutear', { id: event.params.id }); return null; }
+  const disp = await db.collection('push_tokens').doc(uid).collection('dispositivos').get();
+  if (disp.empty) return null; // sin tokens (no instaló la app / permiso negado) — degradación limpia
+  const { title, body } = textoAvisoTurno(turno); // N3: SOLO fecha/hora/medico/nombreVista
+  let enviados = 0, muertos = 0;
+  for (const d of disp.docs) {
+    const token = (d.data() || {}).token;
+    if (!token) continue;
+    try { await admin.messaging().send({ token, notification: { title, body } }); enviados++; }
+    catch (e) {
+      const code = (e && (e.code || (e.errorInfo && e.errorInfo.code))) || '';
+      if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') { await d.ref.delete().catch(() => {}); muertos++; } // token muerto → borrar el dispositivo
+    }
+  }
+  logger.info('[avisarTurno]', { id: event.params.id, uid, dispositivos: disp.size, enviados, muertos });
+  return null;
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================
