@@ -1,0 +1,16 @@
+{
+  "name": "medicar-socio-nativa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Envoltorio Capacitor de la PWA del socio (socio/) para Android/iOS. La UI vive en socio/, esto solo empaqueta.",
+  "scripts": {
+    "cap": "cap",
+    "sync": "cap sync",
+    "open:android": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/cli": "^6.2.1",
+    "@capacitor/core": "^6.2.1"
+  }
+}

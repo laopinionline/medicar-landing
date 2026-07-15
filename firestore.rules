@@ -785,6 +785,15 @@ service cloud.firestore {
       allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId()); // NO se abre a clinico (fuera de la lista de Lucas; sigue esInterno/afiliado propio)
     }
 
+    // configuracion/{id}: datos institucionales de MEDICAR (ej. configuracion/club.whatsapp = línea de atención
+    // para la videollamada de turnos). UN solo lugar; si el número cambia, vale para TODOS los turnos (viejos y nuevos).
+    //  - read: cualquier AUTENTICADO (la línea de atención NO es dato sensible; el socio la necesita).
+    //  - write: configurar_sistema (por cap; superadmin por cortocircuito).
+    match /configuracion/{id} {
+      allow read:  if isSignedIn();
+      allow write: if tienePermiso('configurar_sistema');
+    }
+
     // Resto del datastore: cerrado para todos, salvo superadmin. (Etapa 29 — INMUTABILIDAD REAL.)
     // Las reglas de Firestore son PERMISIVAS-ONLY: un 'allow: if false' NO bloquea lo que otro match
     // permite. El write total del catch-all contradecía la inmutabilidad de auditoria/respuestas/gestiones,
