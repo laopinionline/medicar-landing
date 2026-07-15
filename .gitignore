@@ -9,3 +9,9 @@ node_modules/
 **/node_modules/
 npm-debug.log*
 yarn-error.log*
+
+# App nativa (Capacitor) — Fase A
+/node_modules/
+# android/ NO se commitea todavía: el appId (ar.com.medicaronline.socio) es PROVISORIO;
+# se regenera con `npx cap add android` cuando ITECNIS/Atelier defina la convención de nombres.
+/android/
