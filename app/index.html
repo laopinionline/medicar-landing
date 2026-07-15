@@ -5205,7 +5205,15 @@ async function afBuscarPersona(){
   }catch(e){ afErr('No se pudo buscar: '+(e.message||e)); }
 }
 // F1 (denorm afiliado): nombre de vista para dependientes — MISMO formato que generarAbonos.socioNombre.
-function socioNombreDe(per){ const p=per||{}; return (((p.apellido||'')+', '+(p.nombre||'')).replace(/^, /,'').replace(/, $/,'')) || p.dni || ''; }
+function socioNombreDe(per){
+  const p=per||{};
+  const ape=String(p.apellido||'').trim();
+  let nom=String(p.nombre||'').trim();
+  // Dato viejo: algunas personas guardan el nombre COMPLETO en `nombre` (ya incluye el apellido al final) →
+  // sin esto sale "Torres, Lucía Torres". Si `nombre` termina en el apellido, lo quito antes de concatenar.
+  if(ape && nom){ const re=new RegExp('\\s*'+ape.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*$','i'); if(re.test(nom)) nom=nom.replace(re,'').trim(); }
+  return ((ape+', '+nom).replace(/^, /,'').replace(/, $/,'')) || String(p.dni||'') || '';
+}
 
 async function afGuardarNuevo(){
   if(!puedeAfil()) return; // la regla es la defensa real

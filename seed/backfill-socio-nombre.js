@@ -8,7 +8,12 @@ const admin = require('firebase-admin');
 admin.initializeApp({ credential: admin.credential.cert(require('./serviceAccountKey.json')) });
 const db = admin.firestore();
 const APPLY = process.argv.includes('--apply');
-const nom = (a, n, dni) => (((a || '') + ', ' + (n || '')).replace(/^, /, '').replace(/, $/, '')) || dni || '';
+const nom = (a, n, dni) => {
+  const ape = String(a || '').trim(); let no = String(n || '').trim();
+  // dato viejo: `nombre` completo (incluye el apellido) → no duplicar ("Torres, Lucía Torres")
+  if (ape && no) { const re = new RegExp('\\s*' + ape.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i'); if (re.test(no)) no = no.replace(re, '').trim(); }
+  return ((ape + ', ' + no).replace(/^, /, '').replace(/, $/, '')) || String(dni || '') || '';
+};
 
 (async () => {
   console.log(`=== backfill socios.nombreVista — ${APPLY ? 'APPLY' : 'DRY-RUN (no escribe)'} ===`);
