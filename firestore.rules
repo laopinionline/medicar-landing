@@ -89,6 +89,19 @@ service cloud.firestore {
     // NO abre tarifas/prestaciones (config) ni datos de salud. Definida temprano para no depender del orden.
     function puedeFinanzas() { return tienePermiso('facturar') || tienePermiso('gestionar_cobranza'); }
 
+    // Referente R1: ¿el uid actual es un referente ACTIVO del titular `personaId`, con la habilitación 'estado'
+    // (la ponderación) encendida? Se apoya en el ESPEJO del vínculo referentes/{refUid}/titulares/{titularPersonaId}
+    // (direccionable por get(), a diferencia del código aleatorio). La revocación se enforce ACÁ: el titular pone
+    // estado='revocado' en el espejo (vía CF) y este get() deja de dar 'activo' -> corte instantáneo por REGLA.
+    // FAIL-CLOSED: sin espejo, o estado != activo, o habilitación off => false. NO usa custom claim (defensa en
+    // profundidad: aunque el claim del token quede stale, el acceso a datos lo gobierna el espejo, no el token).
+    function esReferenteActivoDe(personaId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/referentes/$(request.auth.uid)/titulares/$(personaId))
+        && get(/databases/$(database)/documents/referentes/$(request.auth.uid)/titulares/$(personaId)).data.get('estado', '') == 'activo'
+        && get(/databases/$(database)/documents/referentes/$(request.auth.uid)/titulares/$(personaId)).data.get('habilitaciones', {}).get('estado', false) == true;
+    }
+
     // usuarios/{uid}: cada quien lee su doc; admin lee toda la coleccion.
     // Escritura: alta/baja/cambios de rol -> solo superadmin (via panel / Admin SDK).
     // Mi perfil: cada usuario puede actualizar SOLO su propio nombre/fotoURL (nada mas).
@@ -799,6 +812,41 @@ service cloud.firestore {
     match /configuracion/{id} {
       allow read:  if isSignedIn();
       allow write: if tienePermiso('configurar_sistema');
+    }
+
+    // ===================== REFERENTE R1 (auth + código + ponderación) =====================
+    // codigos_referente/{codigo}: el CÓDIGO que el titular genera y comparte. docId = el código.
+    //  - read/create/update: SOLO el titular dueño (titularPersonaId == su personaId). El referente NO lo lee
+    //    (el canje va por CF Admin SDK). create con forma cerrada; update solo para revocar (estado->revocado).
+    //  - El referente jamás toca esta colección.
+    match /codigos_referente/{codigo} {
+      allow read:   if isSignedIn() && resource.data.titularPersonaId == miPersonaId();
+      allow create: if isSignedIn()
+                       && request.resource.data.titularPersonaId == miPersonaId()
+                       && request.resource.data.estado == 'pendiente'
+                       && request.resource.data.keys().hasOnly(['titularPersonaId','estado','habilitaciones','referenteUid','nombreReferente','creadoEn','canjeadoEn','revocadoEn','expiraEn']);
+      allow update: if isSignedIn()
+                       && resource.data.titularPersonaId == miPersonaId()
+                       && tocadas().hasOnly(['estado','revocadoEn'])
+                       && request.resource.data.estado == 'revocado';
+      allow delete: if false;
+    }
+
+    // referentes/{refUid}/titulares/{titularPersonaId}: ESPEJO del vínculo (post-canje). Direccionable por get()
+    // para que esReferenteActivoDe() lo consulte. El referente LEE los suyos (para el selector multi-titular);
+    // NADIE escribe por reglas (solo la CF por Admin SDK: canje lo crea, revocar lo pasa a 'revocado').
+    match /referentes/{refUid}/titulares/{titularPersonaId} {
+      allow read:  if isSignedIn() && request.auth.uid == refUid;
+      allow write: if false;
+    }
+
+    // estado_referido/{titularPersonaId}: doc DERIVADO N3-safe. Contiene SOLO { ponderacion, actualizadoEn };
+    // ponderacion ∈ {'sin_sintomas','con_sintomas'}. NADA clínico crudo (ni síntoma, ni severidad, ni score, ni
+    // nivel). Lo escribe SOLO la CF (Admin SDK). Lo lee el rol INTERNO o un referente ACTIVO habilitado del titular.
+    // El referente lee ESTO, JAMÁS reportes_sintomas (cuya regla queda intacta, cerrada a interno/afiliado-propio).
+    match /estado_referido/{titularPersonaId} {
+      allow read:  if esInterno() || esReferenteActivoDe(titularPersonaId);
+      allow write: if false;
     }
 
     // Resto del datastore: cerrado para todos, salvo superadmin. (Etapa 29 — INMUTABILIDAD REAL.)

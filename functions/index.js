@@ -27,6 +27,8 @@ admin.initializeApp();
 const db = admin.firestore();
 const { ingestarFeeds } = require('./feed-ingesta'); // PWA-2a: núcleo de la ingesta del feed (compartido con el runner manual)
 const { textoAvisoTurno, textoRecordatorioTurno, planRecordatorio, debeRecordar } = require('./push-turno'); // A2: texto N3 + plan/decisión del recordatorio (módulo puro, testeable por smoke)
+const crypto = require('crypto'); // Referente R1: aleatoriedad del código
+const { docEstadoReferido, generarCodigo, esFormatoCodigo } = require('./referente'); // Referente R1: núcleo puro N3 (el shape derivado + el código). La traducción a humano vive en el front (copia de frasePonderacion).
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -462,6 +464,128 @@ exports.recordarTurno = onTaskDispatched(
     if (r.dispositivos === 0) { logger.info('[recordarTurno] sin dispositivos — no-op', { turnoId, uid }); return; } // no marcar: no se envió nada
     await ref.update({ recordatorioEnviadoEn: FV() }).catch(() => {}); // sello de idempotencia tras enviar
     logger.info('[recordarTurno]', { turnoId, uid, ...r });
+  }
+);
+
+/* ===================== REFERENTE R1 — auth + código + ponderación =====================
+   El referente es un usuario NUEVO (no socio): cuenta email/pass propia, solo lectura, scope = los titulares
+   que lo habilitaron. Multi-titular: los CÓDIGOS AGREGAN vínculos, no crean sesiones. La identidad se marca
+   con un CUSTOM CLAIM rol:'referente' (routing en el front); el ACCESO a datos lo gobierna el ESPEJO del
+   vínculo (referentes/{uid}/titulares/{titularPersonaId}), no el token. Estas CFs NO acuñan tokens de sesión:
+   la auth sigue siendo Firebase email/pass estándar; solo escriben Firestore + setean el claim. */
+
+// Ventana del código sin canjear (7 días). Y ms del helper de expiración.
+const REF_CODIGO_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const refRandomInt = (n) => crypto.randomInt(n); // aleatoriedad fuerte para el código
+
+// (1) generarCodigoReferente — el TITULAR (afiliado) crea un código para invitar a un referente. Devuelve el código.
+exports.generarCodigoReferente = onCall(async (request) => {
+  const titularPersonaId = await assertAfiliado(request); // exige afiliado con personaId
+  const nombreReferente = String((request.data || {}).nombreReferente || '').trim().slice(0, 60);
+  // Genera un código único (reintenta si por casualidad ya existe).
+  let codigo = '', ref = null;
+  for (let intento = 0; intento < 6; intento++) {
+    codigo = generarCodigo(refRandomInt);
+    ref = db.collection('codigos_referente').doc(codigo);
+    if (!(await ref.get()).exists) break;
+    codigo = '';
+  }
+  if (!codigo) throw new HttpsError('internal', 'No se pudo generar un código único. Reintentá.');
+  await ref.set({
+    titularPersonaId, estado: 'pendiente',
+    habilitaciones: { estado: true }, // R1: SOLO 'estado' (la ponderación). ubicacion/alertas = R2/R3
+    referenteUid: null, nombreReferente,
+    creadoEn: FV(), canjeadoEn: null, revocadoEn: null,
+    expiraEn: admin.firestore.Timestamp.fromMillis(Date.now() + REF_CODIGO_TTL_MS),
+  });
+  logger.info('[generarCodigoReferente]', { titularPersonaId, codigo });
+  return { codigo };
+});
+
+// (2) canjearCodigoReferente — el REFERENTE (ya autenticado con SU cuenta email/pass) canjea un código y queda
+// vinculado al titular. Marca el claim rol:'referente', escribe el espejo del vínculo, consume el código.
+exports.canjearCodigoReferente = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const codigo = String((request.data || {}).codigo || '').trim().toUpperCase();
+  if (!esFormatoCodigo(codigo)) throw new HttpsError('invalid-argument', 'Código inválido.');
+  const ref = db.collection('codigos_referente').doc(codigo);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Ese código no existe.');
+  const c = snap.data() || {};
+  if (c.estado === 'activo') throw new HttpsError('already-exists', 'Ese código ya fue usado.');
+  if (c.estado === 'revocado') throw new HttpsError('failed-precondition', 'Ese código fue dado de baja.');
+  if (c.expiraEn && c.expiraEn.toMillis && c.expiraEn.toMillis() < Date.now()) throw new HttpsError('failed-precondition', 'Ese código venció.');
+  // El referente no puede ser el propio titular (una cuenta afiliada no se auto-refiere).
+  const uDoc = await db.collection('usuarios').doc(uid).get();
+  if (uDoc.exists && (uDoc.data() || {}).personaId === c.titularPersonaId) throw new HttpsError('failed-precondition', 'No podés referirte a vos mismo.');
+
+  const titularPersonaId = c.titularPersonaId;
+  // Nombre del titular denorm en el ESPEJO: el referente NO puede leer /personas (regla afiliado-propia),
+  // así que su selector muestra este nombre. Es el único dato del titular (aparte de la ponderación) que ve.
+  let titularNombre = '';
+  try { const p = await db.collection('personas').doc(titularPersonaId).get(); if (p.exists) titularNombre = nombreDe(p.data()); } catch (_) {}
+  const espejo = db.collection('referentes').doc(uid).collection('titulares').doc(titularPersonaId);
+  const batch = db.batch();
+  batch.set(ref, { referenteUid: uid, estado: 'activo', canjeadoEn: FV() }, { merge: true });
+  batch.set(espejo, { estado: 'activo', habilitaciones: c.habilitaciones || { estado: true }, codigo, titularNombre, canjeadoEn: FV() }, { merge: true });
+  await batch.commit();
+  // Custom claim rol:'referente' (merge con claims existentes). Marca la cuenta como referente para el routing.
+  const user = await admin.auth().getUser(uid);
+  await admin.auth().setCustomUserClaims(uid, { ...(user.customClaims || {}), rol: 'referente' });
+  logger.info('[canjearCodigoReferente]', { uid, titularPersonaId, codigo });
+  return { titularPersonaId, titularNombre };
+});
+
+// (3) revocarVinculoReferente — el TITULAR corta un código/vínculo. Pasa el código Y el espejo a 'revocado' en
+// un batch atómico → el referente pierde acceso a ESE titular AL INSTANTE (la regla lee estado!='activo'). Sus
+// otros vínculos siguen; el claim NO se toca (marca "es referente", no da acceso por sí solo).
+exports.revocarVinculoReferente = onCall(async (request) => {
+  const titularPersonaId = await assertAfiliado(request);
+  const codigo = String((request.data || {}).codigo || '').trim().toUpperCase();
+  const ref = db.collection('codigos_referente').doc(codigo);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Ese código no existe.');
+  const c = snap.data() || {};
+  if (c.titularPersonaId !== titularPersonaId) throw new HttpsError('permission-denied', 'Ese código no es tuyo.');
+  const batch = db.batch();
+  batch.set(ref, { estado: 'revocado', revocadoEn: FV() }, { merge: true });
+  if (c.referenteUid) {
+    const espejo = db.collection('referentes').doc(c.referenteUid).collection('titulares').doc(titularPersonaId);
+    batch.set(espejo, { estado: 'revocado', revocadoEn: FV() }, { merge: true });
+  }
+  await batch.commit();
+  logger.info('[revocarVinculoReferente]', { titularPersonaId, codigo, referenteUid: c.referenteUid || null });
+  return { ok: true };
+});
+
+// (4) derivarEstadoReferido — onCreate de un reporte de síntomas → estado_referido/{personaId} = 'con_sintomas'.
+// ⚠️ N3: lee SOLO el personaId del reporte; NO copia sintomas/texto/tieneBanderaRoja/score/nivel. El doc queda
+// con EXACTAMENTE {ponderacion, actualizadoEn} (docEstadoReferido lo garantiza). Admin SDK → saltea reglas.
+exports.derivarEstadoReferido = onDocumentCreated('reportes_sintomas/{id}', async (event) => {
+  const data = event.data && event.data.data();
+  const personaId = data && data.personaId;
+  if (!personaId) { logger.warn('[derivarEstadoReferido] reporte sin personaId', { id: event.params.id }); return null; }
+  await db.collection('estado_referido').doc(personaId).set(docEstadoReferido('con_sintomas', FV())); // pisa el doc entero → sin residuos
+  logger.info('[derivarEstadoReferido]', { personaId }); // NO logueo nada del reporte
+  return null;
+});
+
+// (5) barrerEstadoReferido — onSchedule diaria: 'con_sintomas' con más de 72h sin refresco vuelve a 'sin_sintomas'
+// (el binario significa "reportó RECIENTEMENTE"). Barrido en memoria (pocos docs). Admin SDK.
+const REF_VENTANA_MS = 72 * 60 * 60 * 1000;
+exports.barrerEstadoReferido = onSchedule(
+  { schedule: 'every day 05:00', timeZone: 'America/Argentina/Buenos_Aires' },
+  async () => {
+    const corte = Date.now() - REF_VENTANA_MS;
+    const snap = await db.collection('estado_referido').where('ponderacion', '==', 'con_sintomas').get();
+    let vueltos = 0;
+    for (const d of snap.docs) {
+      const ms = (d.data().actualizadoEn && d.data().actualizadoEn.toMillis) ? d.data().actualizadoEn.toMillis() : 0;
+      if (ms < corte) { await d.ref.set(docEstadoReferido('sin_sintomas', FV())); vueltos++; }
+    }
+    logger.info('[barrerEstadoReferido]', { revisados: snap.size, vueltos });
+    return null;
   }
 );
 
