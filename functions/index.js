@@ -18,7 +18,7 @@
  */
 const { setGlobalOptions, logger } = require('firebase-functions/v2');
 const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
-const { onDocumentUpdated, onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentUpdated, onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onTaskDispatched } = require('firebase-functions/v2/tasks'); // A2-b: recordatorio vía Cloud Tasks
 const { getFunctions } = require('firebase-admin/functions');         // A2-b: encolar/cancelar la task
@@ -29,7 +29,7 @@ const { ingestarFeeds } = require('./feed-ingesta'); // PWA-2a: núcleo de la in
 const { textoAvisoTurno, textoRecordatorioTurno, planRecordatorio, debeRecordar } = require('./push-turno'); // A2: texto N3 + plan/decisión del recordatorio (módulo puro, testeable por smoke)
 const crypto = require('crypto'); // Referente R1: aleatoriedad del código
 const { docEstadoReferido, generarCodigo, esFormatoCodigo } = require('./referente'); // Referente R1: núcleo puro N3 (el shape derivado + el código). La traducción a humano vive en el front (copia de frasePonderacion).
-const { docAlerta } = require('./guardia'); // Guardia G1: shape (referencia) de la alerta de la bandeja
+const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); // Guardia G1/G2: shape de la alerta + helpers de cronograma/atendiendo
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -617,8 +617,56 @@ exports.derivarEstadoReferido = onDocumentCreated('reportes_sintomas/{id}', asyn
 exports.derivarAlerta = onDocumentCreated('reportes_sintomas/{id}', async (event) => {
   const data = event.data && event.data.data();
   if (!data || !data.personaId) { logger.warn('[derivarAlerta] reporte sin personaId', { id: event.params.id }); return null; }
-  const ref = await db.collection('alertas').add(docAlerta(data, event.params.id, FV()));
-  logger.info('[derivarAlerta]', { alertaId: ref.id, origenReporteId: event.params.id, personaId: data.personaId }); // NO logueo sintomas/texto
+  // G2 — guardia descubierta: ¿hay algún médico PRESENTE ahora? (estado_guardia con presenteHasta > now). Si no,
+  // la alerta nace 'descubierta' (marcador, NO estado → sigue en el pool). El despachante la ve destacada; el médico
+  // que llegue después también (su bandeja trae todas las 'nueva'). Query 'ligera' (limit 1) por Admin SDK.
+  let descubierta = false;
+  try {
+    const presentes = await db.collection('estado_guardia').where('presenteHasta', '>', admin.firestore.Timestamp.now()).limit(1).get();
+    descubierta = presentes.empty;
+  } catch (e) { logger.error('[derivarAlerta] no se pudo chequear presencia (se marca descubierta por las dudas)', { error: e.message || String(e) }); descubierta = true; }
+  const ref = await db.collection('alertas').add(docAlerta(data, event.params.id, FV(), descubierta));
+  logger.info('[derivarAlerta]', { alertaId: ref.id, origenReporteId: event.params.id, personaId: data.personaId, descubierta }); // NO logueo sintomas/texto
+  return null;
+});
+
+/* ===================== GUARDIA G2 — confirmarPresencia (check-in del médico) =====================
+   El médico toca "Estoy de guardia". VALIDA contra el cronograma SERVER-SIDE (no se puede falsear fuera de la
+   franja): busca una guardia médica vigente ahora (inicio <= now < fin, no cerrada) y estampa presenteHasta = su
+   fin en estado_guardia/{uid}. La presencia expira sola por ese timestamp (la regla compara con request.time). */
+exports.confirmarPresencia = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const u = await db.collection('usuarios').doc(uid).get();
+  const roles = u.exists ? (Array.isArray((u.data() || {}).roles) ? u.data().roles : ((u.data() || {}).rol ? [u.data().rol] : [])) : [];
+  if (!roles.includes('medico')) throw new HttpsError('permission-denied', 'Solo un médico confirma presencia de guardia.');
+  const now = Date.now();
+  // guardias del médico (personaId == su uid). Normalizo inicio/fin a ms absolutos.
+  const snap = await db.collection('guardias').where('personaId', '==', uid).get();
+  const guardias = snap.docs.map((d) => { const g = d.data() || {}; return { rol: g.rol, estado: g.estado, inicioMs: g.inicio && g.inicio.toMillis ? g.inicio.toMillis() : 0, finMs: g.fin && g.fin.toMillis ? g.fin.toMillis() : 0 }; });
+  const vig = guardiaVigente(guardias, now);
+  if (!vig) throw new HttpsError('failed-precondition', 'No tenés una guardia médica vigente en este momento.');
+  const presenteHasta = admin.firestore.Timestamp.fromMillis(vig.finMs);
+  await db.collection('estado_guardia').doc(uid).set({ presenteHasta, confirmadaEn: FV() }, { merge: true }); // merge → preserva atendiendo
+  logger.info('[confirmarPresencia]', { uid, presenteHasta: presenteHasta.toDate().toISOString() });
+  return { presenteHasta: vig.finMs };
+});
+
+/* ===================== GUARDIA G2 — mantenerAtendiendo (episodio que sobrevive) =====================
+   onDocumentWritten('episodios/{id}'): recomputa estado_guardia/{medicoId}.atendiendo = pacientes (personaId) de
+   los episodios ABIERTOS del médico. Cubre reasignación (recomputa el médico nuevo Y el anterior). El override
+   atiendeAlerta de la regla usa esta lista → la alerta del paciente le sigue visible aunque termine la guardia. */
+exports.mantenerAtendiendo = onDocumentWritten('episodios/{id}', async (event) => {
+  const before = event.data && event.data.before && event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data && event.data.after && event.data.after.exists ? event.data.after.data() : null;
+  const afectados = new Set();
+  if (before && before.medicoId) afectados.add(before.medicoId);
+  if (after && after.medicoId) afectados.add(after.medicoId);
+  for (const medicoId of afectados) {
+    const eps = await db.collection('episodios').where('medicoId', '==', medicoId).get();
+    const atendiendo = personasAtendidas(eps.docs.map((d) => d.data()));
+    await db.collection('estado_guardia').doc(medicoId).set({ atendiendo }, { merge: true }); // merge → preserva presenteHasta
+  }
   return null;
 });
 
