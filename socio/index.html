@@ -879,6 +879,16 @@ async function cargarCredencial(uid){
 }
 
 /* ---------- Auth flow ---------- */
+// Ruteo tras autenticarse, como función PURA (smoke-testeable). AFILIADO/STAFF PRIMERO: un afiliado (socio o
+// socio+referente) SIEMPRE va a su credencial; el referente PURO (no afiliado) va a su panel. Así un socio que
+// entra por error por "acceso de referente" NO cae en un panel vacío, y un referente que vuelve llega a su panel.
+function destinoTrasAuth(esRef, credEstado){
+  if(credEstado === 'staff') return 'staff';
+  if(credEstado === 'ok') return 'home';        // afiliado (socio o socio+referente) → su credencial, SIEMPRE
+  if(esRef) return 'referente';                 // referente puro → su panel (con sus vínculos)
+  if(credEstado === 'no-afiliado') return 'no-afiliado';
+  return 'sin-vinculo';
+}
 auth.onAuthStateChanged(async user => {
   if(!user){ set({ view:'login', cred:null, busy:false, refMode:false }); navReplace(); return; }
   set({ view:'boot' });
@@ -894,29 +904,29 @@ auth.onAuthStateChanged(async user => {
     if(esModoReferente() && !esRef){ set({ view:'referente-canje', busy:false, err:'' }); return; }
 
     const cred = await cargarCredencial(user.uid);
-    // ⚠️ AFILIADO/STAFF PRIMERO: la identidad de SOCIO tiene prioridad absoluta. Un socio que ADEMÁS es referente
-    // (de su madre, p.ej.) NO pierde su credencial — el claim referente jamás lo desvía; solo habilita una VISTA
-    // secundaria ("Ver como referente") desde su home. El claim no toca las reglas (el acceso a datos de socio
-    // sale de usuarios/{uid}.roles, no del token), así que su credencial queda intacta.
-    if(cred.estado === 'staff'){
+    // ⚠️ AFILIADO/STAFF PRIMERO (destinoTrasAuth, pura): la identidad de SOCIO tiene prioridad absoluta. Un socio
+    // que ADEMÁS es referente NO pierde su credencial — el claim referente jamás lo desvía; solo habilita la vista
+    // secundaria "Ver como referente" desde su home. Un socio que entra por error por "acceso de referente" cae
+    // igual en SU credencial (no en un panel vacío). El claim no toca las reglas (acceso desde usuarios/{uid}.roles).
+    const destino = destinoTrasAuth(esRef, cred.estado);
+    if(destino === 'staff'){
       if(esAppNativa()){ set({ view:'staff-nativo', cred }); return; }
       window.location.replace('../app/'); return; // web: staff puro → panel
     }
-    if(cred.estado === 'ok'){
+    if(destino === 'home'){
       modoReferenteOff();
       set({ view:'home', cred, tambienReferente: esRef, busy:false }); navReplace();
       registrarPush(user.uid);
       return;
     }
-    // NO es afiliado: si tiene el claim referente → panel del referente (cuenta de referente PURA).
-    if(esRef){
+    if(destino === 'referente'){ // cuenta de referente PURA (no afiliado) → su panel con sus vínculos
       modoReferenteOff();
       const ref = await cargarReferente(user.uid);
       set({ view:'referente', ref, cred:null, busy:false }); navReplace();
       registrarPush(user.uid);
       return;
     }
-    if(cred.estado === 'no-afiliado'){ set({ view:'no-afiliado', cred }); return; }
+    if(destino === 'no-afiliado'){ set({ view:'no-afiliado', cred }); return; }
     set({ view:'sin-vinculo', cred }); return;
   }catch(e){
     set({ view:'error-carga', err:(e&&e.message)||String(e) });
@@ -1693,8 +1703,45 @@ function referenteCodigoView(){
     <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
     <div class="field"><label>Código</label><input id="rcodv" type="text" autocapitalize="characters" autocomplete="off" placeholder="MED-XXXXXX" style="text-transform:uppercase;letter-spacing:.08em"></div>
     <button class="btn-r" onclick="doValidarCodigo()">${S.busy?'Validando…':'Continuar'}${S.busy?'':chv(15,'cw')}</button>
-    <button class="linkish" onclick="volverALogin()" style="margin-top:.9rem;background:none;border:none;color:var(--gris);font-size:.75rem;cursor:pointer;width:100%">← Volver</button>
+    <button class="linkish" onclick="irReferenteLogin()" style="margin-top:1rem;background:none;border:none;color:var(--rojo);font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">Ya tengo acceso de referente</button>
+    <button class="linkish" onclick="volverALogin()" style="margin-top:.7rem;background:none;border:none;color:var(--gris);font-size:.75rem;cursor:pointer;width:100%">← Volver</button>
   </div>`;
+}
+
+// Referente que YA tiene cuenta y vuelve: login directo email/pass, SIN código. onAuthStateChanged lo rutea por
+// el claim a su panel (con sus vínculos existentes). El código queda SOLO para agregar un vínculo nuevo.
+function irReferenteLogin(){ set({ view:'referente-login', err:'', busy:false }); }
+function referenteLoginView(){
+  return `<div class="login">
+    <div class="login-brand"><div class="brand">${chv(28)}<span class="word">medicar</span></div>
+      <div class="login-sub">Acceso de referente</div></div>
+    <h2>Entrá con tu cuenta</h2>
+    <p style="color:var(--gris);font-size:.82rem;margin:-.3rem 0 1rem">Si ya seguís a alguien como referente, entrá con tu email y contraseña.</p>
+    <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
+    <div class="field"><label>Email</label><input id="rlem" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com"></div>
+    <div class="field"><label>Contraseña</label><input id="rlpw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <button class="btn-r" onclick="doReferenteLogin()">${S.busy?'Ingresando…':'Entrar'}${S.busy?'':chv(15,'cw')}</button>
+    <button class="linkish" onclick="irReferenteAuth()" style="margin-top:1rem;background:none;border:none;color:var(--rojo);font-size:.78rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">Tengo un código para vincularme</button>
+    <button class="linkish" onclick="volverALogin()" style="margin-top:.6rem;background:none;border:none;color:var(--gris);font-size:.75rem;cursor:pointer;width:100%">← Volver</button>
+  </div>`;
+}
+async function doReferenteLogin(){
+  if(S.busy) return;
+  const email=(el('rlem')?.value||'').trim(); const pw=el('rlpw')?.value||'';
+  if(!email||!pw){ set({ err:'Ingresá tu email y contraseña.' }); return; }
+  modoReferenteOff(); // login directo NO es onboarding: limpio cualquier flag viejo para no caer en referente-canje
+  S.refCanjePendiente=null; // sin código pendiente: es solo entrar
+  set({ busy:true, err:'' });
+  try{
+    await auth.signInWithEmailAndPassword(email, pw);
+    // onAuthStateChanged toma el control y rutea por destinoTrasAuth (referente→panel · socio→su credencial).
+  }catch(e){
+    const code=(e&&e.code)||'';
+    const msg = /wrong-password|user-not-found|invalid-credential|invalid-email/.test(code) ? 'Email o contraseña incorrectos.'
+      : /too-many-requests/.test(code) ? 'Demasiados intentos. Probá más tarde.'
+      : 'No se pudo ingresar. Revisá tu conexión.';
+    set({ busy:false, err:msg }); // credenciales mal → error acá, NO lo mando de vuelta al código
+  }
 }
 async function doValidarCodigo(){
   if(S.busy) return;
@@ -1893,6 +1940,7 @@ function render(){
   switch(S.view){
     case 'login': html=loginView(); break;
     case 'referente-codigo': html=referenteCodigoView(); break;
+    case 'referente-login': html=referenteLoginView(); break;
     case 'referente-auth': html=referenteAuthView(); break;
     case 'referente-canje': html=referenteCanjeView(); break;
     case 'referente': html=referentePanelView(); break;
@@ -1917,6 +1965,8 @@ function render(){
   const rem=el('rem'); if(rem){ rem.onkeydown=e=>{ if(e.key==='Enter') el('rpw')?.focus(); }; }
   const rcod=el('rcod'); if(rcod){ rcod.onkeydown=e=>{ if(e.key==='Enter') doCanjearCodigo(); }; }
   const rcodv=el('rcodv'); if(rcodv){ rcodv.onkeydown=e=>{ if(e.key==='Enter') doValidarCodigo(); }; }
+  const rlpw=el('rlpw'); if(rlpw){ rlpw.onkeydown=e=>{ if(e.key==='Enter') doReferenteLogin(); }; }
+  const rlem=el('rlem'); if(rlem){ rlem.onkeydown=e=>{ if(e.key==='Enter') el('rlpw')?.focus(); }; }
 }
 
 render();
