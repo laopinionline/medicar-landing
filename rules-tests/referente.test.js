@@ -63,6 +63,24 @@ describe('estado_referido — ponderación (la cara N3)', () => {
   });
 });
 
+describe('cuenta HUÉRFANA (canje falló tras crear cuenta) — benigna, NO lee NADA', () => {
+  // Simula el borde "revocado entre validar y canjear": cuenta autenticada, claim referente, PERO sin ningún
+  // vínculo (referentes/refHuerfano/titulares vacío). esReferenteActivoDe debe dar false para TODO.
+  it('✗ huérfano NO lee estado_referido de NINGÚN titular (pTitA)', async () => {
+    await assertFails(ctx('refHuerfano', REF).doc('estado_referido/pTitA').get());
+  });
+  it('✗ huérfano NO lee estado_referido de otro titular (pTitB)', async () => {
+    await assertFails(ctx('refHuerfano', REF).doc('estado_referido/pTitB').get());
+  });
+  it('✗ huérfano NO lee reportes_sintomas/chequeos/socios/facturas', async () => {
+    await assertFails(ctx('refHuerfano', REF).doc('reportes_sintomas/rep1').get());
+    await assertFails(ctx('refHuerfano', REF).doc('chequeos_parametros/chk1').get());
+    await assertFails(ctx('refHuerfano', REF).doc('socios/socA').get());
+    await assertFails(ctx('refHuerfano', REF).doc('facturas/facA').get());
+  });
+  // (Leer su PROPIA subcolección de vínculos está permitido pero está VACÍA → no hay dato que obtener; no es leak.)
+});
+
 describe('N3 — el referente JAMÁS lee el crudo del titular', () => {
   it('✗ referente NO lee reportes_sintomas (crudo)', async () => {
     await assertFails(ctx('refX', REF).doc('reportes_sintomas/rep1').get());

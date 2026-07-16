@@ -478,6 +478,25 @@ exports.recordarTurno = onTaskDispatched(
 const REF_CODIGO_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const refRandomInt = (n) => crypto.randomInt(n); // aleatoriedad fuerte para el código
 
+// Rate limit del oracle público validarCodigoReferente: máx 10 intentos por IP cada 10 min. Traba simple
+// (Firestore, IP HASHEADA para no guardar IPs crudas) contra brute-force del espacio de códigos. App Check
+// sería más limpio pero su variante nativa depende del google-services.json bloqueado por ITECNIS → follow-up.
+const REF_RL_MAX = 10, REF_RL_VENTANA_MS = 10 * 60 * 1000;
+async function chequearRateLimitValidar(request) {
+  const fwd = (request.rawRequest && request.rawRequest.headers && request.rawRequest.headers['x-forwarded-for']) || '';
+  const ip = String(fwd).split(',')[0].trim() || (request.rawRequest && request.rawRequest.ip) || 'desconocida';
+  const id = crypto.createHash('sha1').update(ip).digest('hex').slice(0, 24); // hash → no guardamos la IP cruda
+  const ref = db.collection('rate_validar_referente').doc(id);
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref);
+    const now = Date.now();
+    let count = 1, windowStart = now;
+    if (s.exists) { const d = s.data() || {}; if (now - (d.windowStart || 0) < REF_RL_VENTANA_MS) { count = (d.count || 0) + 1; windowStart = d.windowStart; } }
+    if (count > REF_RL_MAX) throw new HttpsError('resource-exhausted', 'Demasiados intentos. Esperá unos minutos e intentá de nuevo.');
+    tx.set(ref, { count, windowStart, actualizadoEn: FV() });
+  });
+}
+
 // (1) generarCodigoReferente — el TITULAR (afiliado) crea un código para invitar a un referente. Devuelve el código.
 exports.generarCodigoReferente = onCall(async (request) => {
   const titularPersonaId = await assertAfiliado(request); // exige afiliado con personaId
@@ -500,6 +519,24 @@ exports.generarCodigoReferente = onCall(async (request) => {
   });
   logger.info('[generarCodigoReferente]', { titularPersonaId, codigo });
   return { codigo };
+});
+
+// (1b) validarCodigoReferente — PÚBLICA (sin auth): valida un código ANTES de pedir cuenta, para no crear
+// cuentas huérfanas si el código es inválido. Solo LECTURA; devuelve válido/motivo + nombre del titular (a quién
+// apunta el código que YA tenés). Con RATE LIMIT por IP (oracle acotado). NO consume el código (eso es la canje).
+exports.validarCodigoReferente = onCall(async (request) => {
+  await chequearRateLimitValidar(request); // traba anti brute-force
+  const codigo = String((request.data || {}).codigo || '').trim().toUpperCase();
+  if (!esFormatoCodigo(codigo)) return { valido: false, motivo: 'formato' };
+  const snap = await db.collection('codigos_referente').doc(codigo).get();
+  if (!snap.exists) return { valido: false, motivo: 'inexistente' };
+  const c = snap.data() || {};
+  if (c.estado === 'activo') return { valido: false, motivo: 'usado' };
+  if (c.estado === 'revocado') return { valido: false, motivo: 'revocado' };
+  if (c.expiraEn && c.expiraEn.toMillis && c.expiraEn.toMillis() < Date.now()) return { valido: false, motivo: 'vencido' };
+  let titularNombre = '';
+  try { const p = await db.collection('personas').doc(c.titularPersonaId).get(); if (p.exists) titularNombre = nombreDe(p.data()); } catch (_) {}
+  return { valido: true, titularNombre }; // NO se toca el código; la canje (autenticada) lo consume
 });
 
 // (2) canjearCodigoReferente — el REFERENTE (ya autenticado con SU cuenta email/pass) canjea un código y queda

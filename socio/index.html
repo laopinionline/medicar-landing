@@ -883,9 +883,14 @@ auth.onAuthStateChanged(async user => {
   if(!user){ set({ view:'login', cred:null, busy:false, refMode:false }); navReplace(); return; }
   set({ view:'boot' });
   try{
+    // Canje PENDIENTE del flujo por código (identidad recién resuelta: cuenta creada o socio recién logueado).
+    // El código YA se validó antes de crear la cuenta → acá solo lo consumimos y vamos al panel.
+    if(S.refCanjePendiente){ await procesarCanjePendiente(user); return; }
+
     const tok = await user.getIdTokenResult();
     const esRef = !!(tok.claims && tok.claims.rol === 'referente'); // marca de referente (NO gobierna acceso a datos)
-    // Cuenta recién creada en el flujo de referente, aún SIN canjear (sin claim todavía) → pedir el código.
+    // Fallback: recarga a mitad del onboarding (cuenta creada, aún sin canjear, sin refCanjePendiente en memoria)
+    // → retoma en la entrada de código autenticada para terminar el vínculo.
     if(esModoReferente() && !esRef){ set({ view:'referente-canje', busy:false, err:'' }); return; }
 
     const cred = await cargarCredencial(user.uid);
@@ -1650,21 +1655,80 @@ function modoReferenteOff(){ try{ localStorage.removeItem(REF_FLAG); }catch(_){}
 // N3: traducción crudo→humano (misma que functions/referente.js; el referente NO recibe otra cosa que el enum).
 function frasePonderacion(p){ return p==='con_sintomas' ? 'Se reportaron síntomas recientemente.' : 'No se reportaron síntomas.'; }
 
-// Desde el login: abre el onboarding del referente (crear cuenta / entrar).
-function irReferenteAuth(){ set({ view:'referente-auth', refCrear:true, err:'', busy:false }); }
+// Desde el login: el flujo del referente empieza por el CÓDIGO (validar ANTES de pedir cuenta → sin huérfanas).
+function irReferenteAuth(){ set({ view:'referente-codigo', err:'', busy:false, refCodigo:'', refTitularNombre:'', refCanjePendiente:null }); }
 
+// PASO 3 — identidad resuelta (cuenta creada o socio logueado): canjear el código YA validado y al panel.
+// Lo llama onAuthStateChanged. El código se validó en el paso 1 → si acá falla es el borde raro (revocado/tomado
+// en el ínterin): la cuenta queda autenticada SIN vínculo (benigna, no lee nada) y se ofrece meter otro código.
+async function procesarCanjePendiente(user){
+  const codigo=S.refCanjePendiente; S.refCanjePendiente=null;
+  try{
+    await fnsCall('canjearCodigoReferente',{ codigo });
+    modoReferenteOff();
+    await user.getIdToken(true); // refresca el token para tomar el claim rol:'referente'
+    const ref=await cargarReferente(user.uid);
+    const cred=await cargarCredencial(user.uid);
+    if(cred.estado==='ok'){ set({ view:'referente', ref, cred, tambienReferente:true, busy:false }); } // socio+referente
+    else { set({ view:'referente', ref, cred:null, busy:false }); }                                     // referente puro
+    navReplace(); registrarPush(user.uid);
+  }catch(e){
+    modoReferenteOff();
+    const code=(e&&e.code)||''; const m=(e&&e.message)||'';
+    const msg = /already-exists/.test(code)?'Ese código ya no está disponible. Probá con otro.'
+      : /failed-precondition/.test(code)?(m||'Ese código ya no está disponible.')
+      : /not-found/.test(code)?'Ese código ya no está disponible.'
+      : 'No se pudo vincular. Probá con otro código.';
+    set({ view:'referente-canje', busy:false, err:msg }); // cuenta autenticada sin vínculo → puede meter otro código, sin desloguear
+  }
+}
+
+// PASO 1 — código. Sin cuenta todavía: valida contra la CF pública. Inválido → error, NO avanza a crear cuenta.
+function referenteCodigoView(){
+  return `<div class="login">
+    <div class="login-brand"><div class="brand">${chv(28)}<span class="word">medicar</span></div>
+      <div class="login-sub">Acceso de referente</div></div>
+    <h2>Ingresá el código</h2>
+    <p style="color:var(--gris);font-size:.82rem;margin:-.3rem 0 1rem">Pedile al titular el código que generó en su app MEDICAR. Lo validamos antes de crear tu acceso.</p>
+    <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
+    <div class="field"><label>Código</label><input id="rcodv" type="text" autocapitalize="characters" autocomplete="off" placeholder="MED-XXXXXX" style="text-transform:uppercase;letter-spacing:.08em"></div>
+    <button class="btn-r" onclick="doValidarCodigo()">${S.busy?'Validando…':'Continuar'}${S.busy?'':chv(15,'cw')}</button>
+    <button class="linkish" onclick="volverALogin()" style="margin-top:.9rem;background:none;border:none;color:var(--gris);font-size:.75rem;cursor:pointer;width:100%">← Volver</button>
+  </div>`;
+}
+async function doValidarCodigo(){
+  if(S.busy) return;
+  const codigo=(el('rcodv')?.value||'').trim().toUpperCase();
+  if(!codigo){ set({ err:'Ingresá el código.' }); return; }
+  set({ busy:true, err:'' });
+  try{
+    const r=await fnsCall('validarCodigoReferente',{ codigo });
+    if(!r.valido){
+      const m={ formato:'Ese código no tiene el formato correcto.', inexistente:'Ese código no existe.', usado:'Ese código ya fue usado.', revocado:'Ese código fue dado de baja.', vencido:'Ese código venció.' };
+      set({ busy:false, err: m[r.motivo]||'Ese código no es válido.' }); return;
+    }
+    // Válido → recién ahora pido la cuenta. Guardo el código validado para canjearlo tras resolver identidad.
+    set({ view:'referente-auth', refCrear:true, refCodigo:codigo, refTitularNombre:r.titularNombre||'', busy:false, err:'' });
+  }catch(e){
+    const code=(e&&e.code)||'';
+    set({ busy:false, err: /resource-exhausted/.test(code)?'Demasiados intentos. Esperá unos minutos.':'No se pudo validar el código. Revisá tu conexión.' });
+  }
+}
+
+// PASO 2 — cuenta (solo se llega con un código YA validado). Crear acceso nuevo o entrar con cuenta existente.
 function referenteAuthView(){
   const crear=S.refCrear!==false;
   return `<div class="login">
     <div class="login-brand"><div class="brand">${chv(28)}<span class="word">medicar</span></div>
       <div class="login-sub">Acceso de referente</div></div>
-    <h2>${crear?'Creá tu acceso de referente':'Entrá como referente'}</h2>
+    <h2>${crear?'Creá tu acceso':'Entrá con tu cuenta'}</h2>
+    ${S.refTitularNombre?`<div class="card" style="padding:.7rem 1rem;margin-bottom:1rem;background:#fff5f5"><div style="font-size:.72rem;color:var(--gris);font-weight:700">VAS A SEGUIR A</div><div style="font-weight:800;color:var(--tinta)">${esc(S.refTitularNombre)}</div></div>`:''}
     <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
     <div class="field"><label>Email</label><input id="rem" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com"></div>
     <div class="field"><label>Contraseña</label><input id="rpw" type="password" autocomplete="${crear?'new-password':'current-password'}" placeholder="${crear?'Elegí una contraseña (mín. 6)':'••••••••'}"></div>
     <button class="btn-r" onclick="doReferenteAuth()">${S.busy?'Un momento…':(crear?'Crear acceso':'Entrar')}${S.busy?'':chv(15,'cw')}</button>
-    <button class="linkish" onclick="set({refCrear:${crear?'false':'true'},err:''})" style="margin-top:.9rem;background:none;border:none;color:var(--rojo);font-size:.78rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">${crear?'Ya tengo acceso de referente':'Necesito crear un acceso'}</button>
-    <button class="linkish" onclick="volverALogin()" style="margin-top:.6rem;background:none;border:none;color:var(--gris);font-size:.75rem;cursor:pointer;width:100%">← Volver</button>
+    <button class="linkish" onclick="set({refCrear:${crear?'false':'true'},err:''})" style="margin-top:.9rem;background:none;border:none;color:var(--rojo);font-size:.78rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">${crear?'Ya tengo cuenta (o soy socio)':'Necesito crear una cuenta'}</button>
+    <button class="linkish" onclick="irReferenteAuth()" style="margin-top:.6rem;background:none;border:none;color:var(--gris);font-size:.75rem;cursor:pointer;width:100%">← Cambiar el código</button>
     <div class="foot-note" style="margin-top:1.1rem">El referente ve solo lo que el titular habilita. Ante una emergencia llamá al <b>${TEL_EMERG}</b>.</div>
   </div>`;
 }
@@ -1672,18 +1736,21 @@ async function doReferenteAuth(){
   if(S.busy) return;
   const email=(el('rem')?.value||'').trim(); const pw=el('rpw')?.value||'';
   if(!email||!pw){ set({ err:'Ingresá email y contraseña.' }); return; }
-  set({ busy:true, err:'' }); modoReferenteOn(); // marca el flujo referente ANTES del cambio de auth
+  if(!S.refCodigo){ set({ view:'referente-codigo', err:'Volvé a ingresar el código.' }); return; } // guarda: no crear cuenta sin código validado
+  // El código YA está validado. Dejo el canje PENDIENTE: onAuthStateChanged lo ejecuta apenas se resuelve la identidad.
+  S.refCanjePendiente=S.refCodigo; modoReferenteOn();
+  set({ busy:true, err:'' });
   try{
     if(S.refCrear!==false) await auth.createUserWithEmailAndPassword(email, pw);
     else await auth.signInWithEmailAndPassword(email, pw);
-    // onAuthStateChanged toma el control (claim referente → panel; sin claim → referente-canje).
+    // onAuthStateChanged toma el control: ve refCanjePendiente → canjea el código validado → panel.
   }catch(e){
     const code=(e&&e.code)||'';
-    const msg = /email-already-in-use/.test(code) ? 'Ese email ya tiene una cuenta. Usá "Ya tengo acceso".'
+    const msg = /email-already-in-use/.test(code) ? 'Ese email ya tiene una cuenta. Usá "Ya tengo cuenta".'
       : /weak-password/.test(code) ? 'La contraseña debe tener al menos 6 caracteres.'
       : /wrong-password|user-not-found|invalid-credential|invalid-email/.test(code) ? 'Email o contraseña incorrectos.'
       : 'No se pudo continuar. Revisá tu conexión.';
-    modoReferenteOff(); set({ busy:false, err:msg });
+    S.refCanjePendiente=null; modoReferenteOff(); set({ busy:false, err:msg }); // auth falló → no quedó canje colgado
   }
 }
 
@@ -1824,6 +1891,7 @@ function render(){
   let html='';
   switch(S.view){
     case 'login': html=loginView(); break;
+    case 'referente-codigo': html=referenteCodigoView(); break;
     case 'referente-auth': html=referenteAuthView(); break;
     case 'referente-canje': html=referenteCanjeView(); break;
     case 'referente': html=referentePanelView(); break;
@@ -1847,6 +1915,7 @@ function render(){
   const rpw=el('rpw'); if(rpw){ rpw.onkeydown=e=>{ if(e.key==='Enter') doReferenteAuth(); }; }
   const rem=el('rem'); if(rem){ rem.onkeydown=e=>{ if(e.key==='Enter') el('rpw')?.focus(); }; }
   const rcod=el('rcod'); if(rcod){ rcod.onkeydown=e=>{ if(e.key==='Enter') doCanjearCodigo(); }; }
+  const rcodv=el('rcodv'); if(rcodv){ rcodv.onkeydown=e=>{ if(e.key==='Enter') doValidarCodigo(); }; }
 }
 
 render();
