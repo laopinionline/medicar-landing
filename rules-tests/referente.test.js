@@ -33,6 +33,9 @@ async function seed(env) {
     await db.doc('chequeos_parametros/chk1').set({ personaId: 'pTitA', fc: 120, news2Nivel: 'alto', creadoEn: 1 });
     await db.doc('socios/socA').set({ personaId: 'pTitA', numeroAfiliado: '90002', activo: true });
     await db.doc('facturas/facA').set({ personaId: 'pTitA', total: 1000 });
+    // Feed "Para vos": el referente ve los PUBLICADOS (news de MEDICAR, no dato sensible); nunca pendientes.
+    await db.doc('feed_posts/pub1').set({ estado: 'publicado', titulo: 'Nota publicada', cat: 'medicar' });
+    await db.doc('feed_posts/pend1').set({ estado: 'pendiente', titulo: 'Borrador', cat: 'medicar' });
     // Un código pendiente de titA
     await db.doc('codigos_referente/MED-CCCCCC').set({ titularPersonaId: 'pTitA', estado: 'pendiente', habilitaciones: { estado: true }, referenteUid: null, creadoEn: 1 });
   });
@@ -79,6 +82,21 @@ describe('cuenta HUÉRFANA (canje falló tras crear cuenta) — benigna, NO lee 
     await assertFails(ctx('refHuerfano', REF).doc('facturas/facA').get());
   });
   // (Leer su PROPIA subcolección de vínculos está permitido pero está VACÍA → no hay dato que obtener; no es leak.)
+});
+
+describe('feed "Para vos" — el referente lo lee, sin abrir de más', () => {
+  it('✓ referente lee un feed_post PUBLICADO (news, no sensible)', async () => {
+    await assertSucceeds(ctx('refX', REF).doc('feed_posts/pub1').get());
+  });
+  it('✓ hasta un referente HUÉRFANO (sin vínculos) lee el feed publicado (solo requiere estar autenticado)', async () => {
+    await assertSucceeds(ctx('refHuerfano', REF).doc('feed_posts/pub1').get());
+  });
+  it('✗ NO se abrió de más: un NO autenticado NO lee el feed', async () => {
+    await assertFails(anon().doc('feed_posts/pub1').get());
+  });
+  it('✗ NO se abrió de más: el referente NO lee un feed_post NO publicado (pendiente)', async () => {
+    await assertFails(ctx('refX', REF).doc('feed_posts/pend1').get());
+  });
 });
 
 describe('N3 — el referente JAMÁS lee el crudo del titular', () => {
