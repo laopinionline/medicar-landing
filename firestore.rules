@@ -798,6 +798,27 @@ service cloud.firestore {
       allow read:   if esInterno() || (isSignedIn() && resource.data.personaId == miPersonaId()); // NO se abre a clinico (fuera de la lista de Lucas; sigue esInterno/afiliado propio)
     }
 
+    // ===================== GUARDIA G1 — bandeja de alertas =====================
+    // alertas/{id}: un reporte de síntomas del afiliado → una alerta para la GUARDIA (médicos + despachante).
+    // MODELO REFERENCIA (no copia): la alerta NO lleva el crudo clínico — apunta al reporte por origenReporteId.
+    // El médico/despachante que ve la bandeja abre el reporte por esa referencia (ya leen reportes_sintomas por
+    // esInterno). La alerta solo trae ruteo/identidad (personaId/Nombre/Telefono denorm) + un flag de prioridad
+    // (tieneBanderaRoja) + estado. INVERSO del referente: acá el staff SÍ ve el crudo (en reportes_sintomas), pero
+    // el AFILIADO y el REFERENTE NO tocan esta colección (no son medico/despachante).
+    //  - read: G1 FIJO por rol (medico | despachante). G2 lo hará dinámico (sustituye esMedico por el permiso de
+    //    guardia); por eso el read es un OR simple de helpers, para no clavarlo. superadmin ya lee por el catch-all.
+    //  - create: SOLO la CF (Admin SDK) → false para todos acá.
+    //  - update: medico/despachante SOLO para marcar 'atendida' (whitelist estado/atendidaPor/atendidaEn).
+    //  - delete: nadie (no se borra; cambia de estado).
+    match /alertas/{id} {
+      allow read:   if esMedico() || esDespachante();
+      allow create: if false;
+      allow update: if (esMedico() || esDespachante())
+                       && tocadas().hasOnly(['estado','atendidaPor','atendidaEn'])
+                       && request.resource.data.estado == 'atendida';
+      allow delete: if false;
+    }
+
     // push_tokens/{uid}/dispositivos/{deviceId}: tokens FCM del socio (A2 — push nativas). Multi-dispositivo.
     //  - El DUEÑO (uid propio) escribe/lee SUS dispositivos; NADIE más (un socio NO lee/escribe los de otro).
     //  - La CF de push lee por Admin SDK (saltea reglas). deviceId = UUID persistido del cliente (no el token).

@@ -607,6 +607,7 @@ function resetSession(keepErr){
   if(typeof monDetach==='function') monDetach(); // ídem monitoreo (cuestionarios/respuestas)
   if(typeof banDetach==='function') banDetach(); // ídem escucha en vivo de la bandeja (despachante/médico)
   if(typeof pedDetach==='function') pedDetach(); // ídem pedidos de atención (D-3.2)
+  if(typeof alertasDetach==='function') alertasDetach(); // ídem bandeja de alertas de guardia (G1)
   if(typeof pedLimpiarVinculo==='function') pedLimpiarVinculo(); // invariante: sin reporteId colgado tras logout
   if(S.mapaVivo){ try{S.mapaVivo.remove();}catch(_){} S.mapaVivo=null; } // mapa vivo Leaflet
   S=cleanSession();
@@ -902,8 +903,8 @@ function getTabs(rol){
   if(rol==='afiliado')return[perfil]; // el afiliado se atiende en el PWA; inalcanzable (redirigido antes)
   if(rol==='superadmin')return[home,perfil]; // navega por superView/SUPER_SECS
   let estr;
-  if(rol==='medico') estr=[home,{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'}];
-  else if(rol==='despachante') estr=[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'}];
+  if(rol==='medico') estr=[home,{id:'episodios',icon:'chart',lbl:'Episodios'},{id:'alertas',icon:'history',lbl:'Alertas'},{id:'guardia',icon:'register',lbl:'Guardia'}];
+  else if(rol==='despachante') estr=[{id:'bandeja',icon:'history',lbl:'Bandeja'},{id:'despacho',icon:'dispatch',lbl:'Nuevo'},{id:'guardia',icon:'register',lbl:'Guardia'}];
   else if(rol==='contable') estr=[]; // el contable no tiene home propio; sus tabs son las cap-tabs
   else if(rol==='chofer') estr=[home];
   else estr=[home]; // admin (default)
@@ -924,8 +925,8 @@ function pg(){
   if(capRoute[t]) return capRoute[t]();
   // estructurales del rol (lo que no es cap-tab):
   if(r==='afiliado') return ''; // PWA; inalcanzable (redirigido antes)
-  if(r==='medico'){if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();return mHome();}
-  if(r==='despachante'){if(t==='despacho')return dDesp();return bandeja();}
+  if(r==='medico'){if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='guardia')return bandejaAlertas();return mHome();}
+  if(r==='despachante'){if(t==='despacho')return dDesp();if(t==='guardia')return bandejaAlertas();return bandeja();}
   if(r==='contable') return facPanel();
   if(r==='superadmin') return superView();
   if(r==='chofer') return choferHome();
@@ -1726,6 +1727,65 @@ async function pedDescartar(reporteId){
   try{ await db.collection('reportes_sintomas').doc(reporteId).set({ estadoPedido:'descartado', notaGestion:motivo.slice(0,200), gestionadoPor:S.user.uid, gestionadoEn:FV() },{merge:true}); }
   catch(e){ dspMsg('No se pudo descartar: '+(e.message||e)); }
 }
+/* ===================== GUARDIA G1 — bandeja de alertas (medico + despachante) =====================
+   Alertas persistidas (colección 'alertas', creadas por la CF derivarAlerta al reportar un afiliado). Bandeja EN
+   VIVO (onSnapshot estado=='nueva', sin push en G1). MODELO REFERENCIA: la lista muestra identidad+hora+prioridad
+   SIN el crudo; el síntoma/relato se ve al ABRIR (lee reportes_sintomas/{origenReporteId}, que el staff ya puede
+   por esInterno). "Atender" pasa la alerta a 'atendida' → sale de la bandeja activa (no se borra). */
+function alertasAttach(){
+  if(S.alertasUnsub) return;
+  S.alertasUnsub=db.collection('alertas').where('estado','==','nueva').onSnapshot(s=>{
+    if(!S.user) return;
+    S.alertas=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(tms(b.creadoEn)||0)-(tms(a.creadoEn)||0));
+    if(S.tab==='guardia') render();
+  }, e=>{ S.alertas=[]; S.alertasErr=(e&&e.message)||String(e); if(S.tab==='guardia') render(); });
+}
+function alertasDetach(){ if(S.alertasUnsub){ try{S.alertasUnsub();}catch(_){} S.alertasUnsub=null; } S.alertas=null; S.alertaAbierta=null; S.alertaReporte=null; S.alertasErr=null; }
+// Abrir/cerrar el detalle: recién acá se lee el CRUDO desde reportes_sintomas (el crudo NO viaja en la alerta).
+async function alertaVer(id, reporteId){
+  const cerrar=(S.alertaAbierta===id); S.alertaAbierta=cerrar?null:id; S.alertaReporte=null; render();
+  if(cerrar) return;
+  try{ const r=await db.collection('reportes_sintomas').doc(reporteId).get(); S.alertaReporte=r.exists?{id:r.id,...r.data()}:{err:'no existe'}; }
+  catch(e){ S.alertaReporte={err:(e.message||String(e))}; }
+  if(S.tab==='guardia'&&S.alertaAbierta===id) render();
+}
+async function alertaAtender(id){
+  try{ await db.collection('alertas').doc(id).set({ estado:'atendida', atendidaPor:S.user.uid, atendidaEn:FV() },{merge:true}); if(S.alertaAbierta===id){ S.alertaAbierta=null; S.alertaReporte=null; } }
+  catch(e){ S.alertasErr='No se pudo atender: '+(e.message||e); render(); }
+}
+function bandejaAlertas(){
+  alertasAttach();
+  const list=S.alertas;
+  const head=`<div class="panel-h" style="margin:.1rem 0 .3rem"><b>🔔 Bandeja de guardia${(list&&list.length)?(' ('+list.length+')'):''}</b><span style="font-size:.62rem;color:var(--ink3);font-weight:400">tiempo real</span></div>
+    <div style="font-size:.68rem;color:var(--ink3);margin-bottom:.6rem">Reportes de síntomas de afiliados. Tocá "Ver" para el detalle clínico; "Atender" la saca de la bandeja.</div>`;
+  const err=S.alertasErr?`<div class="card" style="border:1.5px solid var(--r);color:var(--r);padding:.6rem 1rem">${esc(S.alertasErr)}</div>`:'';
+  if(list===null||list===undefined) return `${head}${err}<div class="card" style="padding:1.2rem;text-align:center;color:var(--ink3)">Cargando…</div>`;
+  if(!list.length) return `${head}${err}<div class="card" style="padding:1.2rem;text-align:center;color:var(--ink3)">No hay alertas activas.</div>`;
+  const rows=list.map(a=>{
+    const roja=a.tieneBanderaRoja===true; const abierta=S.alertaAbierta===a.id;
+    const tel=a.personaTelefono?`<a class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:0" href="tel:${esc(a.personaTelefono)}">Llamar</a>`:'';
+    let detalle='';
+    if(abierta){
+      const r=S.alertaReporte;
+      if(!r) detalle=`<div style="padding:.5rem 1rem;color:var(--gris)">Abriendo el reporte…</div>`;
+      else if(r.err) detalle=`<div style="padding:.5rem 1rem;color:var(--r)">No se pudo abrir el reporte referenciado.</div>`;
+      else{ const sint=(r.sintomas||[]).map(s=>esc(s.nombre||'')).filter(Boolean).join(', ');
+        detalle=`<div style="padding:.55rem 1rem;background:#fafafa;border-top:1px dashed var(--linea)"><div><b>Síntomas:</b> ${sint||'—'}</div>${r.texto?`<div style="margin-top:.2rem"><b>Relato:</b> ${esc(r.texto)}</div>`:''}</div>`; }
+    }
+    return `<div class="card" style="padding:0;${roja?'border:1.5px solid var(--r)':''}">
+      <div class="lr" style="flex-wrap:wrap;padding:.6rem 1rem">
+        <div class="lrb" style="flex:1 1 60%"><div class="lrn" style="${roja?'color:var(--r)':''}">${roja?'🔴 ':''}${esc(a.personaNombre||'—')}</div><div class="lrs">${pedHace(a.creadoEn)}</div></div>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+          <button class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:0" onclick="alertaVer('${esc(a.id)}','${esc(a.origenReporteId||'')}')">${abierta?'Ocultar':'Ver'}</button>
+          ${tel}
+          <button class="btn-r" style="width:auto;padding:.3rem .6rem;margin-top:0" onclick="alertaAtender('${esc(a.id)}')">Atender</button>
+        </div>
+      </div>${detalle}
+    </div>`;
+  }).join('');
+  return `${head}${err}${rows}`;
+}
+
 // Hook aditivo (etapa 'creado'): vincula el reporte al episodio recién creado, buscándolo por nroIncidente.
 async function vincularPedido(nro){
   const rid=S.pedidoReporteId; if(!rid){ S.pedidoVinc=false; return; }

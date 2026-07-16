@@ -29,6 +29,7 @@ const { ingestarFeeds } = require('./feed-ingesta'); // PWA-2a: núcleo de la in
 const { textoAvisoTurno, textoRecordatorioTurno, planRecordatorio, debeRecordar } = require('./push-turno'); // A2: texto N3 + plan/decisión del recordatorio (módulo puro, testeable por smoke)
 const crypto = require('crypto'); // Referente R1: aleatoriedad del código
 const { docEstadoReferido, generarCodigo, esFormatoCodigo } = require('./referente'); // Referente R1: núcleo puro N3 (el shape derivado + el código). La traducción a humano vive en el front (copia de frasePonderacion).
+const { docAlerta } = require('./guardia'); // Guardia G1: shape (referencia) de la alerta de la bandeja
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -605,6 +606,19 @@ exports.derivarEstadoReferido = onDocumentCreated('reportes_sintomas/{id}', asyn
   if (!personaId) { logger.warn('[derivarEstadoReferido] reporte sin personaId', { id: event.params.id }); return null; }
   await db.collection('estado_referido').doc(personaId).set(docEstadoReferido('con_sintomas', FV())); // pisa el doc entero → sin residuos
   logger.info('[derivarEstadoReferido]', { personaId }); // NO logueo nada del reporte
+  return null;
+});
+
+/* ===================== GUARDIA G1 — derivarAlerta =====================
+   onDocumentCreated('reportes_sintomas/{id}'): CUALQUIER reporte del afiliado → una alerta en la bandeja de la
+   guardia (sin umbral, decisión de Lucas). SEGUNDO trigger sobre el MISMO path que derivarEstadoReferido: son CFs
+   independientes que escriben colecciones distintas (alertas/{autogen} vs estado_referido/{personaId}) → conviven
+   sin pisarse. MODELO REFERENCIA: la alerta apunta al reporte (origenReporteId), NO copia el crudo (docAlerta). */
+exports.derivarAlerta = onDocumentCreated('reportes_sintomas/{id}', async (event) => {
+  const data = event.data && event.data.data();
+  if (!data || !data.personaId) { logger.warn('[derivarAlerta] reporte sin personaId', { id: event.params.id }); return null; }
+  const ref = await db.collection('alertas').add(docAlerta(data, event.params.id, FV()));
+  logger.info('[derivarAlerta]', { alertaId: ref.id, origenReporteId: event.params.id, personaId: data.personaId }); // NO logueo sintomas/texto
   return null;
 });
 
