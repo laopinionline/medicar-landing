@@ -102,6 +102,22 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/referentes/$(request.auth.uid)/titulares/$(personaId)).data.get('habilitaciones', {}).get('estado', false) == true;
     }
 
+    // Guardia G2 — permiso DINÁMICO derivado. estado_guardia/{uid} lo mantiene una CF (Admin SDK); la regla solo LEE.
+    //  - presenteGuardia: el médico confirmó "Estoy de guardia" y su franja NO terminó. presenteHasta = fin de la
+    //    guardia vigente (la CRONOGRAMA se validó server-side al confirmar; acá NO se consulta guardias). AUTO-EXPIRA
+    //    por request.time > presenteHasta (instantes absolutos → sin trampa de medianoche/husos). FAIL-CLOSED.
+    function presenteGuardia(uid) {
+      return exists(/databases/$(database)/documents/estado_guardia/$(uid))
+        && get(/databases/$(database)/documents/estado_guardia/$(uid)).data.get('presenteHasta', timestamp.value(0)) > request.time;
+    }
+    //  - atiendeAlerta: el médico es el de un episodio ABIERTO de la persona de ESTA alerta (resource.data.personaId
+    //    in atendiendo[], lista que mantiene una CF por episodios abiertos). Es el "episodio que sobrevive": acceso a
+    //    la alerta de SU paciente aunque la franja haya terminado. Per-doc → sirve para GET puntual, no para el pool.
+    function atiendeAlerta(uid) {
+      return exists(/databases/$(database)/documents/estado_guardia/$(uid))
+        && resource.data.personaId in get(/databases/$(database)/documents/estado_guardia/$(uid)).data.get('atendiendo', []);
+    }
+
     // usuarios/{uid}: cada quien lee su doc; admin lee toda la coleccion.
     // Escritura: alta/baja/cambios de rol -> solo superadmin (via panel / Admin SDK).
     // Mi perfil: cada usuario puede actualizar SOLO su propio nombre/fotoURL (nada mas).
@@ -810,13 +826,24 @@ service cloud.firestore {
     //  - create: SOLO la CF (Admin SDK) → false para todos acá.
     //  - update: medico/despachante SOLO para marcar 'atendida' (whitelist estado/atendidaPor/atendidaEn).
     //  - delete: nadie (no se borra; cambia de estado).
+    //  G2: el READ dejó de ser fijo por rol. Ahora: despachante (respaldo, siempre) | médico PRESENTE-y-en-guardia
+    //  (pool compartido — presenteGuardia es uid-scoped → la LISTA pasa) | médico del episodio abierto de la persona
+    //  (atiendeAlerta, per-doc → GET puntual de la alerta de SU paciente, no el pool). Afiliado/referente: sin rol → NO.
     match /alertas/{id} {
-      allow read:   if esMedico() || esDespachante();
+      allow read:   if esDespachante()
+                       || ( esMedico() && ( presenteGuardia(request.auth.uid) || atiendeAlerta(request.auth.uid) ) );
       allow create: if false;
-      allow update: if (esMedico() || esDespachante())
+      allow update: if ( esDespachante() || ( esMedico() && ( presenteGuardia(request.auth.uid) || atiendeAlerta(request.auth.uid) ) ) )
                        && tocadas().hasOnly(['estado','atendidaPor','atendidaEn'])
                        && request.resource.data.estado == 'atendida';
       allow delete: if false;
+    }
+
+    // estado_guardia/{uid}: permiso dinámico derivado (Guardia G2). Lo escribe SOLO la CF (Admin SDK). El dueño LEE
+    // el suyo → la app decide mostrar la bandeja (si presente) o el botón "Estoy de guardia". Nadie más lo necesita.
+    match /estado_guardia/{uid} {
+      allow read:  if isSignedIn() && request.auth.uid == uid;
+      allow write: if false;
     }
 
     // push_tokens/{uid}/dispositivos/{deviceId}: tokens FCM del socio (A2 — push nativas). Multi-dispositivo.

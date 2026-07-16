@@ -1740,7 +1740,7 @@ function alertasAttach(){
     if(S.tab==='guardia') render();
   }, e=>{ S.alertas=[]; S.alertasErr=(e&&e.message)||String(e); if(S.tab==='guardia') render(); });
 }
-function alertasDetach(){ if(S.alertasUnsub){ try{S.alertasUnsub();}catch(_){} S.alertasUnsub=null; } S.alertas=null; S.alertaAbierta=null; S.alertaReporte=null; S.alertasErr=null; }
+function alertasDetach(){ if(S.alertasUnsub){ try{S.alertasUnsub();}catch(_){} S.alertasUnsub=null; } S.alertas=null; S.alertaAbierta=null; S.alertaReporte=null; S.alertasErr=null; S.guardiaPresente=undefined; S.guardiaErr=''; S.guardiaBusy=false; }
 // Abrir/cerrar el detalle: recién acá se lee el CRUDO desde reportes_sintomas (el crudo NO viaja en la alerta).
 async function alertaVer(id, reporteId){
   const cerrar=(S.alertaAbierta===id); S.alertaAbierta=cerrar?null:id; S.alertaReporte=null; render();
@@ -1753,17 +1753,50 @@ async function alertaAtender(id){
   try{ await db.collection('alertas').doc(id).set({ estado:'atendida', atendidaPor:S.user.uid, atendidaEn:FV() },{merge:true}); if(S.alertaAbierta===id){ S.alertaAbierta=null; S.alertaReporte=null; } }
   catch(e){ S.alertasErr='No se pudo atender: '+(e.message||e); render(); }
 }
+/* G2 — presencia del médico (gate del pool). El médico ve la bandeja SOLO si confirmó "Estoy de guardia" y su
+   franja no terminó (presenteHasta > ahora). El despachante la ve siempre (respaldo). La presencia se valida
+   server-side (CF confirmarPresencia) contra el cronograma → no se puede falsear fuera de la franja. */
+function presenteAhora(){ return !!(S.guardiaPresente && tms(S.guardiaPresente.presenteHasta) > Date.now()); }
+async function guardiaPresenciaCargar(){
+  const uid=S.user&&S.user.uid; if(!uid){ S.guardiaPresente=null; return; }
+  try{ const d=await db.collection('estado_guardia').doc(uid).get(); S.guardiaPresente=(d.exists&&d.data().presenteHasta)?{presenteHasta:d.data().presenteHasta}:null; }
+  catch(_){ S.guardiaPresente=null; }
+  if(S.tab==='guardia') render();
+}
+async function doConfirmarPresencia(){
+  if(S.guardiaBusy) return; S.guardiaBusy=true; S.guardiaErr=''; render();
+  try{ const r=await fnsCall('confirmarPresencia',{}); S.guardiaPresente={presenteHasta:r.presenteHasta}; S.guardiaBusy=false; render(); }
+  catch(e){ const code=(e&&e.code)||''; S.guardiaBusy=false; S.guardiaErr=/failed-precondition/.test(code)?'No tenés una guardia médica vigente en este momento.':'No se pudo confirmar la presencia. Reintentá.'; render(); }
+}
+function guardiaHead(extra){ return `<div class="panel-h" style="margin:.1rem 0 .3rem"><b>🔔 Bandeja de guardia</b><span style="font-size:.62rem;color:var(--ink3);font-weight:400">${extra||'tiempo real'}</span></div>`; }
+function hhmm(ts){ const ms=tms(ts); if(ms==null) return ''; const d=new Date(ms); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+
 function bandejaAlertas(){
+  const rol=S.user&&S.user.rol;
+  // Despachante: respaldo, ve el pool siempre.
+  if(rol==='despachante'){ alertasAttach(); return poolAlertasView(''); }
+  // Médico: gate por presencia.
+  if(S.guardiaPresente===undefined){ guardiaPresenciaCargar(); return guardiaHead()+`<div class="card" style="padding:1.2rem;text-align:center;color:var(--ink3)">Cargando…</div>`; }
+  if(!presenteAhora()){
+    const err=S.guardiaErr?`<div class="card" style="border:1.5px solid var(--r);color:var(--r);padding:.6rem 1rem;margin-bottom:.5rem">${esc(S.guardiaErr)}</div>`:'';
+    return guardiaHead('inactiva')+err+`<div class="card" style="padding:1.3rem;text-align:center">
+      <div style="color:var(--ink3);margin-bottom:.8rem">Para ver la bandeja de guardia, confirmá que estás de guardia. Vale hasta el fin de tu franja del cronograma.</div>
+      <button class="btn-r" style="width:auto;padding:.5rem 1.2rem" onclick="doConfirmarPresencia()" ${S.guardiaBusy?'disabled':''}>${S.guardiaBusy?'Un momento…':'Estoy de guardia'}</button></div>`;
+  }
   alertasAttach();
+  return poolAlertasView(`presente hasta ${hhmm(S.guardiaPresente.presenteHasta)}`);
+}
+
+function poolAlertasView(sub){
   const list=S.alertas;
-  const head=`<div class="panel-h" style="margin:.1rem 0 .3rem"><b>🔔 Bandeja de guardia${(list&&list.length)?(' ('+list.length+')'):''}</b><span style="font-size:.62rem;color:var(--ink3);font-weight:400">tiempo real</span></div>
-    <div style="font-size:.68rem;color:var(--ink3);margin-bottom:.6rem">Reportes de síntomas de afiliados. Tocá "Ver" para el detalle clínico; "Atender" la saca de la bandeja.</div>`;
+  const head=guardiaHead(sub)+`<div style="font-size:.68rem;color:var(--ink3);margin-bottom:.6rem">Reportes de síntomas de afiliados (pool compartido). "Ver" abre el detalle clínico; "Atender" la saca de la bandeja.</div>`;
   const err=S.alertasErr?`<div class="card" style="border:1.5px solid var(--r);color:var(--r);padding:.6rem 1rem">${esc(S.alertasErr)}</div>`:'';
   if(list===null||list===undefined) return `${head}${err}<div class="card" style="padding:1.2rem;text-align:center;color:var(--ink3)">Cargando…</div>`;
   if(!list.length) return `${head}${err}<div class="card" style="padding:1.2rem;text-align:center;color:var(--ink3)">No hay alertas activas.</div>`;
   const rows=list.map(a=>{
-    const roja=a.tieneBanderaRoja===true; const abierta=S.alertaAbierta===a.id;
+    const roja=a.tieneBanderaRoja===true; const abierta=S.alertaAbierta===a.id; const desc=a.descubierta===true;
     const tel=a.personaTelefono?`<a class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:0" href="tel:${esc(a.personaTelefono)}">Llamar</a>`:'';
+    const badgeDesc=desc?`<div style="font-size:.6rem;font-weight:800;color:#B36B00;background:#FFF4E0;border-radius:6px;padding:.05rem .4rem;display:inline-block;margin-top:.2rem">🟠 nadie de guardia la tomó a tiempo</div>`:'';
     let detalle='';
     if(abierta){
       const r=S.alertaReporte;
@@ -1772,9 +1805,9 @@ function bandejaAlertas(){
       else{ const sint=(r.sintomas||[]).map(s=>esc(s.nombre||'')).filter(Boolean).join(', ');
         detalle=`<div style="padding:.55rem 1rem;background:#fafafa;border-top:1px dashed var(--linea)"><div><b>Síntomas:</b> ${sint||'—'}</div>${r.texto?`<div style="margin-top:.2rem"><b>Relato:</b> ${esc(r.texto)}</div>`:''}</div>`; }
     }
-    return `<div class="card" style="padding:0;${roja?'border:1.5px solid var(--r)':''}">
+    return `<div class="card" style="padding:0;${roja?'border:1.5px solid var(--r)':(desc?'border:1.5px solid #E8A400':'')}">
       <div class="lr" style="flex-wrap:wrap;padding:.6rem 1rem">
-        <div class="lrb" style="flex:1 1 60%"><div class="lrn" style="${roja?'color:var(--r)':''}">${roja?'🔴 ':''}${esc(a.personaNombre||'—')}</div><div class="lrs">${pedHace(a.creadoEn)}</div></div>
+        <div class="lrb" style="flex:1 1 60%"><div class="lrn" style="${roja?'color:var(--r)':''}">${roja?'🔴 ':''}${esc(a.personaNombre||'—')}</div><div class="lrs">${pedHace(a.creadoEn)}</div>${badgeDesc}</div>
         <div style="display:flex;gap:.4rem;flex-wrap:wrap">
           <button class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:0" onclick="alertaVer('${esc(a.id)}','${esc(a.origenReporteId||'')}')">${abierta?'Ocultar':'Ver'}</button>
           ${tel}
