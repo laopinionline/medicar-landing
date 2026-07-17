@@ -1221,6 +1221,9 @@ function homeView(){
         <div class="cell"><span>Tipo</span><b>${esc(tipo)}</b></div>
       </div>
     </div>
+
+    <a class="btn-emerg" href="tel:${TEL_EMERG}" style="margin-top:1rem">${IC.phone}<span>EMERGENCIAS<span class="em-sub">Llamar al ${TEL_EMERG}</span></span></a>
+
     ${sinAfilNota}
 
     ${cuotaSec}
@@ -1249,8 +1252,6 @@ function homeView(){
           : `<button class="row" onclick="set({view:'referente-canje',err:''})" style="width:100%;border:none;background:none;cursor:pointer;text-align:left"><span class="rl" style="color:var(--tinta);font-weight:700">Seguir a un familiar (con un código)</span><span class="rv">${chv(13)}</span></button>`}
       </div>
     </div>
-
-    <a class="btn-emerg" href="tel:${TEL_EMERG}">${IC.phone}<span>EMERGENCIAS<span class="em-sub">Llamar al ${TEL_EMERG}</span></span></a>
 
     ${instalBlock}
 
