@@ -28,7 +28,7 @@ const db = admin.firestore();
 const { ingestarFeeds } = require('./feed-ingesta'); // PWA-2a: núcleo de la ingesta del feed (compartido con el runner manual)
 const { textoAvisoTurno, textoRecordatorioTurno, planRecordatorio, debeRecordar } = require('./push-turno'); // A2: texto N3 + plan/decisión del recordatorio (módulo puro, testeable por smoke)
 const crypto = require('crypto'); // Referente R1: aleatoriedad del código
-const { docEstadoReferido, generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido } = require('./referente'); // Referente R1 + síntoma-con-consentimiento (F1)
+const { generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido } = require('./referente'); // Referente R1 + síntoma-con-consentimiento (único nivel de salud)
 const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); // Guardia G1/G2: shape de la alerta + helpers de cronograma/atendiendo
 const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'); // Autogestión de plan: diff coberturas + carencia diferenciada
 
@@ -514,7 +514,7 @@ exports.generarCodigoReferente = onCall(async (request) => {
   if (!codigo) throw new HttpsError('internal', 'No se pudo generar un código único. Reintentá.');
   await ref.set({
     titularPersonaId, estado: 'pendiente',
-    habilitaciones: { estado: true }, // R1: SOLO 'estado' (la ponderación). ubicacion/alertas = R2/R3
+    habilitaciones: { sintomas: false }, // ÚNICO flag de salud, OFF por defecto: vincularse NO da acceso a la salud (requiere consentimiento explícito). ubicacion = R2
     referenteUid: null, nombreReferente,
     creadoEn: FV(), canjeadoEn: null, revocadoEn: null,
     expiraEn: admin.firestore.Timestamp.fromMillis(Date.now() + REF_CODIGO_TTL_MS),
@@ -567,7 +567,7 @@ exports.canjearCodigoReferente = onCall(async (request) => {
   const espejo = db.collection('referentes').doc(uid).collection('titulares').doc(titularPersonaId);
   const batch = db.batch();
   batch.set(ref, { referenteUid: uid, estado: 'activo', canjeadoEn: FV() }, { merge: true });
-  batch.set(espejo, { estado: 'activo', habilitaciones: c.habilitaciones || { estado: true }, codigo, titularNombre, titularPersonaId, canjeadoEn: FV() }, { merge: true }); // titularPersonaId denorm → fan-out del síntoma por collectionGroup
+  batch.set(espejo, { estado: 'activo', habilitaciones: c.habilitaciones || { sintomas: false }, codigo, titularNombre, titularPersonaId, canjeadoEn: FV() }, { merge: true }); // titularPersonaId denorm → fan-out del síntoma por collectionGroup; sin acceso a salud hasta consentir
   await batch.commit();
   // Custom claim rol:'referente' (merge con claims existentes). Marca la cuenta como referente para el routing.
   const user = await admin.auth().getUser(uid);
@@ -592,7 +592,7 @@ exports.revocarVinculoReferente = onCall(async (request) => {
   if (c.referenteUid) {
     const espejo = db.collection('referentes').doc(c.referenteUid).collection('titulares').doc(titularPersonaId);
     // Revocar el vínculo ENTERO también apaga el consentimiento de síntomas y PURGA el crudo copiado (minimización).
-    batch.set(espejo, { estado: 'revocado', revocadoEn: FV(), habilitaciones: { estado: false, sintomas: false } }, { merge: true });
+    batch.set(espejo, { estado: 'revocado', revocadoEn: FV(), habilitaciones: { sintomas: false } }, { merge: true });
     batch.delete(db.collection('sintoma_referido').doc(c.referenteUid + '_' + titularPersonaId));
   }
   await batch.commit();
@@ -600,26 +600,17 @@ exports.revocarVinculoReferente = onCall(async (request) => {
   return { ok: true };
 });
 
-// (4) derivarEstadoReferido — onCreate de un reporte de síntomas → estado_referido/{personaId} = 'con_sintomas'.
-// ⚠️ N3: lee SOLO el personaId del reporte; NO copia sintomas/texto/tieneBanderaRoja/score/nivel. El doc queda
-// con EXACTAMENTE {ponderacion, actualizadoEn} (docEstadoReferido lo garantiza). Admin SDK → saltea reglas.
-exports.derivarEstadoReferido = onDocumentCreated('reportes_sintomas/{id}', async (event) => {
-  const data = event.data && event.data.data();
-  const personaId = data && data.personaId;
-  if (!personaId) { logger.warn('[derivarEstadoReferido] reporte sin personaId', { id: event.params.id }); return null; }
-  await db.collection('estado_referido').doc(personaId).set(docEstadoReferido('con_sintomas', FV())); // pisa el doc entero → sin residuos
-  logger.info('[derivarEstadoReferido]', { personaId }); // NO logueo nada del reporte
-  return null;
-});
-
-/* ===================== SÍNTOMA-CON-CONSENTIMIENTO (Fase 1) =====================
+/* ===================== SÍNTOMA-CON-CONSENTIMIENTO (único nivel de salud del referente) =====================
    El referente ve el síntoma EXACTO (nombres + relato) SOLO con consentimiento explícito del titular, per-referente.
-   Deroga el binario como techo. Registro auditable + log de cada lectura. El referente NUNCA lee reportes_sintomas
-   crudo — lee el derivado consentido, y SOLO vía CF (para poder loguear el acceso). Ref al doc: sintoma_referido/{refUid_tid}. */
-const SINTOMA_VENTANA_MS = 72 * 60 * 60 * 1000; // solo el reporte más reciente (72h) — coherente con la ponderación binaria
+   Es el ÚNICO acceso a la salud: sin consentimiento el referente NO ve NADA de salud (ni un binario). Registro
+   auditable + log de cada lectura. El referente NUNCA lee reportes_sintomas crudo — lee el derivado consentido, y
+   SOLO vía CF (para poder loguear el acceso). Ref al doc: sintoma_referido/{refUid_tid}.
+   (Histórico: existía un binario intermedio estado_referido/{personaId} — ELIMINADO al colapsar a un solo nivel;
+   nadie vivo lo leía, la alarma R2 futura reusará ESTE mismo consentimiento, no un permiso aparte.) */
+const SINTOMA_VENTANA_MS = 72 * 60 * 60 * 1000; // solo el reporte más reciente (72h)
 const sintomaDocId = (refUid, tid) => refUid + '_' + tid;
 
-// derivarSintomaReferido — SEGUNDO trigger sobre reportes_sintomas (independiente de derivarEstadoReferido, que NO
+// derivarSintomaReferido — trigger sobre reportes_sintomas (convive con derivarAlerta de la guardia, colección
 // cambia). Fan-out: por cada vínculo ACTIVO del titular con habilitaciones.sintomas → copia el síntoma a su
 // sintoma_referido. Encuentra los vínculos por collectionGroup('titulares') filtrando titularPersonaId+estado+flag.
 exports.derivarSintomaReferido = onDocumentCreated('reportes_sintomas/{id}', async (event) => {
@@ -656,10 +647,10 @@ exports.otorgarConsentimientoSintomas = onCall(async (request) => {
   if (!espejo.exists || (espejo.data() || {}).estado !== 'activo') throw new HttpsError('failed-precondition', 'Ese vínculo no está activo.');
 
   const batch = db.batch();
-  batch.set(espejoRef, { habilitaciones: { estado: (espejo.data().habilitaciones || {}).estado !== false, sintomas: true } }, { merge: true });
+  batch.set(espejoRef, { habilitaciones: { sintomas: true } }, { merge: true });
   // Espejo del flag en el código (lo que el titular puede LEER para el toggle). Busca el código de este vínculo.
   const codSnap = await db.collection('codigos_referente').where('titularPersonaId', '==', titularPersonaId).where('referenteUid', '==', referenteUid).limit(1).get();
-  if (!codSnap.empty) batch.set(codSnap.docs[0].ref, { habilitaciones: { estado: true, sintomas: true } }, { merge: true });
+  if (!codSnap.empty) batch.set(codSnap.docs[0].ref, { habilitaciones: { sintomas: true } }, { merge: true });
   // Siembra el síntoma actual si hay un reporte reciente (< 72h) → el referente lo ve ya, sin esperar el próximo.
   // BLINDADO (fail-open): la siembra es COSMÉTICA — si no siembra, el próximo reporte del titular llega igual por el
   // fan-out (derivarSintomaReferido). Lo IMPORTANTE es que el consentimiento se otorgue. Un fallo de ESTA query —hoy
@@ -695,10 +686,10 @@ exports.revocarConsentimientoSintomas = onCall(async (request) => {
   if (!espejo.exists) throw new HttpsError('not-found', 'Ese vínculo no existe.');
 
   const batch = db.batch();
-  batch.set(espejoRef, { habilitaciones: { estado: (espejo.data().habilitaciones || {}).estado !== false, sintomas: false } }, { merge: true }); // corte por regla instantáneo
+  batch.set(espejoRef, { habilitaciones: { sintomas: false } }, { merge: true }); // corte instantáneo del acceso a salud
   batch.delete(db.collection('sintoma_referido').doc(sintomaDocId(referenteUid, titularPersonaId))); // PURGA del crudo
   const codSnap = await db.collection('codigos_referente').where('titularPersonaId', '==', titularPersonaId).where('referenteUid', '==', referenteUid).limit(1).get();
-  if (!codSnap.empty) batch.set(codSnap.docs[0].ref, { habilitaciones: { estado: true, sintomas: false } }, { merge: true });
+  if (!codSnap.empty) batch.set(codSnap.docs[0].ref, { habilitaciones: { sintomas: false } }, { merge: true });
   batch.set(db.collection('consentimientos').doc(), { titularPersonaId, referenteUid, tipo: 'sintomas', accion: 'revoca', textoConsentimiento: CONSENT_SINTOMAS.texto, version: CONSENT_SINTOMAS.version, en: FV(), actorUid: request.auth.uid });
   await batch.commit();
   logger.info('[revocarConsentimientoSintomas]', { titularPersonaId, referenteUid });
@@ -729,8 +720,8 @@ exports.leerSintomaReferido = onCall(async (request) => {
 
 /* ===================== GUARDIA G1 — derivarAlerta =====================
    onDocumentCreated('reportes_sintomas/{id}'): CUALQUIER reporte del afiliado → una alerta en la bandeja de la
-   guardia (sin umbral, decisión de Lucas). SEGUNDO trigger sobre el MISMO path que derivarEstadoReferido: son CFs
-   independientes que escriben colecciones distintas (alertas/{autogen} vs estado_referido/{personaId}) → conviven
+   guardia (sin umbral, decisión de Lucas). Convive con derivarSintomaReferido sobre el MISMO path: son CFs
+   independientes que escriben colecciones distintas (alertas/{autogen} vs sintoma_referido/{refUid_tid}) → conviven
    sin pisarse. MODELO REFERENCIA: la alerta apunta al reporte (origenReporteId), NO copia el crudo (docAlerta). */
 exports.derivarAlerta = onDocumentCreated('reportes_sintomas/{id}', async (event) => {
   const data = event.data && event.data.data();
@@ -787,24 +778,6 @@ exports.mantenerAtendiendo = onDocumentWritten('episodios/{id}', async (event) =
   }
   return null;
 });
-
-// (5) barrerEstadoReferido — onSchedule diaria: 'con_sintomas' con más de 72h sin refresco vuelve a 'sin_sintomas'
-// (el binario significa "reportó RECIENTEMENTE"). Barrido en memoria (pocos docs). Admin SDK.
-const REF_VENTANA_MS = 72 * 60 * 60 * 1000;
-exports.barrerEstadoReferido = onSchedule(
-  { schedule: 'every day 05:00', timeZone: 'America/Argentina/Buenos_Aires' },
-  async () => {
-    const corte = Date.now() - REF_VENTANA_MS;
-    const snap = await db.collection('estado_referido').where('ponderacion', '==', 'con_sintomas').get();
-    let vueltos = 0;
-    for (const d of snap.docs) {
-      const ms = (d.data().actualizadoEn && d.data().actualizadoEn.toMillis) ? d.data().actualizadoEn.toMillis() : 0;
-      if (ms < corte) { await d.ref.set(docEstadoReferido('sin_sintomas', FV())); vueltos++; }
-    }
-    logger.info('[barrerEstadoReferido]', { revisados: snap.size, vueltos });
-    return null;
-  }
-);
 
 /* ===================== AUTOGESTIÓN DE PLAN — cambiarMiPlan =====================
    Self-service: el TITULAR responsable de pago cambia su plan (upgrade/downgrade/lateral). El socio NO escribe

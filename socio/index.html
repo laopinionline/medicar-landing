@@ -1659,16 +1659,15 @@ async function enviarParams(){
   }
 }
 
-/* ==================== REFERENTE R1 (auth + código + ponderación) ====================
+/* ==================== REFERENTE (auth + código + acceso a salud) ====================
    El referente es una cuenta propia (email/pass), SOLO LECTURA, scope = los titulares que lo habilitaron.
-   Ve UN binario por titular: "sin síntomas" / "reportó síntomas" (N3: nunca lee el crudo, solo estado_referido).
+   UN SOLO nivel de acceso a la salud: con consentimiento del titular ve el SÍNTOMA EXACTO; sin consentimiento
+   NO ve NADA de salud (solo feed, emergencias, nombre del titular). El binario "reportó/no reportó" fue eliminado.
    Los códigos AGREGAN vínculos (multi-titular); la sesión es una sola. */
 const REF_FLAG='medicarModoReferente';
 function esModoReferente(){ try{ return localStorage.getItem(REF_FLAG)==='1'; }catch(_){ return false; } }
 function modoReferenteOn(){ try{ localStorage.setItem(REF_FLAG,'1'); }catch(_){} }
 function modoReferenteOff(){ try{ localStorage.removeItem(REF_FLAG); }catch(_){} }
-// N3: traducción crudo→humano (misma que functions/referente.js; el referente NO recibe otra cosa que el enum).
-function frasePonderacion(p){ return p==='con_sintomas' ? 'Se reportaron síntomas recientemente.' : 'No se reportaron síntomas.'; }
 
 // Desde el login: el flujo del referente empieza por el CÓDIGO (validar ANTES de pedir cuenta → sin huérfanas).
 function irReferenteAuth(){ set({ view:'referente-codigo', err:'', busy:false, refCodigo:'', refTitularNombre:'', refCanjePendiente:null }); }
@@ -1841,17 +1840,17 @@ async function doCanjearCodigo(){
   }
 }
 
-// Carga los vínculos ACTIVOS del referente + la ponderación de cada titular. NO lee /personas ni el crudo:
-// el nombre viene denorm en el espejo; la ponderación, del doc derivado estado_referido.
+// Carga los vínculos ACTIVOS del referente. NO lee /personas ni el crudo: el nombre viene denorm en el espejo, y el
+// estado del consentimiento de salud sale del MISMO espejo (habilitaciones.sintomas), que el referente puede leer
+// (regla uid==refUid). Sin llamar ninguna CF ni tap: el panel ya sabe si mostrar la vista de salud o el estado limpio.
 async function cargarReferente(uid){
   let vinculos=[];
   try{
     const snap=await db.collection('referentes').doc(uid).collection('titulares').where('estado','==','activo').get();
     for(const d of snap.docs){
       const v=d.data(); const tid=d.id;
-      let ponderacion='sin_sintomas';
-      try{ const er=await db.collection('estado_referido').doc(tid).get(); if(er.exists) ponderacion=(er.data()||{}).ponderacion||'sin_sintomas'; }catch(_){}
-      vinculos.push({ titularPersonaId:tid, titularNombre:v.titularNombre||'Titular', ponderacion });
+      const saludHab=!!(v.habilitaciones && v.habilitaciones.sintomas);
+      vinculos.push({ titularPersonaId:tid, titularNombre:v.titularNombre||'Titular', saludHab });
     }
   }catch(_){}
   vinculos.sort((a,b)=>(a.titularNombre||'').localeCompare(b.titularNombre||''));
@@ -1872,24 +1871,25 @@ function referentePanelView(){
   const selector = vs.length>1 ? `<div class="sec"><div class="sec-h">Titulares</div><div class="card">${
     vs.map((x,i)=>`<button class="row" onclick="refSel(${i})" style="width:100%;border:none;background:${i===sel?'#fff5f5':'none'};cursor:pointer;text-align:left;border-bottom:1px solid var(--linea)"><span class="rl" style="font-weight:${i===sel?'800':'600'};color:var(--tinta)">${esc(x.titularNombre)}</span><span class="rv">${i===sel?'●':''}</span></button>`).join('')
   }</div></div>` : '';
-  const con = v.ponderacion==='con_sintomas';
   return `<div class="home">
     <div class="topbar"><div class="brand">${chv(20)}<span class="word">medicar</span></div><div class="tb-sp"></div>${salidaBtn}</div>
     <div class="sec" style="margin-top:.6rem"><div class="sec-h">Estás siguiendo como referente</div></div>
     ${selector}
     <div class="sec"><div class="card">
-      <div style="padding:1rem 1.1rem;border-bottom:1px solid var(--linea)"><div style="font-size:.7rem;color:var(--gris);font-weight:700;text-transform:uppercase;letter-spacing:.06em">Titular</div><div style="font-size:1.05rem;font-weight:800;color:var(--tinta);margin-top:.15rem">${esc(v.titularNombre)}</div></div>
-      <div style="padding:1.1rem;display:flex;align-items:center;gap:.7rem">
-        <span style="width:12px;height:12px;border-radius:50%;background:${con?'var(--amar,#E8A400)':'var(--verde,#2E8B57)'};flex:0 0 auto"></span>
-        <div><div style="font-weight:700;color:var(--tinta);font-size:.92rem">${frasePonderacion(v.ponderacion)}</div>
-        <div style="font-size:.72rem;color:var(--gris);margin-top:.15rem">El estado que el titular habilitó para vos.</div></div>
-      </div>
+      <div style="padding:1rem 1.1rem"><div style="font-size:.7rem;color:var(--gris);font-weight:700;text-transform:uppercase;letter-spacing:.06em">Titular</div><div style="font-size:1.05rem;font-weight:800;color:var(--tinta);margin-top:.15rem">${esc(v.titularNombre)}</div></div>
     </div></div>
-    ${sintomaBloque(v.titularPersonaId)}
+    ${saludBloque(v)}
     <button class="btn-o" style="margin-top:.4rem" onclick="set({view:'referente-canje',err:''})">＋ Vincular con otro titular</button>
     ${homeFeedBlock()}
     <a class="btn-emerg" href="tel:${TEL_EMERG}" style="margin-top:1rem">${IC.phone}<span>EMERGENCIAS<span class="em-sub">Llamar al ${TEL_EMERG}</span></span></a>
   </div>`;
+}
+// Bloque de salud del panel del referente. UN SOLO nivel: sin consentimiento (v.saludHab=false) NO se muestra NADA
+// de salud, solo un estado LIMPIO (no un hueco ni un error). Con consentimiento → el síntoma exacto tap-to-reveal.
+// v.saludHab sale del espejo del vínculo (habilitaciones.sintomas), ya cargado en cargarReferente.
+function saludBloque(v){
+  if(!v.saludHab) return `<div class="card" style="margin-top:.4rem;padding:.95rem 1.1rem"><div style="font-size:.7rem;color:var(--gris);font-weight:700;text-transform:uppercase;letter-spacing:.06em">Información de salud</div><div style="font-size:.85rem;color:var(--gris);margin-top:.3rem;line-height:1.45">${esc(v.titularNombre)} todavía no habilitó que veas su información de salud.</div></div>`;
+  return sintomaBloque(v.titularPersonaId);
 }
 // Síntoma exacto (con consentimiento): tap-to-reveal. El read va por CF leerSintomaReferido (que LOGUEA el acceso;
 // sintoma_referido es read:false). Si no hay consentimiento → permission-denied → mensaje. Solo el ÚLTIMO (72h).
@@ -1955,14 +1955,15 @@ function misReferentesView(){
   const list=(S.misCodigos||[]).map(c=>{
     const activo=c.estado==='activo'; const sint=!!(c.habilitaciones&&c.habilitaciones.sintomas);
     const nombreJs=(c.nombreReferente||'Referente').replace(/[\\'"]/g,'');
-    const tog=(activo&&c.referenteUid)?`<button class="mini" style="${sint?'background:#fff5f5;color:var(--rojo)':''}" onclick="abrirConsentSintomas('${esc(c.referenteUid)}','${esc(nombreJs)}',${sint})">Síntomas: ${sint?'sí ✓':'no'}</button>`:'';
+    const tog=(activo&&c.referenteUid)?`<button class="mini" style="${sint?'background:#fff5f5;color:var(--rojo)':''}" onclick="abrirConsentSintomas('${esc(c.referenteUid)}','${esc(nombreJs)}',${sint})">Salud: ${sint?'sí ✓':'no'}</button>`:'';
+    const saludTxt=activo?(sint?' · <b style="color:var(--rojo)">ve tu salud</b>':' · sin acceso a tu salud'):'';
     return `<div class="row" style="align-items:center;flex-wrap:wrap">
       <div style="flex:1 1 50%"><div style="font-weight:800;color:var(--tinta);letter-spacing:.06em">${esc(c.id)}</div>
-      <div style="font-size:.72rem;color:var(--gris)">${esc(c.nombreReferente||'Referente')} · ${activo?'Vinculado':'Pendiente de canje'}</div></div>
+      <div style="font-size:.72rem;color:var(--gris)">${esc(c.nombreReferente||'Referente')} · ${activo?'Vinculado':'Pendiente de canje'}${saludTxt}</div></div>
       <div style="display:flex;gap:.35rem;flex-wrap:wrap">${tog}<button class="mini" onclick="doRevocar('${esc(c.id)}')">Revocar</button></div></div>`;
   }).join('') || `<div class="row"><span class="rl" style="color:var(--gris)">Todavía no generaste ningún código.</span><span class="rv"></span></div>`;
   return `<div class="home">${top}
-    <div class="sec" style="margin-top:.6rem"><p style="color:var(--gris);font-size:.82rem;margin:.2rem .2rem 0">Un referente (ej. un familiar) puede ver si reportaste síntomas. Con "Síntomas: sí" además ve <b>qué</b> síntomas reportás (con tu autorización). Podés revocar cuando quieras.</p></div>
+    <div class="sec" style="margin-top:.6rem"><p style="color:var(--gris);font-size:.82rem;margin:.2rem .2rem 0">Un referente (ej. un familiar) que designes <b>NO ve tu información de salud</b>, salvo que lo autorices. Si activás <b>"Salud: sí"</b>, ese referente ve <b>qué</b> síntomas reportás (te mostramos el texto de la autorización). Podés revocar cuando quieras.</p></div>
     <button class="btn-r" onclick="doGenerarCodigo()" ${S.refbusy?'disabled':''}>${S.refbusy?'Un momento…':'Generar un código'}${S.refbusy?'':chv(15,'cw')}</button>
     ${S.nuevoCodigo?`<div class="card" style="margin-top:.8rem;padding:1rem;text-align:center;background:#fff5f5"><div style="font-size:.72rem;color:var(--gris);font-weight:700">CÓDIGO NUEVO — compartilo con tu referente</div><div style="font-size:1.4rem;font-weight:900;letter-spacing:.12em;color:var(--rojo);margin:.3rem 0">${esc(S.nuevoCodigo)}</div><div style="font-size:.7rem;color:var(--gris)">Vence en 7 días si no se usa.</div></div>`:''}
     <div class="err ${S.err?'on':''}" style="margin-top:.6rem">${esc(S.err)}</div>

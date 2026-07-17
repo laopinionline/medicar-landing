@@ -1,7 +1,7 @@
 // Smoke Guardia G1/G2 — la alerta REFERENCIA (no duplica crudo); triggers conviven; y G2: descubierta como flag,
 // guardiaVigente valida el cronograma (presencia no falseable), personasAtendidas para el episodio que sobrevive.
 const { docAlerta, guardiaVigente, personasAtendidas } = require('../functions/guardia');
-const { docEstadoReferido } = require('../functions/referente');
+const { docSintomaReferido } = require('../functions/referente');
 let ok = 0, fail = 0;
 const t = (l, c, x) => { (c ? ok++ : fail++); console.log(`${c ? '✓' : '✗'} ${l}${x !== undefined ? ' → ' + x : ''}`); };
 
@@ -32,10 +32,12 @@ t('★ el crudo vive SOLO en el reporte (la alerta no lo tiene)', a.sintomas ===
 const a2 = docAlerta({ personaId: 'pB', tieneBanderaRoja: false }, 'REP9', 1);
 t('sin bandera roja → tieneBanderaRoja false', a2.tieneBanderaRoja === false);
 
-// 4) ★ los dos triggers escriben COSAS DISTINTAS sobre el mismo reporte (conviven, no se pisan)
-const dEstado = docEstadoReferido('con_sintomas', 1); // lo que escribe derivarEstadoReferido (referente, binario)
-t('estado_referido = binario N3 (referente), sin referencia ni crudo', dEstado.ponderacion === 'con_sintomas' && dEstado.origenReporteId === undefined && dEstado.sintomas === undefined);
-t('★ alerta (guardia) ≠ estado_referido (referente): docs distintos', a.origenReporteId !== undefined && dEstado.ponderacion !== undefined && a.ponderacion === undefined);
+// 4) ★ los dos triggers vivos escriben COSAS DISTINTAS sobre el mismo reporte (conviven, no se pisan):
+//    derivarAlerta → alertas/ (guardia, REFERENCIA sin crudo) · derivarSintomaReferido → sintoma_referido/ (referente,
+//    el síntoma consentido: nombres + relato). Colecciones y shapes distintos.
+const dSint = docSintomaReferido(reporte, 1); // lo que escribe derivarSintomaReferido (solo a vínculos consentidos)
+t('sintoma_referido (referente) = nombres + relato consentidos, SIN referencia de ruteo', Array.isArray(dSint.sintomas) && dSint.texto === 'me duele el pecho desde anoche' && dSint.origenReporteId === undefined && dSint.estado === undefined);
+t('★ alerta (guardia) ≠ sintoma_referido (referente): docs/colecciones distintos', a.origenReporteId !== undefined && a.sintomas === undefined && dSint.sintomas !== undefined && dSint.origenReporteId === undefined);
 
 // ── G2: descubierta = flag ortogonal al estado (no la saca del pool) ──
 const aDesc = docAlerta(reporte, 'REP1', 1, true);

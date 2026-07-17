@@ -1,7 +1,8 @@
 'use strict';
 /*
- * Reglas — Referente R1. Las DOS CARAS de cada regla (quién SÍ / quién NO).
- * N3 innegociable: el referente lee estado_referido (derivado), JAMÁS reportes_sintomas (crudo).
+ * Reglas — Referente. Las DOS CARAS de cada regla (quién SÍ / quién NO).
+ * Acceso a salud = UN SOLO nivel: el síntoma exacto CON consentimiento (por CF), o NADA. El referente JAMÁS lee
+ * reportes_sintomas crudo ni sintoma_referido directo. El binario estado_referido fue eliminado.
  *   PATH="/opt/homebrew/opt/openjdk/bin:$PATH" ./rules-tests/node_modules/.bin/firebase \
  *     emulators:exec --only firestore --project demo-medicar "npx mocha rules-tests/referente.test.js"
  */
@@ -22,12 +23,11 @@ async function seed(env) {
     const db = c.firestore();
     await db.doc('usuarios/titA').set({ roles: ['afiliado'], personaId: 'pTitA' });
     await db.doc('usuarios/titB').set({ roles: ['afiliado'], personaId: 'pTitB' });
-    // Espejos de vínculo (los escribe la CF por Admin SDK; acá se siembran)
-    await db.doc('referentes/refX/titulares/pTitA').set({ estado: 'activo', habilitaciones: { estado: true }, codigo: 'MED-AAAAAA' });
-    await db.doc('referentes/refRev/titulares/pTitA').set({ estado: 'revocado', habilitaciones: { estado: true }, codigo: 'MED-BBBBBB' });
-    // Docs derivados N3 (los escribe la CF)
-    await db.doc('estado_referido/pTitA').set({ ponderacion: 'con_sintomas', actualizadoEn: 1 });
-    await db.doc('estado_referido/pTitB').set({ ponderacion: 'sin_sintomas', actualizadoEn: 1 });
+    // Espejos de vínculo (los escribe la CF por Admin SDK; acá se siembran). Un solo flag de salud: habilitaciones.sintomas.
+    await db.doc('referentes/refX/titulares/pTitA').set({ estado: 'activo', habilitaciones: { sintomas: true }, titularPersonaId: 'pTitA', codigo: 'MED-AAAAAA' });
+    await db.doc('referentes/refRev/titulares/pTitA').set({ estado: 'revocado', habilitaciones: { sintomas: false }, titularPersonaId: 'pTitA', codigo: 'MED-BBBBBB' });
+    // Síntoma consentido copiado per-referente (read:false → solo por CF leerSintomaReferido; acá para probar que NADIE lo lee)
+    await db.doc('sintoma_referido/refX_pTitA').set({ sintomas: ['Fiebre'], texto: 'crudo', actualizadoEn: 1 });
     // Datos CRUDOS del titular (el referente NUNCA debe poder leerlos)
     await db.doc('reportes_sintomas/rep1').set({ personaId: 'pTitA', sintomas: [{ id: 's1', nombre: 'x', banderaRoja: true }], texto: 'crudo', tieneBanderaRoja: true, creadoEn: 1 });
     await db.doc('chequeos_parametros/chk1').set({ personaId: 'pTitA', fc: 120, news2Nivel: 'alto', creadoEn: 1 });
@@ -37,7 +37,7 @@ async function seed(env) {
     await db.doc('feed_posts/pub1').set({ estado: 'publicado', titulo: 'Nota publicada', cat: 'medicar' });
     await db.doc('feed_posts/pend1').set({ estado: 'pendiente', titulo: 'Borrador', cat: 'medicar' });
     // Un código pendiente de titA
-    await db.doc('codigos_referente/MED-CCCCCC').set({ titularPersonaId: 'pTitA', estado: 'pendiente', habilitaciones: { estado: true }, referenteUid: null, creadoEn: 1 });
+    await db.doc('codigos_referente/MED-CCCCCC').set({ titularPersonaId: 'pTitA', estado: 'pendiente', habilitaciones: { sintomas: false }, referenteUid: null, creadoEn: 1 });
   });
 }
 before(async () => { env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { rules: fs.readFileSync('firestore.rules', 'utf8') } }); });
@@ -47,33 +47,31 @@ beforeEach(async () => { await env.clearFirestore(); await seed(env); });
 // El referente se autentica con claim rol:'referente' (las reglas NO dependen del claim, pero así es realista).
 const REF = { rol: 'referente' };
 
-describe('estado_referido — ponderación (la cara N3)', () => {
-  it('✓ referente ACTIVO lee la ponderación de su titular habilitado', async () => {
-    await assertSucceeds(ctx('refX', REF).doc('estado_referido/pTitA').get());
+describe('acceso a salud — UN SOLO nivel (síntoma consentido o NADA; binario eliminado)', () => {
+  it('✓ referente ACTIVO lee su PROPIO espejo de vínculo (así el panel sabe si hay consentimiento, sin CF)', async () => {
+    await assertSucceeds(ctx('refX', REF).doc('referentes/refX/titulares/pTitA').get());
   });
-  it('✗ referente NO lee la ponderación de un titular que NO lo habilitó', async () => {
-    await assertFails(ctx('refX', REF).doc('estado_referido/pTitB').get());
+  it('✗ referente NO lee el espejo de OTRO referente (aislamiento)', async () => {
+    await assertFails(ctx('refX', REF).doc('referentes/refRev/titulares/pTitA').get());
   });
-  it('✗ referente REVOCADO NO lee la ponderación (corte por REGLA, no UI)', async () => {
-    await assertFails(ctx('refRev', REF).doc('estado_referido/pTitA').get());
-  });
-  it('✗ un anónimo NO lee la ponderación', async () => {
+  it('✗ el binario estado_referido YA NO EXISTE — sin regla → deny para todos', async () => {
+    await assertFails(ctx('refX', REF).doc('estado_referido/pTitA').get());
     await assertFails(anon().doc('estado_referido/pTitA').get());
   });
-  it('✗ NADIE escribe estado_referido por reglas (solo la CF Admin SDK)', async () => {
-    await assertFails(ctx('refX', REF).doc('estado_referido/pTitA').set({ ponderacion: 'sin_sintomas', actualizadoEn: 2 }));
-    await assertFails(ctx('titA').doc('estado_referido/pTitA').set({ ponderacion: 'sin_sintomas', actualizadoEn: 2 }));
+  it('✗ referente ACTIVO NO lee reportes_sintomas crudo (regla intacta)', async () => {
+    await assertFails(ctx('refX', REF).doc('reportes_sintomas/rep1').get());
+  });
+  it('✗ NADIE lee sintoma_referido directo (read:false; el síntoma solo por CF leerSintomaReferido)', async () => {
+    await assertFails(ctx('refX', REF).doc('sintoma_referido/refX_pTitA').get());
+    await assertFails(ctx('titA').doc('sintoma_referido/refX_pTitA').get());
   });
 });
 
 describe('cuenta HUÉRFANA (canje falló tras crear cuenta) — benigna, NO lee NADA', () => {
   // Simula el borde "revocado entre validar y canjear": cuenta autenticada, claim referente, PERO sin ningún
-  // vínculo (referentes/refHuerfano/titulares vacío). esReferenteActivoDe debe dar false para TODO.
-  it('✗ huérfano NO lee estado_referido de NINGÚN titular (pTitA)', async () => {
-    await assertFails(ctx('refHuerfano', REF).doc('estado_referido/pTitA').get());
-  });
-  it('✗ huérfano NO lee estado_referido de otro titular (pTitB)', async () => {
-    await assertFails(ctx('refHuerfano', REF).doc('estado_referido/pTitB').get());
+  // vínculo (referentes/refHuerfano/titulares vacío). No accede a NINGÚN dato del titular.
+  it('✗ huérfano NO lee el síntoma consentido de otro (sintoma_referido)', async () => {
+    await assertFails(ctx('refHuerfano', REF).doc('sintoma_referido/refX_pTitA').get());
   });
   it('✗ huérfano NO lee reportes_sintomas/chequeos/socios/facturas', async () => {
     await assertFails(ctx('refHuerfano', REF).doc('reportes_sintomas/rep1').get());
@@ -122,16 +120,16 @@ describe('referentes/{uid}/titulares — el espejo del vínculo', () => {
     await assertFails(ctx('refRev', REF).doc('referentes/refX/titulares/pTitA').get());
   });
   it('✗ el referente NO escribe su vínculo (solo la CF)', async () => {
-    await assertFails(ctx('refX', REF).doc('referentes/refX/titulares/pTitA').set({ estado: 'activo', habilitaciones: { estado: true } }));
+    await assertFails(ctx('refX', REF).doc('referentes/refX/titulares/pTitA').set({ estado: 'activo', habilitaciones: { sintomas: true } }));
   });
 });
 
 describe('codigos_referente — el titular genera/gestiona', () => {
   it('✓ el titular crea un código para SÍ mismo', async () => {
-    await assertSucceeds(ctx('titA').doc('codigos_referente/MED-DDDDDD').set({ titularPersonaId: 'pTitA', estado: 'pendiente', habilitaciones: { estado: true }, referenteUid: null, nombreReferente: 'Hijo', creadoEn: 1, canjeadoEn: null, revocadoEn: null, expiraEn: 1 }));
+    await assertSucceeds(ctx('titA').doc('codigos_referente/MED-DDDDDD').set({ titularPersonaId: 'pTitA', estado: 'pendiente', habilitaciones: { sintomas: false }, referenteUid: null, nombreReferente: 'Hijo', creadoEn: 1, canjeadoEn: null, revocadoEn: null, expiraEn: 1 }));
   });
   it('✗ un socio NO crea un código para OTRA personaId', async () => {
-    await assertFails(ctx('titB').doc('codigos_referente/MED-EEEEEE').set({ titularPersonaId: 'pTitA', estado: 'pendiente', habilitaciones: { estado: true }, referenteUid: null, creadoEn: 1 }));
+    await assertFails(ctx('titB').doc('codigos_referente/MED-EEEEEE').set({ titularPersonaId: 'pTitA', estado: 'pendiente', habilitaciones: { sintomas: false }, referenteUid: null, creadoEn: 1 }));
   });
   it('✓ el titular lee su propio código', async () => {
     await assertSucceeds(ctx('titA').doc('codigos_referente/MED-CCCCCC').get());
