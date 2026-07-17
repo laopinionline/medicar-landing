@@ -16,6 +16,14 @@
         { "fieldPath": "estado", "order": "ASCENDING" },
         { "fieldPath": "habilitaciones.sintomas", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "reportes_sintomas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "personaId", "order": "ASCENDING" },
+        { "fieldPath": "creadoEn", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
