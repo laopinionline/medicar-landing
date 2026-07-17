@@ -661,11 +661,18 @@ exports.otorgarConsentimientoSintomas = onCall(async (request) => {
   const codSnap = await db.collection('codigos_referente').where('titularPersonaId', '==', titularPersonaId).where('referenteUid', '==', referenteUid).limit(1).get();
   if (!codSnap.empty) batch.set(codSnap.docs[0].ref, { habilitaciones: { estado: true, sintomas: true } }, { merge: true });
   // Siembra el síntoma actual si hay un reporte reciente (< 72h) → el referente lo ve ya, sin esperar el próximo.
-  const rs = await db.collection('reportes_sintomas').where('personaId', '==', titularPersonaId).orderBy('creadoEn', 'desc').limit(1).get();
-  if (!rs.empty) {
-    const r = rs.docs[0].data() || {};
-    const ms = r.creadoEn && r.creadoEn.toMillis ? r.creadoEn.toMillis() : 0;
-    if (Date.now() - ms < SINTOMA_VENTANA_MS) batch.set(db.collection('sintoma_referido').doc(sintomaDocId(referenteUid, titularPersonaId)), docSintomaReferido(r, FV()));
+  // BLINDADO (fail-open): la siembra es COSMÉTICA — si no siembra, el próximo reporte del titular llega igual por el
+  // fan-out (derivarSintomaReferido). Lo IMPORTANTE es que el consentimiento se otorgue. Un fallo de ESTA query —hoy
+  // por índice faltante, mañana por otra causa— NO debe volver a tumbar el otorgamiento. Se loguea y se sigue.
+  try {
+    const rs = await db.collection('reportes_sintomas').where('personaId', '==', titularPersonaId).orderBy('creadoEn', 'desc').limit(1).get();
+    if (!rs.empty) {
+      const r = rs.docs[0].data() || {};
+      const ms = r.creadoEn && r.creadoEn.toMillis ? r.creadoEn.toMillis() : 0;
+      if (Date.now() - ms < SINTOMA_VENTANA_MS) batch.set(db.collection('sintoma_referido').doc(sintomaDocId(referenteUid, titularPersonaId)), docSintomaReferido(r, FV()));
+    }
+  } catch (e) {
+    logger.error('[otorgarConsentimientoSintomas] siembra del síntoma actual falló — se otorga igual', { titularPersonaId, referenteUid, err: String((e && e.message) || e) });
   }
   batch.set(db.collection('consentimientos').doc(), {
     titularPersonaId, referenteUid, tipo: 'sintomas', accion: 'otorga',
