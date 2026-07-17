@@ -49,4 +49,13 @@ function docSintomaReferido(reporte, ts) {
   };
 }
 
-module.exports = { generarCodigo, esFormatoCodigo, CODE_ALFABETO, CODE_LARGO, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido };
+// ── R3: alerta al referente (push genérico) ──
+// TEXTO DEL PUSH — GENÉRICO A PROPÓSITO. 🚩 INVARIANTE: NO contiene síntomas ni NADA de salud. El push aparece en la
+// lockscreen (visible sin abrir la app, sin gate de quién mira) → jamás lleva dato de salud ahí. El síntoma se ve al
+// ABRIR la app, vía leerSintomaReferido (que loguea el acceso). smoke-r3-push.js falla si alguien mete salud acá.
+const TEXTO_R3 = {
+  title: 'MEDICAR',
+  body: 'Tu familiar reportó algo. Abrí la app para ver.',
+};
+
+module.exports = { generarCodigo, esFormatoCodigo, CODE_ALFABETO, CODE_LARGO, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido, TEXTO_R3 };
