@@ -846,6 +846,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // cambios_plan/{id}: log del self-service de cambio de plan (autogestión). Lo escribe SOLO la CF cambiarMiPlan
+    // (Admin SDK) — el socio NO escribe socios ni este log. Lo lee el propio socio (su historial) y el staff.
+    match /cambios_plan/{id} {
+      allow read:   if (isSignedIn() && resource.data.personaId == miPersonaId()) || tienePermiso('gestionar_afiliados');
+      allow create, update, delete: if false;
+    }
+
     // push_tokens/{uid}/dispositivos/{deviceId}: tokens FCM del socio (A2 — push nativas). Multi-dispositivo.
     //  - El DUEÑO (uid propio) escribe/lee SUS dispositivos; NADIE más (un socio NO lee/escribe los de otro).
     //  - La CF de push lee por Admin SDK (saltea reglas). deviceId = UUID persistido del cliente (no el token).
