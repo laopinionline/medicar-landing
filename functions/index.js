@@ -30,6 +30,7 @@ const { textoAvisoTurno, textoRecordatorioTurno, planRecordatorio, debeRecordar 
 const crypto = require('crypto'); // Referente R1: aleatoriedad del código
 const { docEstadoReferido, generarCodigo, esFormatoCodigo } = require('./referente'); // Referente R1: núcleo puro N3 (el shape derivado + el código). La traducción a humano vive en el front (copia de frasePonderacion).
 const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); // Guardia G1/G2: shape de la alerta + helpers de cronograma/atendiendo
+const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'); // Autogestión de plan: diff coberturas + carencia diferenciada
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -687,6 +688,65 @@ exports.barrerEstadoReferido = onSchedule(
     return null;
   }
 );
+
+/* ===================== AUTOGESTIÓN DE PLAN — cambiarMiPlan =====================
+   Self-service: el TITULAR responsable de pago cambia su plan (upgrade/downgrade/lateral). El socio NO escribe
+   socios (Admin SDK). Carencia diferenciada por diff de coberturas (ganadas → carencia; mantenidas → conservan;
+   perdidas → fuera). Rige el próximo período por el motor de abonos existente (sin prorrateo). Corporativo(precio 0)
+   y Plan 01 legacy excluidos. */
+const PLAN_EXCLUIDOS = ['plan-corporativo', 'PcB28RvKHEOrZ267ny6Z']; // corporativo (precio 0) + Plan 01 legacy
+exports.cambiarMiPlan = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const nuevoPlanId = String((request.data || {}).planId || '').trim();
+  if (!nuevoPlanId) throw new HttpsError('invalid-argument', 'Falta el plan.');
+
+  // (1) resolver el socio del caller y validar que es el TITULAR responsable de pago.
+  const u = await db.collection('usuarios').doc(uid).get();
+  const personaId = u.exists ? (u.data() || {}).personaId : null;
+  if (!personaId) throw new HttpsError('failed-precondition', 'Tu cuenta no está vinculada a un socio.');
+  const socSnap = await db.collection('socios').where('personaId', '==', personaId).where('activo', '==', true).limit(1).get();
+  if (socSnap.empty) throw new HttpsError('failed-precondition', 'No encontramos tu afiliación activa.');
+  const socioRef = socSnap.docs[0].ref;
+  const socio = socSnap.docs[0].data() || {};
+  if (socio.esResponsablePago !== true || !socio.planId) throw new HttpsError('permission-denied', 'Solo el titular responsable de pago puede cambiar el plan.');
+  if (socio.planId === nuevoPlanId) throw new HttpsError('failed-precondition', 'Ya tenés ese plan.');
+  if (PLAN_EXCLUIDOS.includes(nuevoPlanId)) throw new HttpsError('permission-denied', 'Ese plan no está disponible para autogestión.');
+
+  // (2) validar el plan nuevo + traer el viejo (para el diff de coberturas).
+  const [pnSnap, pvSnap] = await Promise.all([db.collection('planes').doc(nuevoPlanId).get(), db.collection('planes').doc(socio.planId).get()]);
+  if (!pnSnap.exists) throw new HttpsError('not-found', 'El plan no existe.');
+  const planNuevo = pnSnap.data() || {};
+  if (planNuevo.activo === false) throw new HttpsError('failed-precondition', 'Ese plan no está disponible.');
+  const planViejo = pvSnap.exists ? (pvSnap.data() || {}) : {};
+
+  // (3) carencia diferenciada por diff de coberturas.
+  const now = Date.now();
+  const carenciaActualMs = {};
+  const cpActual = socio.carenciaPorCobertura || {};
+  for (const k of Object.keys(cpActual)) { const v = cpActual[k]; carenciaActualMs[k] = v && v.toMillis ? v.toMillis() : (typeof v === 'number' ? v : 0); }
+  const carMs = nuevaCarencia(carenciaActualMs, planViejo.coberturas || {}, planNuevo.coberturas || {}, planNuevo.carenciaDias || 0, now);
+  const { ganadas } = diffCoberturas(planViejo.coberturas || {}, planNuevo.coberturas || {});
+  const enCarencia = coberturasEnCarencia(carMs, now);
+  const carenciaPorCobertura = {};
+  for (const k of Object.keys(carMs)) carenciaPorCobertura[k] = admin.firestore.Timestamp.fromMillis(carMs[k]);
+
+  // (4) batch: cambia el plan + carencia + log. El motor de abonos existente cobra la cuota nueva el próximo período.
+  const logRef = db.collection('cambios_plan').doc();
+  const batch = db.batch();
+  batch.set(socioRef, { planId: nuevoPlanId, planCambiadoEn: FV(), carenciaPorCobertura }, { merge: true });
+  batch.set(logRef, {
+    socioId: socioRef.id, personaId,
+    planViejo: socio.planId, planViejoNombre: planViejo.nombre || '',
+    planNuevo: nuevoPlanId, planNuevoNombre: planNuevo.nombre || '',
+    coberturasGanadas: ganadas, coberturasEnCarencia: enCarencia,
+    carenciaDias: planNuevo.carenciaDias || 0,
+    en: FV(), actorUid: uid,
+  });
+  await batch.commit();
+  logger.info('[cambiarMiPlan]', { socioId: socioRef.id, de: socio.planId, a: nuevoPlanId, ganadas: ganadas.length, enCarencia: enCarencia.length });
+  return { ok: true, coberturasEnCarencia: enCarencia };
+});
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================
    onSchedule (Cloud Scheduler auto-aprovisionado). TIMEZONE EXPLÍCITO: sin timeZone, '06:00' dispararía 03:00 AR.

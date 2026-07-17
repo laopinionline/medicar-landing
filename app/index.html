@@ -2084,12 +2084,22 @@ async function resolverAtribucion(personaId){
       const ps=await db.collection('planes').doc(socio.planId).get();
       if(ps.exists){
         const pl=ps.data();
+        // Autogestión de plan: congelar QUÉ coberturas estaban EN CARENCIA en la fecha del episodio (carenciaPorCobertura
+        // [prestacionId] > ahora). generarCargos las cobra (no las cubre). Snapshot al CREAR el episodio → si el socio
+        // cambia de plan después, el episodio "sabe" lo que estaba en carencia en SU momento.
+        const cp=socio.carenciaPorCobertura||{}; const nowMs=Date.now();
+        const enCarencia=Object.keys(pl.coberturas||{}).filter(k=>{
+          if((pl.coberturas||{})[k]!==true) return false;
+          const h=cp[k]; const hMs=(h&&h.toMillis)?h.toMillis():(typeof h==='number'?h:0);
+          return hMs>nowMs;
+        });
         planSnapshot={
           planId: socio.planId,
           nombre: pl.nombre||'',
           precio: (pl.precio!=null?pl.precio:0),
           carenciaDias: (pl.carenciaDias!=null?pl.carenciaDias:0),
           coberturas: pl.coberturas||{},
+          enCarencia, // prestacionIds cubiertas por el plan PERO en carencia al momento del episodio
           vigenteAlMomento: firebase.firestore.Timestamp.now() // congelado (client Timestamp: valor plano, seguro en map anidado)
         };
       }
@@ -4191,7 +4201,7 @@ async function facBaja(id,reactivar){
    se ajustan/anulan DESPUÉS. Sin bandeja de aprobación previa. El motor SOLO LEE episodios (nunca escribe).
    Mapeo FIJO codigo→prestación (valores reales verificados en CODIGOS): */
 const COD_PRESTACION={ rojo:'emergencias', amarillo:'urgencias', verde:'atencion_medica', traslado:'traslados' };
-const REGLA_LBL={ no_socio:'No socio', fuera_cobertura:'Fuera de cobertura', siempre_extra:'Siempre extra' };
+const REGLA_LBL={ no_socio:'No socio', fuera_cobertura:'Fuera de cobertura', en_carencia:'En carencia', siempre_extra:'Siempre extra' };
 
 function facCargosView(){
   if(S.fac.cargos===null) return `<div class="card">Cargando cargos…</div>`;
@@ -4243,9 +4253,11 @@ async function generarCargos(){
       const sinAtrib=!atrib;
       const socioId=(atrib && atrib.socioId)?atrib.socioId:null;
       const cob=(atrib && atrib.planSnapshot && atrib.planSnapshot.coberturas)?atrib.planSnapshot.coberturas:{};
+      const enCar=(atrib && atrib.planSnapshot && Array.isArray(atrib.planSnapshot.enCarencia))?atrib.planSnapshot.enCarencia:[];
       let regla=null;
       if(socioId==null){ regla='no_socio'; }              // a. no socio (o episodio histórico sin atribución)
       else if(cob[prestacionId]!==true){ regla='fuera_cobertura'; } // b. fuera de cobertura
+      else if(enCar.includes(prestacionId)){ regla='en_carencia'; rep.enCarencia=(rep.enCarencia||0)+1; } // b2. cubierta por el plan PERO en carencia al momento del episodio → se cobra (enforcement financiero)
       else if(tarifa.siempreExtra){ regla='siempre_extra'; }       // c. tipo siempre-extra
       else { rep.sinCargo++; continue; }                  // d. cubierto por el abono → no genera
       if(sinAtrib) rep.sinAtribucion++;                   // histórico: se cuenta aparte (subconjunto de no_socio)
@@ -4271,7 +4283,7 @@ async function generarCargos(){
       catch(e){ rep.errores++; console.warn('[generarCargos] fallo al crear cargo de',epId,e); }
     }
     audit('cargos_generados','cargos','',rep.generados+' generados, '+rep.sinTarifa+' sin tarifa');
-    S.fac.report=`Generados: <b>${rep.generados}</b> · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
+    S.fac.report=`Generados: <b>${rep.generados}</b>${rep.enCarencia?(' (en carencia: '+rep.enCarencia+')'):''} · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
 }

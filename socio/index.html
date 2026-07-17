@@ -1106,11 +1106,14 @@ function homeView(){
     const activos = depsDeMiSocio.filter(d=>d.activo!==false).length;
     const porInt = c.plan.modeloPrecio==='por_integrante';
     const monto = socioMoney(planPrecioTotal(c.plan, activos));
+    // Autogestión: solo el TITULAR responsable de pago puede cambiar el plan (el dependiente no tiene plan propio).
+    const esTitularPago = socio.esResponsablePago===true && !socio.titularSocioId;
     cuotaSec = `<div class="sec">
       <div class="sec-h">${porInt?'Cuota vigente (estimada)':'Cuota mensual'}</div>
       <div class="card">
         <div class="row"><span class="rl">${esc(c.planNombre||'—')}</span><span class="rv">${monto}</span></div>
         ${porInt?`<div style="padding:.75rem 1rem;font-size:.72rem;color:var(--gris);line-height:1.45">El valor final lo confirma tu factura mensual; puede variar según los integrantes activos al momento de facturar.</div>`:''}
+        ${esTitularPago?`<button class="row" onclick="abrirCambiarPlan()" style="width:100%;border:none;border-top:1px solid var(--linea);background:none;cursor:pointer;text-align:left"><span class="rl" style="color:var(--rojo);font-weight:700">Cambiar mi plan</span><span class="rv">${chv(13)}</span></button>`:''}
       </div>
     </div>`;
   }
@@ -1203,6 +1206,7 @@ function homeView(){
       <div class="tb-sp"></div>
       <button class="mini" onclick="salir()">Salir</button>
     </div>
+    ${S.planMsg?`<div class="card" style="border:1.5px solid var(--verde,#2E8B57);color:var(--verde,#2E8B57);padding:.6rem 1rem;font-size:.8rem;font-weight:600;margin-bottom:.6rem">${esc(S.planMsg)} <button onclick="set({planMsg:null})" style="float:right;background:none;border:none;color:var(--gris);cursor:pointer;font-weight:700">✕</button></div>`:''}
 
     <div class="cred">
       <svg class="lines-bg" width="130" height="80" viewBox="0 0 120 60"><rect x="6" y="16" width="108" height="6" rx="3" fill="#fff"/><rect x="22" y="30" width="92" height="6" rx="3" fill="#fff"/><rect x="40" y="44" width="74" height="6" rx="3" fill="#fff"/></svg>
@@ -1935,6 +1939,63 @@ async function doRevocar(codigo){
   catch(e){ set({ refbusy:false, err:'No se pudo revocar.' }); }
 }
 
+/* ==================== AUTOGESTIÓN DE PLAN (self-service, solo TITULAR responsable de pago) ====================
+   El socio ve todos los planes y elige; la CF cambiarMiPlan cambia el planId (el socio NO escribe socios). Rige el
+   próximo período (sin prorrateo). La carencia diferenciada la grava la CF; acá solo se avisa. */
+const PLAN_EXCLUIDOS_SOCIO=['plan-corporativo','PcB28RvKHEOrZ267ny6Z']; // corporativo(precio 0) + Plan 01 legacy
+async function abrirCambiarPlan(){
+  set({ view:'cambiar-plan', planes:undefined, planErr:'', planBusy:false, planSel:null }); navPush();
+  try{
+    const s=await db.collection('planes').where('activo','==',true).get();
+    const arr=s.docs.map(d=>({id:d.id,...d.data()})).filter(p=>!PLAN_EXCLUIDOS_SOCIO.includes(p.id) && (Number(p.precio)||0)>0);
+    arr.sort((a,b)=>(Number(a.ordenLanding)||0)-(Number(b.ordenLanding)||0));
+    set({ planes:arr });
+  }catch(e){ set({ planes:[], planErr:'No se pudieron cargar los planes.' }); }
+}
+function nuevasCoberturasVs(actualCob, candCob){ // prestacionIds cubiertas por el candidato y NO por el actual
+  const a=new Set(Object.keys(actualCob||{}).filter(k=>(actualCob||{})[k]===true));
+  return Object.keys(candCob||{}).filter(k=>(candCob||{})[k]===true && !a.has(k));
+}
+function planCarAviso(actualCob, p){ const n=nuevasCoberturasVs(actualCob,p.coberturas); return (n.length && Number(p.carenciaDias)>0)?{n:n.length, dias:Number(p.carenciaDias)}:null; }
+function cambiarPlanView(){
+  const c=S.cred||{}; const socio=c.socio||{}; const actualId=socio.planId; const actualCob=(c.plan&&c.plan.coberturas)||{};
+  const activos=((c.dependientes||[]).filter(d=>d.titularSocioId===socio.id && d.activo!==false)).length;
+  const list=S.planes;
+  const top=`<div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Cambiar mi plan</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Volver</button></div>`;
+  if(list===undefined) return `<div class="home">${top}<div class="card" style="padding:1.2rem;text-align:center;color:var(--gris)">Cargando planes…</div></div>`;
+  const err=S.planErr?`<div class="card" style="border:1.5px solid var(--rojo);color:var(--rojo);padding:.6rem 1rem;margin-bottom:.5rem">${esc(S.planErr)}</div>`:'';
+  // Confirmación in-app (sin dialog): al elegir, se fija S.planSel.
+  if(S.planSel){
+    const p=list.find(x=>x.id===S.planSel.id)||{}; const cuota=socioMoney(planPrecioTotal(p,activos)); const av=planCarAviso(actualCob,p);
+    return `<div class="home">${top}${err}
+      <div class="card" style="padding:1.1rem"><div style="font-weight:800;color:var(--tinta);font-size:1.02rem">Cambiar a "${esc(p.nombre||'—')}"</div>
+      <div class="row" style="margin-top:.5rem"><span class="rl">Cuota estimada</span><span class="rv">${cuota}</span></div>
+      <div style="font-size:.75rem;color:var(--gris);margin-top:.5rem;line-height:1.4">Rige desde el <b>próximo período</b> de facturación.${av?` <b>${av.n}</b> prestación${av.n===1?'':'es'} nueva${av.n===1?'':'s'} tendrá${av.n===1?'':'n'} una <b>carencia de ${av.dias} días</b>.`:''}</div>
+      <button class="btn-r" style="margin-top:.9rem" onclick="doCambiarPlan()" ${S.planBusy?'disabled':''}>${S.planBusy?'Cambiando…':'Confirmar cambio'}${S.planBusy?'':chv(15,'cw')}</button>
+      <button class="linkish" onclick="set({planSel:null})" style="margin-top:.6rem;background:none;border:none;color:var(--gris);font-size:.78rem;cursor:pointer;width:100%">Cancelar</button></div></div>`;
+  }
+  const rows=list.map(p=>{
+    const actual=p.id===actualId; const cuota=socioMoney(planPrecioTotal(p,activos)); const av=planCarAviso(actualCob,p);
+    const btn=actual?`<span class="rv" style="font-size:.6rem;font-weight:800;color:var(--verde,#2E8B57)">TU PLAN</span>`:`<button class="btn-o" style="width:auto;padding:.3rem .7rem;margin-top:0" onclick="set({planSel:{id:'${esc(p.id)}',nombre:'${esc((p.nombre||'').replace(/'/g,''))}'}})">Elegir</button>`;
+    return `<div class="card" style="padding:0;margin-bottom:.5rem;${actual?'border:1.5px solid var(--verde,#2E8B57)':''}"><div class="lr" style="padding:.7rem 1rem;flex-wrap:wrap"><div style="flex:1 1 55%"><div style="font-weight:800;color:var(--tinta)">${esc(p.nombre||'—')}</div><div style="font-size:.75rem;color:var(--gris)">${cuota}${p.modeloPrecio==='por_integrante'?' (según integrantes)':''}</div>${av?`<div style="font-size:.65rem;color:#B36B00;margin-top:.15rem">${av.n} nueva${av.n===1?'':'s'} · carencia ${av.dias}d</div>`:''}</div>${btn}</div></div>`;
+  }).join('');
+  return `<div class="home">${top}
+    <div style="font-size:.72rem;color:var(--gris);margin:.2rem .2rem .7rem">Elegí tu plan. El cambio rige desde el próximo período de facturación; las prestaciones nuevas pueden tener carencia.</div>
+    ${err}${rows||'<div class="card" style="padding:1rem;text-align:center;color:var(--gris)">No hay planes disponibles.</div>'}</div>`;
+}
+async function doCambiarPlan(){
+  const sel=S.planSel; if(!sel || S.planBusy) return;
+  set({ planBusy:true, planErr:'' });
+  try{
+    const r=await fnsCall('cambiarMiPlan',{ planId:sel.id });
+    await recargarCred(); // refresca plan/cuota del socio
+    const enCar=(r&&r.coberturasEnCarencia&&r.coberturasEnCarencia.length)||0;
+    S.planSel=null; S.planBusy=false; S.view='home';
+    S.planMsg=`Tu plan cambió a "${sel.nombre}". Rige desde el próximo período.${enCar?` ${enCar} prestación${enCar===1?'':'es'} en carencia.`:''}`;
+    render(); navReplace();
+  }catch(e){ const code=(e&&e.code)||''; const m=(e&&e.message)||''; set({ planBusy:false, planErr:/permission-denied|failed-precondition|not-found/.test(code)?(m||'No se pudo cambiar el plan.'):'No se pudo cambiar el plan. Reintentá.' }); }
+}
+
 function render(){
   const root=el('app'); if(!root) return;
   let html='';
@@ -1951,6 +2012,7 @@ function render(){
     case 'sin-vinculo': html=sinVinculoView(); break;
     case 'error-carga': html=errorCargaView(); break;
     case 'home': html=homeView(); break;
+    case 'cambiar-plan': html=cambiarPlanView(); break;
     case 'chequeo': html=chequeoFormView(); break;
     case 'reporte': html=reporteFormView(); break;
     case 'parametros': html=paramsFormView(); break;
