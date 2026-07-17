@@ -1251,14 +1251,21 @@ function homeView(){
     ${solicitudesBandejaBlock()}
 
     <div class="sec">
-      <div class="sec-h">Referentes</div>
+      <div class="sec-h">Mis referentes</div>
       <div class="card">
-        <button class="row" onclick="abrirMisReferentes()" style="width:100%;border:none;background:none;cursor:pointer;text-align:left;border-bottom:1px solid var(--linea)">
-          <span class="rl" style="color:var(--tinta);font-weight:700">Compartir mi estado con un familiar</span><span class="rv">${chv(13)}</span></button>
+        <button class="row" onclick="abrirMisReferentes()" style="width:100%;border:none;background:none;cursor:pointer;text-align:left">
+          <div><div class="rl" style="color:var(--tinta);font-weight:700">Mis referentes</div><div style="font-size:.72rem;color:var(--gris);margin-top:.1rem">Quién puede ver tu estado (los que designaste)</div></div><span class="rv">${chv(13)}</span></button>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h">Seguir a un familiar</div>
+      <div class="card">
+        <button class="row" onclick="set({view:'referente-seguir',err:''})" style="width:100%;border:none;background:none;cursor:pointer;text-align:left${S.tambienReferente?';border-bottom:1px solid var(--linea)':''}">
+          <div><div class="rl" style="color:var(--tinta);font-weight:700">Seguir a un familiar</div><div style="font-size:.72rem;color:var(--gris);margin-top:.1rem">Ver el estado de otra persona</div></div><span class="rv">${chv(13)}</span></button>
         ${S.tambienReferente
-          ? `<button class="row" onclick="verComoReferente()" style="width:100%;border:none;background:none;cursor:pointer;text-align:left;border-bottom:1px solid var(--linea)"><span class="rl" style="color:var(--tinta);font-weight:700">Ver como referente</span><span class="rv">${chv(13)}</span></button>`
-          : `<button class="row" onclick="set({view:'referente-canje',err:''})" style="width:100%;border:none;background:none;cursor:pointer;text-align:left;border-bottom:1px solid var(--linea)"><span class="rl" style="color:var(--tinta);font-weight:700">Seguir a un familiar (con un código)</span><span class="rv">${chv(13)}</span></button>`}
-        <button class="row" onclick="set({view:'referente-buscar',err:'',busqueda:null})" style="width:100%;border:none;background:none;cursor:pointer;text-align:left"><span class="rl" style="color:var(--tinta);font-weight:700">Seguir a un familiar (buscándolo)</span><span class="rv">${chv(13)}</span></button>
+          ? `<button class="row" onclick="verComoReferente()" style="width:100%;border:none;background:none;cursor:pointer;text-align:left"><div><div class="rl" style="color:var(--tinta);font-weight:700">Ver como referente</div><div style="font-size:.72rem;color:var(--gris);margin-top:.1rem">A quién ya seguís</div></div><span class="rv">${chv(13)}</span></button>`
+          : ''}
       </div>
     </div>
 
@@ -1810,6 +1817,24 @@ async function doReferenteAuth(){
   }
 }
 
+// R1.5 UX: "Seguir a un familiar" = UNA entrada → acá se elige el MÉTODO (código o búsqueda). No dos botones en el home.
+function referenteSeguirView(){
+  const volver = S.cred
+    ? `<button class="linkish" onclick="volverACredencial()" style="margin-top:.4rem;background:none;border:none;color:var(--gris);font-size:.78rem;cursor:pointer;width:100%">← Volver a mi credencial</button>`
+    : (S.ref&&S.ref.vinculos&&S.ref.vinculos.length)
+      ? `<button class="linkish" onclick="set({view:'referente'})" style="margin-top:.4rem;background:none;border:none;color:var(--gris);font-size:.78rem;cursor:pointer;width:100%">← Volver a mis titulares</button>`
+      : `<button class="linkish" onclick="salirReferente()" style="margin-top:.4rem;background:none;border:none;color:var(--gris);font-size:.75rem;cursor:pointer;width:100%">Salir</button>`;
+  return `<div class="login">
+    <div class="login-brand"><div class="brand">${chv(28)}<span class="word">medicar</span></div><div class="login-sub">Seguir a un familiar</div></div>
+    <h2>¿Cómo querés vincularte?</h2>
+    <p style="color:var(--gris);font-size:.82rem;margin:-.3rem 0 1.2rem">Vas a poder ver el estado de esa persona (si te lo habilita). Elegí una opción:</p>
+    <button class="btn-r" onclick="set({view:'referente-canje',err:''})">Con un código ${chv(15,'cw')}</button>
+    <p style="color:var(--gris);font-size:.75rem;margin:.4rem .2rem 1.1rem">Si la persona te dio un código MED-XXXXXX desde su app.</p>
+    <button class="btn-o" onclick="set({view:'referente-buscar',err:'',busqueda:null})">🔍 Buscándola por sus datos</button>
+    <p style="color:var(--gris);font-size:.75rem;margin:.4rem .2rem 1rem">Con su número de socio o DNI + apellido. Le llega una solicitud que tiene que aceptar.</p>
+    ${volver}
+  </div>`;
+}
 function referenteCanjeView(){
   return `<div class="login">
     <div class="login-brand"><div class="brand">${chv(28)}<span class="word">medicar</span></div>
@@ -2200,6 +2225,7 @@ function render(){
     case 'referente-codigo': html=referenteCodigoView(); break;
     case 'referente-login': html=referenteLoginView(); break;
     case 'referente-auth': html=referenteAuthView(); break;
+    case 'referente-seguir': html=referenteSeguirView(); break;
     case 'referente-canje': html=referenteCanjeView(); break;
     case 'referente-buscar': html=referenteBuscarView(); break;
     case 'referente': html=referentePanelView(); break;
