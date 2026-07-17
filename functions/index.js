@@ -28,7 +28,7 @@ const db = admin.firestore();
 const { ingestarFeeds } = require('./feed-ingesta'); // PWA-2a: núcleo de la ingesta del feed (compartido con el runner manual)
 const { textoAvisoTurno, textoRecordatorioTurno, planRecordatorio, debeRecordar } = require('./push-turno'); // A2: texto N3 + plan/decisión del recordatorio (módulo puro, testeable por smoke)
 const crypto = require('crypto'); // Referente R1: aleatoriedad del código
-const { generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido } = require('./referente'); // Referente R1 + síntoma-con-consentimiento (único nivel de salud)
+const { generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido, TEXTO_R3 } = require('./referente'); // Referente R1 + síntoma-con-consentimiento (único nivel de salud) + R3 alerta
 const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); // Guardia G1/G2: shape de la alerta + helpers de cronograma/atendiendo
 const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'); // Autogestión de plan: diff coberturas + carencia diferenciada
 
@@ -613,6 +613,8 @@ const sintomaDocId = (refUid, tid) => refUid + '_' + tid;
 // derivarSintomaReferido — trigger sobre reportes_sintomas (convive con derivarAlerta de la guardia, colección
 // cambia). Fan-out: por cada vínculo ACTIVO del titular con habilitaciones.sintomas → copia el síntoma a su
 // sintoma_referido. Encuentra los vínculos por collectionGroup('titulares') filtrando titularPersonaId+estado+flag.
+// R3 (alerta): en el MISMO loop, además del síntoma, (2) marca la novedad content-free en el espejo y (3) dispara el
+// push genérico al referente. Un solo gate (habilitaciones.sintomas) gobierna síntoma + panel + push.
 exports.derivarSintomaReferido = onDocumentCreated('reportes_sintomas/{id}', async (event) => {
   const data = event.data && event.data.data();
   const personaId = data && data.personaId;
@@ -624,13 +626,20 @@ exports.derivarSintomaReferido = onDocumentCreated('reportes_sintomas/{id}', asy
   } catch (e) { logger.error('[derivarSintomaReferido] query falló (¿falta el índice compuesto?)', { error: e.message || String(e) }); return null; }
   if (vinc.empty) return null;
   const doc = docSintomaReferido(data, FV());
-  let escritos = 0;
+  let escritos = 0, pushEnviados = 0;
   for (const d of vinc.docs) {
     const refUid = d.ref.parent.parent.id; // referentes/{refUid}/titulares/{tid} → refUid
+    // (1) CONTENIDO — lo importante. El síntoma solo se LEE por leerSintomaReferido (sintoma_referido es read:false).
     await db.collection('sintoma_referido').doc(sintomaDocId(refUid, personaId)).set(doc); // pisa entero → solo el último
+    // (2) NOVEDAD — timestamp content-free en el espejo (d.ref), que el referente SÍ lee (uid==refUid). SIN síntoma.
+    await d.ref.set({ ultimoReporteEn: FV() }, { merge: true });
+    // (3) PUSH GENÉRICO al referente (rutea a push_tokens/{refUid} por Admin SDK). FAIL-OPEN: un problema de push NO
+    // tumba el fan-out del síntoma (lo importante ya está escrito). Texto sin salud (la lockscreen no lleva dato clínico).
+    try { const r = await pushATurno(refUid, TEXTO_R3); pushEnviados += (r && r.enviados) || 0; }
+    catch (e) { logger.warn('[derivarSintomaReferido] push R3 falló — el fan-out sigue', { refUid, err: String((e && e.message) || e) }); }
     escritos++;
   }
-  logger.info('[derivarSintomaReferido]', { personaId, vinculosConsentidos: escritos }); // NO logueo sintomas/texto
+  logger.info('[derivarSintomaReferido]', { personaId, vinculosConsentidos: escritos, pushEnviados }); // NO logueo sintomas/texto
   return null;
 });
 

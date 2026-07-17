@@ -1850,12 +1850,18 @@ async function cargarReferente(uid){
     for(const d of snap.docs){
       const v=d.data(); const tid=d.id;
       const saludHab=!!(v.habilitaciones && v.habilitaciones.sintomas);
-      vinculos.push({ titularPersonaId:tid, titularNombre:v.titularNombre||'Titular', saludHab });
+      // R3: novedad = timestamp content-free del espejo (ultimoReporteEn). SIN síntoma → leerlo no rompe N3.
+      const ultimoReporteMs=(v.ultimoReporteEn && v.ultimoReporteEn.toMillis)?v.ultimoReporteEn.toMillis():0;
+      vinculos.push({ titularPersonaId:tid, titularNombre:v.titularNombre||'Titular', saludHab, ultimoReporteMs });
     }
   }catch(_){}
   vinculos.sort((a,b)=>(a.titularNombre||'').localeCompare(b.titularNombre||''));
   return { vinculos, sel:0 };
 }
+// R3: "visto por última vez" per-titular en localStorage (solo un timestamp, content-free). Es la PWA real → persiste.
+function refVistoMs(tid){ try{ return parseInt(localStorage.getItem('medicar_ref_visto_'+tid)||'0',10)||0; }catch(_){ return 0; } }
+function marcarRefVisto(tid, ms){ try{ if((ms||0)>refVistoMs(tid)) localStorage.setItem('medicar_ref_visto_'+tid, String(ms)); }catch(_){} }
+function hayNovedad(v){ return !!(v && v.saludHab && v.ultimoReporteMs>0 && v.ultimoReporteMs>refVistoMs(v.titularPersonaId)); }
 
 function referentePanelView(){
   const ref=S.ref||{vinculos:[]}; const vs=ref.vinculos||[];
@@ -1885,11 +1891,18 @@ function referentePanelView(){
   </div>`;
 }
 // Bloque de salud del panel del referente. UN SOLO nivel: sin consentimiento (v.saludHab=false) NO se muestra NADA
-// de salud, solo un estado LIMPIO (no un hueco ni un error). Con consentimiento → el síntoma exacto tap-to-reveal.
+// de salud, solo un estado LIMPIO (no un hueco ni un error). Con consentimiento → el síntoma exacto.
 // v.saludHab sale del espejo del vínculo (habilitaciones.sintomas), ya cargado en cargarReferente.
+// R3: si hay NOVEDAD (ultimoReporteEn > visto), el síntoma se AUTO-REVELA (sin tap) — pero SIEMPRE vía leerSintomaReferido
+// (que loguea). El badge "salta"; el ultimoReporteEn es solo timestamp. El contenido nunca llega fuera de esa CF.
 function saludBloque(v){
   if(!v.saludHab) return `<div class="card" style="margin-top:.4rem;padding:.95rem 1.1rem"><div style="font-size:.7rem;color:var(--gris);font-weight:700;text-transform:uppercase;letter-spacing:.06em">Información de salud</div><div style="font-size:.85rem;color:var(--gris);margin-top:.3rem;line-height:1.45">${esc(v.titularNombre)} todavía no habilitó que veas su información de salud.</div></div>`;
-  return sintomaBloque(v.titularPersonaId);
+  const tid=v.titularPersonaId, novedad=hayNovedad(v), st=(S.sintoma||{})[tid];
+  // Auto-reveal: novedad + síntoma no cargado → dispará leerSintomaReferido UNA vez (fire-and-forget; verSintoma
+  // marca 'visto' al loguear OK). Guard S.autoKick evita doble disparo entre renders sincrónicos.
+  if(novedad && st===undefined && !(S.autoKick||{})[tid]){ (S.autoKick=S.autoKick||{})[tid]=1; setTimeout(()=>verSintoma(tid), 0); }
+  const badge = novedad ? `<div style="margin-top:.4rem;display:flex;align-items:center;gap:.4rem;font-size:.74rem;font-weight:800;color:var(--rojo)"><span style="width:8px;height:8px;border-radius:50%;background:var(--rojo);flex:0 0 auto"></span>Nuevo reporte</div>` : '';
+  return badge + sintomaBloque(tid);
 }
 // Síntoma exacto (con consentimiento): tap-to-reveal. El read va por CF leerSintomaReferido (que LOGUEA el acceso;
 // sintoma_referido es read:false). Si no hay consentimiento → permission-denied → mensaje. Solo el ÚLTIMO (72h).
@@ -1905,7 +1918,13 @@ function sintomaBloque(tid){
 }
 async function verSintoma(tid){
   if(!S.sintoma) S.sintoma={}; S.sintoma[tid]='loading'; render();
-  try{ const r=await fnsCall('leerSintomaReferido',{ titularPersonaId:tid }); S.sintoma[tid]={ sintoma:(r&&r.sintoma)||null }; }
+  try{
+    const r=await fnsCall('leerSintomaReferido',{ titularPersonaId:tid }); S.sintoma[tid]={ sintoma:(r&&r.sintoma)||null };
+    // R3: el acceso quedó logueado (la CF logueó antes de devolver) → consumí la novedad marcando 'visto' con el
+    // ultimoReporteEn de este vínculo. Solo avanza (marcarRefVisto no retrocede). Sin novedad = no vuelve a auto-revelar.
+    const v=((S.ref&&S.ref.vinculos)||[]).find(x=>x.titularPersonaId===tid);
+    if(v && v.ultimoReporteMs) marcarRefVisto(tid, v.ultimoReporteMs);
+  }
   catch(e){ S.sintoma[tid]=/permission-denied/.test((e&&e.code)||'')?{noAuth:true}:{err:true}; }
   render();
 }
