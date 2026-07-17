@@ -907,6 +907,15 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // R1.5 — solicitudes_referente/{id}: pedido de vínculo por BÚSQUEDA. read DOS CARAS: el referente que la mandó
+    // (referenteUid==uid) y el titular destinatario (titularPersonaId==miPersonaId, para su bandeja). TODO por CF
+    // (buscar/solicitar/resolver, Admin SDK) → create/update/delete cerrados. rate_buscar_referente = sin match
+    // (Admin-only, el catch-all deniega a clientes, igual que rate_validar_referente).
+    match /solicitudes_referente/{id} {
+      allow read:  if isSignedIn() && ( resource.data.referenteUid == request.auth.uid || resource.data.titularPersonaId == miPersonaId() );
+      allow create, update, delete: if false;
+    }
+
     // Resto del datastore: cerrado para todos, salvo superadmin. (Etapa 29 — INMUTABILIDAD REAL.)
     // Las reglas de Firestore son PERMISIVAS-ONLY: un 'allow: if false' NO bloquea lo que otro match
     // permite. El write total del catch-all contradecía la inmutabilidad de auditoria/respuestas/gestiones,

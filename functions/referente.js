@@ -49,6 +49,31 @@ function docSintomaReferido(reporte, ts) {
   };
 }
 
+// ── R1.5: vinculación por BÚSQUEDA + aceptación (núcleo puro, para smoke-testear la garantía cero-oráculo) ──
+// Normalización de nombre: lowercase + NFD sin tildes + trim (MISMA que app/seed → match exacto insensible a mayúsc/tildes).
+function normNombre(s) { return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim(); }
+function apellidoCoincide(a, b) { const na = normNombre(a); return na.length > 0 && na === normNombre(b); }
+
+// 🚩 DECISIÓN ÚNICA de la búsqueda — CERO ORÁCULO: cualquier fallo (no existe / apellido no coincide / sin login) devuelve
+// EXACTAMENTE el MISMO objeto genérico {encontrado:false}. Solo el acierto completo (persona + login + apellido) revela el
+// nombre. La CF hace los lookups; ESTA función toma la decisión final → el smoke prueba que todos los fallos son idénticos.
+function resultadoBusqueda(m) {
+  const x = m || {};
+  if (x.persona && x.tieneLogin && apellidoCoincide(x.apellidoInput, x.persona.apellido)) {
+    return { encontrado: true, nombre: x.nombreCompleto, titularPersonaId: x.persona.id };
+  }
+  return { encontrado: false }; // MISMO resultado para: no existe, no es socio, sin login, apellido incorrecto, es uno mismo
+}
+
+// Anti-spam de la solicitud: una PENDIENTE por par, no auto-referencia, no duplicar vínculo activo. Puro → smoke-testeable.
+function puedeSolicitar(ctx) {
+  const c = ctx || {};
+  if (c.esAutoReferencia) return { ok: false, motivo: 'auto' };
+  if (c.yaVinculoActivo) return { ok: false, motivo: 'ya-vinculado' };
+  if (c.yaPendiente) return { ok: false, motivo: 'ya-pendiente' };
+  return { ok: true };
+}
+
 // ── R3: alerta al referente (push genérico) ──
 // TEXTO DEL PUSH — GENÉRICO A PROPÓSITO. 🚩 INVARIANTE: NO contiene síntomas ni NADA de salud. El push aparece en la
 // lockscreen (visible sin abrir la app, sin gate de quién mira) → jamás lleva dato de salud ahí. El síntoma se ve al
@@ -58,4 +83,4 @@ const TEXTO_R3 = {
   body: 'Tu familiar reportó algo. Abrí la app para ver.',
 };
 
-module.exports = { generarCodigo, esFormatoCodigo, CODE_ALFABETO, CODE_LARGO, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido, TEXTO_R3 };
+module.exports = { generarCodigo, esFormatoCodigo, CODE_ALFABETO, CODE_LARGO, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido, TEXTO_R3, normNombre, apellidoCoincide, resultadoBusqueda, puedeSolicitar };

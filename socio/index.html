@@ -1067,6 +1067,8 @@ function errorCargaView(){
 
 function homeView(){
   const c=S.cred||{}; const per=c.per||{}; const u=c.u||{}; const socio=c.socio||null;
+  // R1.5: cargar la bandeja de solicitudes una vez (fire-and-forget, guard). Solo un timestamp/nombre, no dato sensible.
+  if(S.solicitudesPend===undefined && u.personaId && !S.solKick){ S.solKick=1; setTimeout(()=>cargarSolicitudesTitular(u.personaId), 0); }
   const nombre=nombreDe(per,u);
   const activo = socio ? (socio.activo!==false) : false;
   const numero = socio && socio.numeroAfiliado ? socio.numeroAfiliado : '—';
@@ -1246,14 +1248,17 @@ function homeView(){
       <div class="card">${contacto}</div>
     </div>
 
+    ${solicitudesBandejaBlock()}
+
     <div class="sec">
       <div class="sec-h">Referentes</div>
       <div class="card">
         <button class="row" onclick="abrirMisReferentes()" style="width:100%;border:none;background:none;cursor:pointer;text-align:left;border-bottom:1px solid var(--linea)">
           <span class="rl" style="color:var(--tinta);font-weight:700">Compartir mi estado con un familiar</span><span class="rv">${chv(13)}</span></button>
         ${S.tambienReferente
-          ? `<button class="row" onclick="verComoReferente()" style="width:100%;border:none;background:none;cursor:pointer;text-align:left"><span class="rl" style="color:var(--tinta);font-weight:700">Ver como referente</span><span class="rv">${chv(13)}</span></button>`
-          : `<button class="row" onclick="set({view:'referente-canje',err:''})" style="width:100%;border:none;background:none;cursor:pointer;text-align:left"><span class="rl" style="color:var(--tinta);font-weight:700">Seguir a un familiar (con un código)</span><span class="rv">${chv(13)}</span></button>`}
+          ? `<button class="row" onclick="verComoReferente()" style="width:100%;border:none;background:none;cursor:pointer;text-align:left;border-bottom:1px solid var(--linea)"><span class="rl" style="color:var(--tinta);font-weight:700">Ver como referente</span><span class="rv">${chv(13)}</span></button>`
+          : `<button class="row" onclick="set({view:'referente-canje',err:''})" style="width:100%;border:none;background:none;cursor:pointer;text-align:left;border-bottom:1px solid var(--linea)"><span class="rl" style="color:var(--tinta);font-weight:700">Seguir a un familiar (con un código)</span><span class="rv">${chv(13)}</span></button>`}
+        <button class="row" onclick="set({view:'referente-buscar',err:'',busqueda:null})" style="width:100%;border:none;background:none;cursor:pointer;text-align:left"><span class="rl" style="color:var(--tinta);font-weight:700">Seguir a un familiar (buscándolo)</span><span class="rv">${chv(13)}</span></button>
       </div>
     </div>
 
@@ -1840,6 +1845,104 @@ async function doCanjearCodigo(){
   }
 }
 
+/* ---- R1.5: el referente BUSCA a un titular → le manda solicitud (el titular la acepta) ---- */
+function referenteBuscarView(){
+  const b=S.busqueda||{}; const modo=S.busqModo||'numero';
+  let res='';
+  if(b.enviada){
+    res=`<div class="card" style="margin-top:.8rem;padding:1rem 1.1rem;border:1.5px solid var(--verde,#2E8B57)"><div style="font-weight:800;color:var(--tinta)">Solicitud enviada ✓</div><div style="font-size:.8rem;color:var(--gris);margin-top:.25rem">Cuando la persona la acepte desde su app, vas a poder seguir su estado.</div></div>`;
+  }else if(b.loading){
+    res=`<div class="card" style="margin-top:.8rem;padding:.9rem 1rem;color:var(--gris)">Buscando…</div>`;
+  }else if(b.resultado){
+    res=b.resultado.encontrado
+      ? `<div class="card" style="margin-top:.8rem;padding:1rem 1.1rem;border:1.5px solid var(--verde,#2E8B57)">
+          <div style="font-size:.7rem;color:var(--gris);font-weight:700;text-transform:uppercase;letter-spacing:.06em">Encontramos a</div>
+          <div style="font-size:1.05rem;font-weight:800;color:var(--tinta);margin:.2rem 0 .1rem">${esc(b.resultado.nombre)}</div>
+          <div style="font-size:.75rem;color:var(--gris);margin-bottom:.7rem">Si es la persona correcta, mandale una solicitud. La acepta desde su propia app.</div>
+          <div class="field"><label>Tu nombre (para que te reconozca)</label><input id="rsolnom" type="text" autocomplete="name" placeholder="Ej: Juan Pérez (hijo)" value="${esc(S.busqNombre||'')}"></div>
+          <div class="err ${S.solErr?'on':''}">${esc(S.solErr)}</div>
+          <button class="btn-r" onclick="doSolicitarReferente('${esc(b.resultado.titularPersonaId)}')" ${S.solBusy?'disabled':''}>${S.solBusy?'Enviando…':'Enviar solicitud'}</button>
+        </div>`
+      : `<div class="card" style="margin-top:.8rem;padding:.9rem 1rem;font-size:.83rem;color:var(--gris)">No encontramos a nadie con esos datos. Revisá el número o DNI y el apellido — tienen que coincidir exactamente.</div>`;
+  }
+  return `<div class="login">
+    <div class="login-brand"><div class="brand">${chv(28)}<span class="word">medicar</span></div><div class="login-sub">Buscar a un titular</div></div>
+    <h2>Buscá a la persona</h2>
+    <p style="color:var(--gris);font-size:.82rem;margin:-.3rem 0 1rem">Necesitás su <b>número de socio + apellido</b> o su <b>DNI + apellido</b> (exactos). Le llega una solicitud que tiene que aceptar.</p>
+    <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
+    <div style="display:flex;gap:.5rem;margin-bottom:.7rem">
+      <button class="mini" style="${modo==='numero'?'background:#fff5f5;color:var(--rojo)':''}" onclick="set({busqModo:'numero',busqueda:null,err:''})">N° de socio</button>
+      <button class="mini" style="${modo==='dni'?'background:#fff5f5;color:var(--rojo)':''}" onclick="set({busqModo:'dni',busqueda:null,err:''})">DNI</button>
+    </div>
+    <div class="field"><label>${modo==='numero'?'Número de socio':'DNI'}</label><input id="rbclave" type="text" inputmode="numeric" autocomplete="off" placeholder="${modo==='numero'?'Ej: 90001':'Sin puntos'}" value="${esc(S.busqClave||'')}"></div>
+    <div class="field"><label>Apellido</label><input id="rbape" type="text" autocomplete="off" placeholder="Apellido exacto" value="${esc(S.busqApellido||'')}"></div>
+    <button class="btn-r" onclick="doBuscarTitular()" ${b.loading?'disabled':''}>${b.loading?'Buscando…':'Buscar'}</button>
+    ${res}
+    ${(S.ref&&S.ref.vinculos&&S.ref.vinculos.length)
+      ? `<button class="linkish" onclick="set({view:'referente',busqueda:null,err:''})" style="margin-top:.9rem;background:none;border:none;color:var(--gris);font-size:.78rem;cursor:pointer;width:100%">← Volver a mis titulares</button>`
+      : S.cred ? `<button class="linkish" onclick="volverACredencial()" style="margin-top:.9rem;background:none;border:none;color:var(--gris);font-size:.78rem;cursor:pointer;width:100%">← Volver a mi credencial</button>`
+      : `<button class="linkish" onclick="salirReferente()" style="margin-top:.9rem;background:none;border:none;color:var(--gris);font-size:.75rem;cursor:pointer;width:100%">Salir</button>`}
+  </div>`;
+}
+async function doBuscarTitular(){
+  if((S.busqueda||{}).loading) return;
+  const modo=S.busqModo||'numero';
+  const clave=(el('rbclave')?.value||'').trim(); const apellido=(el('rbape')?.value||'').trim();
+  if(!clave||!apellido){ set({ err:'Completá el '+(modo==='numero'?'número de socio':'DNI')+' y el apellido.' }); return; }
+  set({ err:'', solErr:'', busqNombre:'', busqClave:clave, busqApellido:apellido, busqueda:{ loading:true } });
+  try{
+    const r=await fnsCall('buscarTitular',{ modo, clave, apellido });
+    set({ busqueda:{ resultado: r||{ encontrado:false } } });
+  }catch(e){
+    const code=(e&&e.code)||'';
+    set({ busqueda:null, err: /resource-exhausted/.test(code)?'Hiciste muchas búsquedas. Esperá unos minutos e intentá de nuevo.' : /invalid-argument/.test(code)?((e&&e.message)||'Datos incompletos.') : 'No se pudo buscar. Reintentá.' });
+  }
+}
+async function doSolicitarReferente(titularPersonaId){
+  if(S.solBusy) return;
+  const nombreReferente=(el('rsolnom')?.value||'').trim();
+  if(!nombreReferente){ set({ solErr:'Escribí tu nombre para que te reconozca.' }); return; }
+  set({ solBusy:true, solErr:'', busqNombre:nombreReferente });
+  try{
+    await fnsCall('solicitarReferente',{ titularPersonaId, nombreReferente });
+    set({ solBusy:false, busqueda:{ enviada:true } });
+  }catch(e){
+    const code=(e&&e.code)||''; const m=(e&&e.message)||'';
+    set({ solBusy:false, solErr: /failed-precondition/.test(code)?(m||'No se pudo enviar.') : /invalid-argument/.test(code)?(m||'Faltan datos.') : 'No se pudo enviar la solicitud. Reintentá.' });
+  }
+}
+
+/* ---- R1.5: bandeja de solicitudes en la app del TITULAR (aceptar/rechazar) ---- */
+async function cargarSolicitudesTitular(personaId){
+  if(!personaId){ S.solicitudesPend=[]; return; }
+  try{
+    const snap=await db.collection('solicitudes_referente').where('titularPersonaId','==',personaId).where('estado','==','pendiente').get();
+    S.solicitudesPend=snap.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=>((b.creadoEn&&b.creadoEn.toMillis?b.creadoEn.toMillis():0)-(a.creadoEn&&a.creadoEn.toMillis?a.creadoEn.toMillis():0)));
+  }catch(_){ S.solicitudesPend=[]; }
+  render();
+}
+function solicitudesBandejaBlock(){
+  const arr=S.solicitudesPend||[];
+  if(!arr.length) return '';
+  return `<div class="sec"><div class="sec-h">Solicitudes para seguirte</div><div class="card">${
+    arr.map(s=>`<div class="row" style="align-items:center;flex-wrap:wrap${arr.length>1?';border-bottom:1px solid var(--linea)':''}">
+      <div style="flex:1 1 55%"><div style="font-weight:700;color:var(--tinta)">${esc(s.nombreReferente||'Alguien')}</div>
+      <div style="font-size:.72rem;color:var(--gris)">quiere seguir tu estado como referente</div></div>
+      <div style="display:flex;gap:.35rem;flex-wrap:wrap">
+        <button class="mini" style="background:#fff5f5;color:var(--rojo)" ${S.solResBusy?'disabled':''} onclick="doResolverSolicitud('${esc(s.id)}','aceptar')">Aceptar</button>
+        <button class="mini" ${S.solResBusy?'disabled':''} onclick="doResolverSolicitud('${esc(s.id)}','rechazar')">Rechazar</button>
+      </div></div>`).join('')
+  }</div></div>`;
+}
+async function doResolverSolicitud(id, accion){
+  if(S.solResBusy) return; set({ solResBusy:true });
+  const pid=(S.cred&&S.cred.u&&S.cred.u.personaId)||null;
+  try{ await fnsCall('resolverSolicitudReferente',{ solicitudId:id, accion }); }
+  catch(_){ /* recargo igual: si otro la resolvió o cambió, la bandeja se sincroniza */ }
+  S.solResBusy=false;
+  await cargarSolicitudesTitular(pid);
+}
+
 // Carga los vínculos ACTIVOS del referente. NO lee /personas ni el crudo: el nombre viene denorm en el espejo, y el
 // estado del consentimiento de salud sale del MISMO espejo (habilitaciones.sintomas), que el referente puede leer
 // (regla uid==refUid). Sin llamar ninguna CF ni tap: el panel ya sabe si mostrar la vista de salud o el estado limpio.
@@ -1886,7 +1989,8 @@ function referentePanelView(){
   if(!vs.length){
     return `<div class="home"><div class="topbar"><div class="brand">${chv(20)}<span class="word">medicar</span></div><div class="tb-sp"></div>${salidaBtn}</div>
       <div class="sec" style="margin-top:2rem"><div class="card"><div style="padding:1.2rem 1rem;text-align:center;color:var(--gris);font-size:.85rem">Todavía no seguís a ningún titular como referente.</div></div></div>
-      <button class="btn-r" style="margin-top:1rem" onclick="set({view:'referente-canje',err:''})">Vincular con un titular ${chv(15,'cw')}</button></div>`;
+      <button class="btn-r" style="margin-top:1rem" onclick="set({view:'referente-canje',err:''})">Vincular con un código ${chv(15,'cw')}</button>
+      <button class="btn-o" style="margin-top:.5rem" onclick="set({view:'referente-buscar',err:'',busqueda:null})">Buscar a un titular</button></div>`;
   }
   const sel=Math.min(ref.sel||0, vs.length-1); const v=vs[sel];
   const selector = vs.length>1 ? `<div class="sec"><div class="sec-h">Titulares</div><div class="card">${
@@ -1900,7 +2004,8 @@ function referentePanelView(){
       <div style="padding:1rem 1.1rem"><div style="font-size:.7rem;color:var(--gris);font-weight:700;text-transform:uppercase;letter-spacing:.06em">Titular</div><div style="font-size:1.05rem;font-weight:800;color:var(--tinta);margin-top:.15rem">${esc(v.titularNombre)}</div></div>
     </div></div>
     ${saludBloque(v)}
-    <button class="btn-o" style="margin-top:.4rem" onclick="set({view:'referente-canje',err:''})">＋ Vincular con otro titular</button>
+    <button class="btn-o" style="margin-top:.4rem" onclick="set({view:'referente-canje',err:''})">＋ Vincular con un código</button>
+    <button class="btn-o" style="margin-top:.4rem" onclick="set({view:'referente-buscar',err:'',busqueda:null})">🔍 Buscar a un titular</button>
     ${homeFeedBlock()}
     <a class="btn-emerg" href="tel:${TEL_EMERG}" style="margin-top:1rem">${IC.phone}<span>EMERGENCIAS<span class="em-sub">Llamar al ${TEL_EMERG}</span></span></a>
   </div>`;
@@ -2096,6 +2201,7 @@ function render(){
     case 'referente-login': html=referenteLoginView(); break;
     case 'referente-auth': html=referenteAuthView(); break;
     case 'referente-canje': html=referenteCanjeView(); break;
+    case 'referente-buscar': html=referenteBuscarView(); break;
     case 'referente': html=referentePanelView(); break;
     case 'mis-referentes': html=misReferentesView(); break;
     case 'staff-nativo': html=staffNativoView(); break;

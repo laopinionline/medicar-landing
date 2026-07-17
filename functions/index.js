@@ -28,7 +28,7 @@ const db = admin.firestore();
 const { ingestarFeeds } = require('./feed-ingesta'); // PWA-2a: núcleo de la ingesta del feed (compartido con el runner manual)
 const { textoAvisoTurno, textoRecordatorioTurno, planRecordatorio, debeRecordar } = require('./push-turno'); // A2: texto N3 + plan/decisión del recordatorio (módulo puro, testeable por smoke)
 const crypto = require('crypto'); // Referente R1: aleatoriedad del código
-const { generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido, TEXTO_R3 } = require('./referente'); // Referente R1 + síntoma-con-consentimiento (único nivel de salud) + R3 alerta
+const { generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido, TEXTO_R3, normNombre, resultadoBusqueda, puedeSolicitar } = require('./referente'); // Referente R1 + síntoma (único nivel salud) + R3 alerta + R1.5 búsqueda
 const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); // Guardia G1/G2: shape de la alerta + helpers de cronograma/atendiendo
 const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'); // Autogestión de plan: diff coberturas + carencia diferenciada
 
@@ -725,6 +725,127 @@ exports.leerSintomaReferido = onCall(async (request) => {
   const ms = s.actualizadoEn && s.actualizadoEn.toMillis ? s.actualizadoEn.toMillis() : 0;
   if (Date.now() - ms >= SINTOMA_VENTANA_MS) return { sintoma: null }; // fuera de la ventana 72h → como si no hubiera
   return { sintoma: { sintomas: s.sintomas || [], texto: s.texto || '' } };
+});
+
+/* ===================== R1.5 — VINCULACIÓN POR BÚSQUEDA + ACEPTACIÓN =====================
+   Segundo camino de vínculo: el referente logueado BUSCA a un titular → le manda SOLICITUD → el titular ACEPTA/rechaza.
+   El referente NUNCA lee socios/personas/pacientes: todo por CF (Admin SDK) que devuelve el MÍNIMO. El vínculo creado al
+   aceptar es IDÉNTICO al de R1 (mismo espejo). El consentimiento de síntomas NO se shortcutea (sintomas:false). */
+const BUSCAR_RL_MAX = 20, BUSCAR_RL_VENTANA_MS = 10 * 60 * 1000; // rate limit por UID del referente (no IP: está autenticado)
+async function chequearRateLimitBuscar(uid) {
+  const ref = db.collection('rate_buscar_referente').doc(uid);
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(ref); const now = Date.now(); let count = 1, windowStart = now;
+    if (s.exists) { const d = s.data() || {}; if (now - (d.windowStart || 0) < BUSCAR_RL_VENTANA_MS) { count = (d.count || 0) + 1; windowStart = d.windowStart; } }
+    if (count > BUSCAR_RL_MAX) throw new HttpsError('resource-exhausted', 'Demasiadas búsquedas. Esperá unos minutos e intentá de nuevo.');
+    tx.set(ref, { count, windowStart, actualizadoEn: FV() });
+  });
+}
+// ¿esa persona tiene una cuenta de login propia? (usuarios/{uid}.personaId == pid). Solo así "puede aceptar por sí misma".
+async function personaTieneLogin(personaId) {
+  if (!personaId) return false;
+  try { const u = await db.collection('usuarios').where('personaId', '==', personaId).limit(1).get(); return !u.empty; } catch (_) { return false; }
+}
+
+// buscarTitular — el referente busca a un titular por (número+apellido) O (DNI+apellido), ambos exactos y juntos. Cero
+// oráculo: TODO fallo devuelve el mismo {encontrado:false}. Devuelve ≤1 = nombre completo + id opaco, NADA sensible.
+exports.buscarTitular = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  await chequearRateLimitBuscar(uid); // anti brute-force (por uid)
+  const modo = String((request.data || {}).modo || '').trim();
+  const clave = String((request.data || {}).clave || '').trim();
+  const apellido = String((request.data || {}).apellido || '').trim();
+  if (!apellido || !clave || (modo !== 'numero' && modo !== 'dni')) throw new HttpsError('invalid-argument', 'Completá el número de socio o DNI y el apellido.');
+
+  // Resolver la persona candidata (Admin SDK; el referente nunca lee el padrón). Cualquier tropiezo → persona null.
+  let personaData = null, personaId = null;
+  try {
+    if (modo === 'numero') {
+      let soc = await db.collection('socios').where('numeroAfiliado', '==', clave).where('activo', '==', true).limit(1).get();
+      if (soc.empty && /^\d+$/.test(clave)) soc = await db.collection('socios').where('numeroAfiliado', '==', Number(clave)).where('activo', '==', true).limit(1).get();
+      if (!soc.empty) { personaId = (soc.docs[0].data() || {}).personaId || null; if (personaId) { const p = await db.collection('personas').doc(personaId).get(); if (p.exists) personaData = p.data(); else personaId = null; } }
+    } else {
+      let per = await db.collection('personas').where('dni', '==', clave).limit(1).get();
+      if (per.empty && /^\d+$/.test(clave)) per = await db.collection('personas').where('dni', '==', Number(clave)).limit(1).get();
+      if (!per.empty) {
+        personaId = per.docs[0].id; personaData = per.docs[0].data();
+        const soc = await db.collection('socios').where('personaId', '==', personaId).where('activo', '==', true).limit(1).get();
+        if (soc.empty) { personaData = null; personaId = null; } // existe la persona pero no es socio activo → no-match
+      }
+    }
+  } catch (e) { logger.error('[buscarTitular] lookup falló', { modo, error: e.message || String(e) }); personaData = null; personaId = null; }
+
+  const tieneLogin = await personaTieneLogin(personaId);
+  // No encontrarse a sí mismo (si el referente es socio): mismo no-match genérico, sin oráculo.
+  let esYo = false;
+  try { const me = await db.collection('usuarios').doc(uid).get(); if (me.exists && personaId && (me.data() || {}).personaId === personaId) esYo = true; } catch (_) {}
+
+  const persona = (personaData && personaId && !esYo) ? { id: personaId, apellido: personaData.apellido } : null;
+  const nombreCompleto = personaData ? nombreDe(personaData) : '';
+  return resultadoBusqueda({ persona, apellidoInput: apellido, tieneLogin, nombreCompleto }); // decisión cero-oráculo (núcleo puro)
+});
+
+// solicitarReferente — el referente pide seguir a un titular encontrado. Re-valida el target server-side (socio activo +
+// login), guarda auto-referencia y anti-spam (una pendiente por par, no duplicar vínculo activo). Nombre AUTODECLARADO.
+exports.solicitarReferente = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const referenteUid = request.auth.uid;
+  const titularPersonaId = String((request.data || {}).titularPersonaId || '').trim();
+  const nombreReferente = String((request.data || {}).nombreReferente || '').trim().slice(0, 80);
+  if (!titularPersonaId) throw new HttpsError('invalid-argument', 'Falta el titular.');
+  if (!nombreReferente) throw new HttpsError('invalid-argument', 'Decinos tu nombre para que la persona te reconozca.');
+
+  // Re-validación server-side (no confío en el id opaco del cliente): socio activo + tiene login.
+  const soc = await db.collection('socios').where('personaId', '==', titularPersonaId).where('activo', '==', true).limit(1).get();
+  if (soc.empty || !(await personaTieneLogin(titularPersonaId))) throw new HttpsError('failed-precondition', 'Esa persona no está disponible.');
+
+  const me = await db.collection('usuarios').doc(referenteUid).get();
+  const esAutoReferencia = me.exists && (me.data() || {}).personaId === titularPersonaId;
+  const esp = await db.collection('referentes').doc(referenteUid).collection('titulares').doc(titularPersonaId).get();
+  const yaVinculoActivo = esp.exists && (esp.data() || {}).estado === 'activo';
+  const pend = await db.collection('solicitudes_referente').where('referenteUid', '==', referenteUid).where('titularPersonaId', '==', titularPersonaId).where('estado', '==', 'pendiente').limit(1).get();
+  const permiso = puedeSolicitar({ esAutoReferencia, yaVinculoActivo, yaPendiente: !pend.empty });
+  if (!permiso.ok) {
+    const msg = permiso.motivo === 'auto' ? 'No podés seguirte a vos mismo.' : permiso.motivo === 'ya-vinculado' ? 'Ya seguís a esta persona.' : 'Ya le enviaste una solicitud a esta persona.';
+    throw new HttpsError('failed-precondition', msg);
+  }
+  const doc = await db.collection('solicitudes_referente').add({ referenteUid, titularPersonaId, nombreReferente, estado: 'pendiente', creadoEn: FV(), resueltoEn: null });
+  logger.info('[solicitarReferente]', { referenteUid, titularPersonaId, solicitudId: doc.id });
+  return { ok: true };
+});
+
+// resolverSolicitudReferente — el TITULAR acepta/rechaza. Al ACEPTAR crea el MISMO vínculo de R1 (espejo write:false → por
+// CF) + claim rol:'referente'. Rechazar solo marca el estado (sin bloqueo: re-solicitar = se vuelve a rechazar).
+exports.resolverSolicitudReferente = onCall(async (request) => {
+  const titularPersonaId = await assertAfiliado(request); // caller = el titular destinatario
+  const solicitudId = String((request.data || {}).solicitudId || '').trim();
+  const accion = String((request.data || {}).accion || '').trim();
+  if (!solicitudId || (accion !== 'aceptar' && accion !== 'rechazar')) throw new HttpsError('invalid-argument', 'Solicitud o acción inválida.');
+  const sRef = db.collection('solicitudes_referente').doc(solicitudId);
+  const sSnap = await sRef.get();
+  if (!sSnap.exists) throw new HttpsError('not-found', 'Esa solicitud no existe.');
+  const s = sSnap.data() || {};
+  if (s.titularPersonaId !== titularPersonaId) throw new HttpsError('permission-denied', 'Esa solicitud no es para vos.');
+  if (s.estado !== 'pendiente') throw new HttpsError('failed-precondition', 'Esa solicitud ya fue resuelta.');
+
+  if (accion === 'rechazar') {
+    await sRef.set({ estado: 'rechazada', resueltoEn: FV() }, { merge: true });
+    logger.info('[resolverSolicitudReferente] rechazada', { solicitudId });
+    return { ok: true, estado: 'rechazada' };
+  }
+  // aceptar → crea el MISMO vínculo de R1 (idéntico al canje; sin acceso a salud hasta consentir)
+  const referenteUid = s.referenteUid;
+  let titularNombre = ''; try { const p = await db.collection('personas').doc(titularPersonaId).get(); if (p.exists) titularNombre = nombreDe(p.data()); } catch (_) {}
+  const espejo = db.collection('referentes').doc(referenteUid).collection('titulares').doc(titularPersonaId);
+  const batch = db.batch();
+  batch.set(espejo, { estado: 'activo', habilitaciones: { sintomas: false }, titularNombre, titularPersonaId, origen: 'busqueda', solicitudId, canjeadoEn: FV() }, { merge: true });
+  batch.set(sRef, { estado: 'aceptada', resueltoEn: FV() }, { merge: true });
+  await batch.commit();
+  const user = await admin.auth().getUser(referenteUid);
+  await admin.auth().setCustomUserClaims(referenteUid, { ...(user.customClaims || {}), rol: 'referente' });
+  logger.info('[resolverSolicitudReferente] aceptada', { solicitudId, referenteUid, titularPersonaId });
+  return { ok: true, estado: 'aceptada' };
 });
 
 /* ===================== GUARDIA G1 — derivarAlerta =====================
