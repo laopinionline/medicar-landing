@@ -24,6 +24,23 @@
         { "fieldPath": "personaId", "order": "ASCENDING" },
         { "fieldPath": "creadoEn", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "solicitudes_referente",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "referenteUid", "order": "ASCENDING" },
+        { "fieldPath": "titularPersonaId", "order": "ASCENDING" },
+        { "fieldPath": "estado", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "solicitudes_referente",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "titularPersonaId", "order": "ASCENDING" },
+        { "fieldPath": "estado", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

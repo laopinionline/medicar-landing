@@ -38,6 +38,8 @@ async function seed(env) {
     await db.doc('feed_posts/pend1').set({ estado: 'pendiente', titulo: 'Borrador', cat: 'medicar' });
     // Un código pendiente de titA
     await db.doc('codigos_referente/MED-CCCCCC').set({ titularPersonaId: 'pTitA', estado: 'pendiente', habilitaciones: { sintomas: false }, referenteUid: null, creadoEn: 1 });
+    // R1.5 — una SOLICITUD del referente refX dirigida al titular pTitA (la escribe la CF; acá se siembra)
+    await db.doc('solicitudes_referente/sol1').set({ referenteUid: 'refX', titularPersonaId: 'pTitA', nombreReferente: 'Juan (hijo)', estado: 'pendiente', creadoEn: 1, resueltoEn: null });
   });
 }
 before(async () => { env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { rules: fs.readFileSync('firestore.rules', 'utf8') } }); });
@@ -142,5 +144,33 @@ describe('codigos_referente — el titular genera/gestiona', () => {
   });
   it('✗ el titular NO puede pisar otros campos del código (solo estado/revocadoEn)', async () => {
     await assertFails(ctx('titA').doc('codigos_referente/MED-CCCCCC').set({ titularPersonaId: 'pTitB' }, { merge: true }));
+  });
+});
+
+describe('R1.5 — solicitudes_referente (búsqueda + aceptación): read DOS CARAS, write cerrado', () => {
+  // sol1 = { referenteUid:'refX', titularPersonaId:'pTitA' } — la mandó refX, es para pTitA (titA).
+  it('✓ el REFERENTE que la mandó lee su solicitud (refX)', async () => {
+    await assertSucceeds(ctx('refX', REF).doc('solicitudes_referente/sol1').get());
+  });
+  it('✓ el TITULAR destinatario la lee (titA, personaId==pTitA → su bandeja)', async () => {
+    await assertSucceeds(ctx('titA').doc('solicitudes_referente/sol1').get());
+  });
+  it('✗ un TERCERO no la lee (otro titular titB)', async () => {
+    await assertFails(ctx('titB').doc('solicitudes_referente/sol1').get());
+  });
+  it('✗ otro referente no la lee (refRev)', async () => {
+    await assertFails(ctx('refRev', REF).doc('solicitudes_referente/sol1').get());
+  });
+  it('✗ un anónimo no la lee', async () => {
+    await assertFails(anon().doc('solicitudes_referente/sol1').get());
+  });
+  it('✗ NADIE crea una solicitud por regla (solo la CF solicitarReferente)', async () => {
+    await assertFails(ctx('refX', REF).doc('solicitudes_referente/nueva').set({ referenteUid: 'refX', titularPersonaId: 'pTitA', estado: 'pendiente', creadoEn: 1 }));
+  });
+  it('✗ el titular NO puede aceptar escribiendo el estado (la resolución es por CF)', async () => {
+    await assertFails(ctx('titA').doc('solicitudes_referente/sol1').set({ estado: 'aceptada' }, { merge: true }));
+  });
+  it('✗ el referente NO puede pisar su propia solicitud', async () => {
+    await assertFails(ctx('refX', REF).doc('solicitudes_referente/sol1').set({ estado: 'aceptada' }, { merge: true }));
   });
 });

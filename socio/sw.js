@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v22'; // R3 follow-up: "Reportado {hora AR}" en el panel del referente (hora Argentina, no UTC)
+const CACHE = 'medicar-socio-v23'; // R1.5: vinculación por búsqueda (número/DNI+apellido) + bandeja de solicitudes del titular
 const SHELL = [
   './',
   './index.html',
