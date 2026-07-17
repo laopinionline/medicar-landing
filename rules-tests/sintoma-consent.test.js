@@ -20,7 +20,7 @@ async function seed(env) {
     await db.doc('usuarios/legalUid').set({ rol: 'admin', roles: ['admin'], permisos: { configurar_sistema: true } });
     await db.doc('usuarios/staffUid').set({ rol: 'despachante', roles: ['despachante'] }); // interno pero SIN configurar_sistema
     // vínculo activo con consentimiento de síntomas
-    await db.doc('referentes/refUid/titulares/pTit').set({ estado: 'activo', habilitaciones: { estado: true, sintomas: true }, titularPersonaId: 'pTit' });
+    await db.doc('referentes/refUid/titulares/pTit').set({ estado: 'activo', habilitaciones: { sintomas: true }, titularPersonaId: 'pTit' });
     await db.doc('sintoma_referido/refUid_pTit').set({ sintomas: ['Dolor'], texto: 'crudo', actualizadoEn: 1 });
     await db.doc('consentimientos/c1').set({ titularPersonaId: 'pTit', referenteUid: 'refUid', tipo: 'sintomas', accion: 'otorga', textoConsentimiento: 'texto', version: 1, en: 1 });
     await db.doc('accesos_sintoma/a1').set({ referenteUid: 'refUid', titularPersonaId: 'pTit', tipo: 'sintomas', en: 1 });

@@ -7,7 +7,7 @@
  * lleva solo ruteo/identidad (personaId/Nombre/Telefono, denorm, no clínicos) + un flag de prioridad de triage
  * (tieneBanderaRoja, un bit) + estado. NUNCA sintomas/texto — eso vive solo en reportes_sintomas.
  *
- * Es el INVERSO del referente: el referente recibía un binario N3-safe (estado_referido); la guardia recibe una
+ * A diferencia del referente (que solo ve el síntoma consentido, per-referente y logueado), la guardia recibe una
  * alerta que REFERENCIA el crudo (el staff sí lo ve, abriendo el reporte). El afiliado/referente no leen alertas.
  */
 
