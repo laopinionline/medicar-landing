@@ -1858,6 +1858,21 @@ async function cargarReferente(uid){
   vinculos.sort((a,b)=>(a.titularNombre||'').localeCompare(b.titularNombre||''));
   return { vinculos, sel:0 };
 }
+// R3: formatea un timestamp (ms) a HORA ARGENTINA explícita (America/Argentina/Buenos_Aires, UTC−3) — NUNCA UTC crudo
+// ni la TZ del dispositivo (regla feedback-hora-argentina). Reciente → "hace X"; hoy/ayer → con HH:MM; más viejo → DD/MM HH:MM.
+const TZ_AR='America/Argentina/Buenos_Aires';
+function horaReporteAR(ms){
+  if(!ms) return '';
+  const hhmm=new Date(ms).toLocaleTimeString('es-AR',{timeZone:TZ_AR,hour:'2-digit',minute:'2-digit',hour12:false});
+  const diff=Date.now()-ms;
+  if(diff>=0 && diff<60000) return 'recién';
+  if(diff>=0 && diff<3600000) return 'hace '+Math.floor(diff/60000)+' min';
+  const diaAR=(t)=>new Date(t).toLocaleDateString('en-CA',{timeZone:TZ_AR}); // "YYYY-MM-DD" AR (padded, comparable)
+  if(diaAR(ms)===diaAR(Date.now())) return 'hoy '+hhmm;
+  if(diaAR(ms)===diaAR(Date.now()-86400000)) return 'ayer '+hhmm;
+  const [,M,D]=diaAR(ms).split('-'); // fecha AR consistente DD/MM
+  return D+'/'+M+' '+hhmm;
+}
 // R3: "visto por última vez" per-titular en localStorage (solo un timestamp, content-free). Es la PWA real → persiste.
 function refVistoMs(tid){ try{ return parseInt(localStorage.getItem('medicar_ref_visto_'+tid)||'0',10)||0; }catch(_){ return 0; } }
 function marcarRefVisto(tid, ms){ try{ if((ms||0)>refVistoMs(tid)) localStorage.setItem('medicar_ref_visto_'+tid, String(ms)); }catch(_){} }
@@ -1902,11 +1917,11 @@ function saludBloque(v){
   // marca 'visto' al loguear OK). Guard S.autoKick evita doble disparo entre renders sincrónicos.
   if(novedad && st===undefined && !(S.autoKick||{})[tid]){ (S.autoKick=S.autoKick||{})[tid]=1; setTimeout(()=>verSintoma(tid), 0); }
   const badge = novedad ? `<div style="margin-top:.4rem;display:flex;align-items:center;gap:.4rem;font-size:.74rem;font-weight:800;color:var(--rojo)"><span style="width:8px;height:8px;border-radius:50%;background:var(--rojo);flex:0 0 auto"></span>Nuevo reporte</div>` : '';
-  return badge + sintomaBloque(tid);
+  return badge + sintomaBloque(tid, v.ultimoReporteMs); // ultimoReporteMs = cuándo se reportó (ya cargado del espejo; sin lectura nueva)
 }
 // Síntoma exacto (con consentimiento): tap-to-reveal. El read va por CF leerSintomaReferido (que LOGUEA el acceso;
 // sintoma_referido es read:false). Si no hay consentimiento → permission-denied → mensaje. Solo el ÚLTIMO (72h).
-function sintomaBloque(tid){
+function sintomaBloque(tid, reporteMs){
   const st=(S.sintoma||{})[tid];
   if(st===undefined) return `<button class="btn-o" style="margin-top:.4rem" onclick="verSintoma('${esc(tid)}')">Ver qué síntomas reportó</button>`;
   if(st==='loading') return `<div class="card" style="margin-top:.4rem;padding:.8rem 1rem;color:var(--gris)">Consultando…</div>`;
@@ -1914,7 +1929,11 @@ function sintomaBloque(tid){
   if(st.err) return `<div class="card" style="margin-top:.4rem;padding:.8rem 1rem;font-size:.8rem;color:var(--rojo)">No se pudo consultar. Reintentá.</div>`;
   if(!st.sintoma) return `<div class="card" style="margin-top:.4rem;padding:.8rem 1rem;font-size:.8rem;color:var(--gris)">No hay un síntoma reciente para mostrar.</div>`;
   const s=st.sintoma; const sints=(s.sintomas||[]).map(x=>esc(x)).join(', ');
-  return `<div class="card" style="margin-top:.4rem;padding:.9rem 1rem;border:1.5px solid var(--amar,#E8A400)"><div style="font-size:.68rem;color:#B36B00;font-weight:800;text-transform:uppercase;letter-spacing:.05em">Síntomas reportados (autorizado)</div><div style="color:var(--tinta);margin-top:.25rem;font-weight:600">${sints||'—'}</div>${s.texto?`<div style="font-size:.82rem;color:var(--gris);margin-top:.35rem;line-height:1.4"><b>Relato:</b> ${esc(s.texto)}</div>`:''}</div>`;
+  // R3 follow-up: "Reportado {hora AR}" — timestamp que YA vino con el síntoma (ultimoReporteMs del espejo). Cosmético,
+  // no agrega acceso ni toca leerSintomaReferido. Solo si hay hora disponible.
+  const cuando=horaReporteAR(reporteMs);
+  const cuandoLinea=cuando?`<div style="font-size:.72rem;color:var(--gris);margin-top:.4rem">Reportado ${esc(cuando)}</div>`:'';
+  return `<div class="card" style="margin-top:.4rem;padding:.9rem 1rem;border:1.5px solid var(--amar,#E8A400)"><div style="font-size:.68rem;color:#B36B00;font-weight:800;text-transform:uppercase;letter-spacing:.05em">Síntomas reportados (autorizado)</div><div style="color:var(--tinta);margin-top:.25rem;font-weight:600">${sints||'—'}</div>${s.texto?`<div style="font-size:.82rem;color:var(--gris);margin-top:.35rem;line-height:1.4"><b>Relato:</b> ${esc(s.texto)}</div>`:''}${cuandoLinea}</div>`;
 }
 async function verSintoma(tid){
   if(!S.sintoma) S.sintoma={}; S.sintoma[tid]='loading'; render();
