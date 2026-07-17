@@ -7,6 +7,15 @@
         { "fieldPath": "estado", "order": "ASCENDING" },
         { "fieldPath": "fechaFuente", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "titulares",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "titularPersonaId", "order": "ASCENDING" },
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "habilitaciones.sintomas", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -28,7 +28,7 @@ const db = admin.firestore();
 const { ingestarFeeds } = require('./feed-ingesta'); // PWA-2a: núcleo de la ingesta del feed (compartido con el runner manual)
 const { textoAvisoTurno, textoRecordatorioTurno, planRecordatorio, debeRecordar } = require('./push-turno'); // A2: texto N3 + plan/decisión del recordatorio (módulo puro, testeable por smoke)
 const crypto = require('crypto'); // Referente R1: aleatoriedad del código
-const { docEstadoReferido, generarCodigo, esFormatoCodigo } = require('./referente'); // Referente R1: núcleo puro N3 (el shape derivado + el código). La traducción a humano vive en el front (copia de frasePonderacion).
+const { docEstadoReferido, generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido } = require('./referente'); // Referente R1 + síntoma-con-consentimiento (F1)
 const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); // Guardia G1/G2: shape de la alerta + helpers de cronograma/atendiendo
 const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'); // Autogestión de plan: diff coberturas + carencia diferenciada
 
@@ -567,7 +567,7 @@ exports.canjearCodigoReferente = onCall(async (request) => {
   const espejo = db.collection('referentes').doc(uid).collection('titulares').doc(titularPersonaId);
   const batch = db.batch();
   batch.set(ref, { referenteUid: uid, estado: 'activo', canjeadoEn: FV() }, { merge: true });
-  batch.set(espejo, { estado: 'activo', habilitaciones: c.habilitaciones || { estado: true }, codigo, titularNombre, canjeadoEn: FV() }, { merge: true });
+  batch.set(espejo, { estado: 'activo', habilitaciones: c.habilitaciones || { estado: true }, codigo, titularNombre, titularPersonaId, canjeadoEn: FV() }, { merge: true }); // titularPersonaId denorm → fan-out del síntoma por collectionGroup
   await batch.commit();
   // Custom claim rol:'referente' (merge con claims existentes). Marca la cuenta como referente para el routing.
   const user = await admin.auth().getUser(uid);
@@ -591,7 +591,9 @@ exports.revocarVinculoReferente = onCall(async (request) => {
   batch.set(ref, { estado: 'revocado', revocadoEn: FV() }, { merge: true });
   if (c.referenteUid) {
     const espejo = db.collection('referentes').doc(c.referenteUid).collection('titulares').doc(titularPersonaId);
-    batch.set(espejo, { estado: 'revocado', revocadoEn: FV() }, { merge: true });
+    // Revocar el vínculo ENTERO también apaga el consentimiento de síntomas y PURGA el crudo copiado (minimización).
+    batch.set(espejo, { estado: 'revocado', revocadoEn: FV(), habilitaciones: { estado: false, sintomas: false } }, { merge: true });
+    batch.delete(db.collection('sintoma_referido').doc(c.referenteUid + '_' + titularPersonaId));
   }
   await batch.commit();
   logger.info('[revocarVinculoReferente]', { titularPersonaId, codigo, referenteUid: c.referenteUid || null });
@@ -608,6 +610,114 @@ exports.derivarEstadoReferido = onDocumentCreated('reportes_sintomas/{id}', asyn
   await db.collection('estado_referido').doc(personaId).set(docEstadoReferido('con_sintomas', FV())); // pisa el doc entero → sin residuos
   logger.info('[derivarEstadoReferido]', { personaId }); // NO logueo nada del reporte
   return null;
+});
+
+/* ===================== SÍNTOMA-CON-CONSENTIMIENTO (Fase 1) =====================
+   El referente ve el síntoma EXACTO (nombres + relato) SOLO con consentimiento explícito del titular, per-referente.
+   Deroga el binario como techo. Registro auditable + log de cada lectura. El referente NUNCA lee reportes_sintomas
+   crudo — lee el derivado consentido, y SOLO vía CF (para poder loguear el acceso). Ref al doc: sintoma_referido/{refUid_tid}. */
+const SINTOMA_VENTANA_MS = 72 * 60 * 60 * 1000; // solo el reporte más reciente (72h) — coherente con la ponderación binaria
+const sintomaDocId = (refUid, tid) => refUid + '_' + tid;
+
+// derivarSintomaReferido — SEGUNDO trigger sobre reportes_sintomas (independiente de derivarEstadoReferido, que NO
+// cambia). Fan-out: por cada vínculo ACTIVO del titular con habilitaciones.sintomas → copia el síntoma a su
+// sintoma_referido. Encuentra los vínculos por collectionGroup('titulares') filtrando titularPersonaId+estado+flag.
+exports.derivarSintomaReferido = onDocumentCreated('reportes_sintomas/{id}', async (event) => {
+  const data = event.data && event.data.data();
+  const personaId = data && data.personaId;
+  if (!personaId) return null;
+  let vinc;
+  try {
+    vinc = await db.collectionGroup('titulares')
+      .where('titularPersonaId', '==', personaId).where('estado', '==', 'activo').where('habilitaciones.sintomas', '==', true).get();
+  } catch (e) { logger.error('[derivarSintomaReferido] query falló (¿falta el índice compuesto?)', { error: e.message || String(e) }); return null; }
+  if (vinc.empty) return null;
+  const doc = docSintomaReferido(data, FV());
+  let escritos = 0;
+  for (const d of vinc.docs) {
+    const refUid = d.ref.parent.parent.id; // referentes/{refUid}/titulares/{tid} → refUid
+    await db.collection('sintoma_referido').doc(sintomaDocId(refUid, personaId)).set(doc); // pisa entero → solo el último
+    escritos++;
+  }
+  logger.info('[derivarSintomaReferido]', { personaId, vinculosConsentidos: escritos }); // NO logueo sintomas/texto
+  return null;
+});
+
+// otorgarConsentimientoSintomas — el TITULAR habilita a un referente a ver sus síntomas. RECHAZA si no hay texto
+// de consentimiento real (invariante). Setea el flag (vínculo + código), siembra el síntoma actual si hay uno < 72h,
+// y REGISTRA el consentimiento (texto + version). El titular nunca escribe el flag ni el registro directo.
+exports.otorgarConsentimientoSintomas = onCall(async (request) => {
+  const titularPersonaId = await assertAfiliado(request);
+  if (!consentSintomasOk()) throw new HttpsError('failed-precondition', 'El consentimiento no está disponible en este momento.'); // invariante: sin texto real, no se graba nada
+  const referenteUid = String((request.data || {}).referenteUid || '').trim();
+  if (!referenteUid) throw new HttpsError('invalid-argument', 'Falta el referente.');
+  const espejoRef = db.collection('referentes').doc(referenteUid).collection('titulares').doc(titularPersonaId);
+  const espejo = await espejoRef.get();
+  if (!espejo.exists || (espejo.data() || {}).estado !== 'activo') throw new HttpsError('failed-precondition', 'Ese vínculo no está activo.');
+
+  const batch = db.batch();
+  batch.set(espejoRef, { habilitaciones: { estado: (espejo.data().habilitaciones || {}).estado !== false, sintomas: true } }, { merge: true });
+  // Espejo del flag en el código (lo que el titular puede LEER para el toggle). Busca el código de este vínculo.
+  const codSnap = await db.collection('codigos_referente').where('titularPersonaId', '==', titularPersonaId).where('referenteUid', '==', referenteUid).limit(1).get();
+  if (!codSnap.empty) batch.set(codSnap.docs[0].ref, { habilitaciones: { estado: true, sintomas: true } }, { merge: true });
+  // Siembra el síntoma actual si hay un reporte reciente (< 72h) → el referente lo ve ya, sin esperar el próximo.
+  const rs = await db.collection('reportes_sintomas').where('personaId', '==', titularPersonaId).orderBy('creadoEn', 'desc').limit(1).get();
+  if (!rs.empty) {
+    const r = rs.docs[0].data() || {};
+    const ms = r.creadoEn && r.creadoEn.toMillis ? r.creadoEn.toMillis() : 0;
+    if (Date.now() - ms < SINTOMA_VENTANA_MS) batch.set(db.collection('sintoma_referido').doc(sintomaDocId(referenteUid, titularPersonaId)), docSintomaReferido(r, FV()));
+  }
+  batch.set(db.collection('consentimientos').doc(), {
+    titularPersonaId, referenteUid, tipo: 'sintomas', accion: 'otorga',
+    textoConsentimiento: CONSENT_SINTOMAS.texto, version: CONSENT_SINTOMAS.version,
+    en: FV(), actorUid: request.auth.uid,
+  });
+  await batch.commit();
+  logger.info('[otorgarConsentimientoSintomas]', { titularPersonaId, referenteUid, version: CONSENT_SINTOMAS.version });
+  return { ok: true };
+});
+
+// revocarConsentimientoSintomas — el TITULAR corta. ATÓMICO: flag→false (vínculo+código) + DELETE del síntoma copiado
+// (purga, minimización Ley 25.326) + registro accion:'revoca'. No basta el flag: hay que purgar el crudo en reposo.
+exports.revocarConsentimientoSintomas = onCall(async (request) => {
+  const titularPersonaId = await assertAfiliado(request);
+  const referenteUid = String((request.data || {}).referenteUid || '').trim();
+  if (!referenteUid) throw new HttpsError('invalid-argument', 'Falta el referente.');
+  const espejoRef = db.collection('referentes').doc(referenteUid).collection('titulares').doc(titularPersonaId);
+  const espejo = await espejoRef.get();
+  if (!espejo.exists) throw new HttpsError('not-found', 'Ese vínculo no existe.');
+
+  const batch = db.batch();
+  batch.set(espejoRef, { habilitaciones: { estado: (espejo.data().habilitaciones || {}).estado !== false, sintomas: false } }, { merge: true }); // corte por regla instantáneo
+  batch.delete(db.collection('sintoma_referido').doc(sintomaDocId(referenteUid, titularPersonaId))); // PURGA del crudo
+  const codSnap = await db.collection('codigos_referente').where('titularPersonaId', '==', titularPersonaId).where('referenteUid', '==', referenteUid).limit(1).get();
+  if (!codSnap.empty) batch.set(codSnap.docs[0].ref, { habilitaciones: { estado: true, sintomas: false } }, { merge: true });
+  batch.set(db.collection('consentimientos').doc(), { titularPersonaId, referenteUid, tipo: 'sintomas', accion: 'revoca', textoConsentimiento: CONSENT_SINTOMAS.texto, version: CONSENT_SINTOMAS.version, en: FV(), actorUid: request.auth.uid });
+  await batch.commit();
+  logger.info('[revocarConsentimientoSintomas]', { titularPersonaId, referenteUid });
+  return { ok: true };
+});
+
+// leerSintomaReferido — el REFERENTE lee el síntoma del titular tid. Es el ÚNICO camino de lectura (sintoma_referido
+// es read:false) → así se puede LOGUEAR cada acceso (Firestore no da hook de read). Valida el consentimiento vivo,
+// respeta la ventana 72h, REGISTRA el acceso ANTES de devolver, y devuelve {sintomas, texto} o null.
+exports.leerSintomaReferido = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const refUid = request.auth.uid;
+  const tid = String((request.data || {}).titularPersonaId || '').trim();
+  if (!tid) throw new HttpsError('invalid-argument', 'Falta el titular.');
+  // Consentimiento vivo: vínculo activo + habilitaciones.sintomas (defensa server-side, aunque el doc no se lea por regla).
+  const espejo = await db.collection('referentes').doc(refUid).collection('titulares').doc(tid).get();
+  const h = espejo.exists ? ((espejo.data() || {}).habilitaciones || {}) : {};
+  if (!espejo.exists || (espejo.data() || {}).estado !== 'activo' || h.sintomas !== true) throw new HttpsError('permission-denied', 'No tenés autorización para ver los síntomas de esta persona.');
+  // LOG del acceso (antes de devolver — el registro no depende de que la lectura del doc salga bien).
+  await db.collection('accesos_sintoma').add({ referenteUid: refUid, titularPersonaId: tid, tipo: 'sintomas', en: FV() });
+  const snap = await db.collection('sintoma_referido').doc(sintomaDocId(refUid, tid)).get();
+  if (!snap.exists) return { sintoma: null };
+  const s = snap.data() || {};
+  const ms = s.actualizadoEn && s.actualizadoEn.toMillis ? s.actualizadoEn.toMillis() : 0;
+  if (Date.now() - ms >= SINTOMA_VENTANA_MS) return { sintoma: null }; // fuera de la ventana 72h → como si no hubiera
+  return { sintoma: { sintomas: s.sintomas || [], texto: s.texto || '' } };
 });
 
 /* ===================== GUARDIA G1 — derivarAlerta =====================
