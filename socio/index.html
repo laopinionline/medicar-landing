@@ -1882,13 +1882,32 @@ function referentePanelView(){
       <div style="padding:1.1rem;display:flex;align-items:center;gap:.7rem">
         <span style="width:12px;height:12px;border-radius:50%;background:${con?'var(--amar,#E8A400)':'var(--verde,#2E8B57)'};flex:0 0 auto"></span>
         <div><div style="font-weight:700;color:var(--tinta);font-size:.92rem">${frasePonderacion(v.ponderacion)}</div>
-        <div style="font-size:.72rem;color:var(--gris);margin-top:.15rem">Es la única información que el titular habilitó para vos.</div></div>
+        <div style="font-size:.72rem;color:var(--gris);margin-top:.15rem">El estado que el titular habilitó para vos.</div></div>
       </div>
     </div></div>
+    ${sintomaBloque(v.titularPersonaId)}
     <button class="btn-o" style="margin-top:.4rem" onclick="set({view:'referente-canje',err:''})">＋ Vincular con otro titular</button>
     ${homeFeedBlock()}
     <a class="btn-emerg" href="tel:${TEL_EMERG}" style="margin-top:1rem">${IC.phone}<span>EMERGENCIAS<span class="em-sub">Llamar al ${TEL_EMERG}</span></span></a>
   </div>`;
+}
+// Síntoma exacto (con consentimiento): tap-to-reveal. El read va por CF leerSintomaReferido (que LOGUEA el acceso;
+// sintoma_referido es read:false). Si no hay consentimiento → permission-denied → mensaje. Solo el ÚLTIMO (72h).
+function sintomaBloque(tid){
+  const st=(S.sintoma||{})[tid];
+  if(st===undefined) return `<button class="btn-o" style="margin-top:.4rem" onclick="verSintoma('${esc(tid)}')">Ver qué síntomas reportó</button>`;
+  if(st==='loading') return `<div class="card" style="margin-top:.4rem;padding:.8rem 1rem;color:var(--gris)">Consultando…</div>`;
+  if(st.noAuth) return `<div class="card" style="margin-top:.4rem;padding:.8rem 1rem;font-size:.8rem;color:var(--gris)">El titular no te habilitó a ver qué síntomas reporta.</div>`;
+  if(st.err) return `<div class="card" style="margin-top:.4rem;padding:.8rem 1rem;font-size:.8rem;color:var(--rojo)">No se pudo consultar. Reintentá.</div>`;
+  if(!st.sintoma) return `<div class="card" style="margin-top:.4rem;padding:.8rem 1rem;font-size:.8rem;color:var(--gris)">No hay un síntoma reciente para mostrar.</div>`;
+  const s=st.sintoma; const sints=(s.sintomas||[]).map(x=>esc(x)).join(', ');
+  return `<div class="card" style="margin-top:.4rem;padding:.9rem 1rem;border:1.5px solid var(--amar,#E8A400)"><div style="font-size:.68rem;color:#B36B00;font-weight:800;text-transform:uppercase;letter-spacing:.05em">Síntomas reportados (autorizado)</div><div style="color:var(--tinta);margin-top:.25rem;font-weight:600">${sints||'—'}</div>${s.texto?`<div style="font-size:.82rem;color:var(--gris);margin-top:.35rem;line-height:1.4"><b>Relato:</b> ${esc(s.texto)}</div>`:''}</div>`;
+}
+async function verSintoma(tid){
+  if(!S.sintoma) S.sintoma={}; S.sintoma[tid]='loading'; render();
+  try{ const r=await fnsCall('leerSintomaReferido',{ titularPersonaId:tid }); S.sintoma[tid]={ sintoma:(r&&r.sintoma)||null }; }
+  catch(e){ S.sintoma[tid]=/permission-denied/.test((e&&e.code)||'')?{noAuth:true}:{err:true}; }
+  render();
 }
 function refSel(i){ if(S.ref){ S.ref.sel=i; render(); } }
 function salirReferente(){ modoReferenteOff(); auth.signOut(); }
@@ -1911,22 +1930,55 @@ async function recargarMisCodigos(){
   arr=arr.filter(c=>c.estado!=='revocado').sort((a,b)=>(tsMs(b.creadoEn)||0)-(tsMs(a.creadoEn)||0));
   set({ misCodigos:arr, refbusy:false });
 }
+// Texto del consentimiento de síntomas (copia del CONSENT_SINTOMAS v1 del backend; el registro legal lo guarda la CF).
+const CONSENT_SINTOMAS_TEXTO='Autorizo a la persona que designé como mi referente en MEDICAR a ver los síntomas que reporto, incluyendo la descripción que yo escriba. Entiendo que es información de mi salud, que la comparto por mi propia decisión, que se comparte solo mi reporte más reciente, y que puedo revocar esta autorización en cualquier momento desde la aplicación.';
 function misReferentesView(){
+  const top=`<div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Mis referentes</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Volver</button></div>`;
+  // Flujo de consentimiento de síntomas (in-app, sin dialog).
+  if(S.consentModal){
+    const m=S.consentModal;
+    if(m.accion==='otorga'){
+      return `<div class="home">${top}<div class="card" style="padding:1.1rem">
+        <div style="font-weight:800;color:var(--tinta)">Compartir tus síntomas con ${esc(m.nombre)}</div>
+        <div style="font-size:.82rem;color:var(--tinta);line-height:1.5;margin:.7rem 0;background:#fafafa;border-radius:10px;padding:.8rem">${esc(CONSENT_SINTOMAS_TEXTO)}</div>
+        <div class="err ${S.consentErr?'on':''}">${esc(S.consentErr)}</div>
+        <button class="btn-r" onclick="doOtorgarSintomas()" ${S.consentBusy?'disabled':''}>${S.consentBusy?'Guardando…':'Autorizo'}</button>
+        <button class="linkish" onclick="set({consentModal:null,consentErr:''})" style="margin-top:.6rem;background:none;border:none;color:var(--gris);font-size:.78rem;cursor:pointer;width:100%">Cancelar</button></div></div>`;
+    }
+    return `<div class="home">${top}<div class="card" style="padding:1.1rem">
+      <div style="font-weight:800;color:var(--tinta)">Dejar de compartir tus síntomas con ${esc(m.nombre)}</div>
+      <div style="font-size:.8rem;color:var(--gris);line-height:1.45;margin:.6rem 0">Se corta el acceso al instante y <b>se borra</b> el síntoma que ya se le había compartido.</div>
+      <div class="err ${S.consentErr?'on':''}">${esc(S.consentErr)}</div>
+      <button class="btn-r" onclick="doRevocarSintomas()" ${S.consentBusy?'disabled':''}>${S.consentBusy?'Revocando…':'Dejar de compartir'}</button>
+      <button class="linkish" onclick="set({consentModal:null,consentErr:''})" style="margin-top:.6rem;background:none;border:none;color:var(--gris);font-size:.78rem;cursor:pointer;width:100%">Cancelar</button></div></div>`;
+  }
   const list=(S.misCodigos||[]).map(c=>{
-    const activo=c.estado==='activo';
-    return `<div class="row" style="align-items:center">
-      <div><div style="font-weight:800;color:var(--tinta);letter-spacing:.06em">${esc(c.id)}</div>
+    const activo=c.estado==='activo'; const sint=!!(c.habilitaciones&&c.habilitaciones.sintomas);
+    const nombreJs=(c.nombreReferente||'Referente').replace(/[\\'"]/g,'');
+    const tog=(activo&&c.referenteUid)?`<button class="mini" style="${sint?'background:#fff5f5;color:var(--rojo)':''}" onclick="abrirConsentSintomas('${esc(c.referenteUid)}','${esc(nombreJs)}',${sint})">Síntomas: ${sint?'sí ✓':'no'}</button>`:'';
+    return `<div class="row" style="align-items:center;flex-wrap:wrap">
+      <div style="flex:1 1 50%"><div style="font-weight:800;color:var(--tinta);letter-spacing:.06em">${esc(c.id)}</div>
       <div style="font-size:.72rem;color:var(--gris)">${esc(c.nombreReferente||'Referente')} · ${activo?'Vinculado':'Pendiente de canje'}</div></div>
-      <button class="mini" onclick="doRevocar('${esc(c.id)}')">Revocar</button></div>`;
+      <div style="display:flex;gap:.35rem;flex-wrap:wrap">${tog}<button class="mini" onclick="doRevocar('${esc(c.id)}')">Revocar</button></div></div>`;
   }).join('') || `<div class="row"><span class="rl" style="color:var(--gris)">Todavía no generaste ningún código.</span><span class="rv"></span></div>`;
-  return `<div class="home">
-    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Mis referentes</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Volver</button></div>
-    <div class="sec" style="margin-top:.6rem"><p style="color:var(--gris);font-size:.82rem;margin:.2rem .2rem 0">Un referente (ej. un familiar) puede ver si reportaste síntomas. Generá un código y compartíselo; podés revocarlo cuando quieras.</p></div>
+  return `<div class="home">${top}
+    <div class="sec" style="margin-top:.6rem"><p style="color:var(--gris);font-size:.82rem;margin:.2rem .2rem 0">Un referente (ej. un familiar) puede ver si reportaste síntomas. Con "Síntomas: sí" además ve <b>qué</b> síntomas reportás (con tu autorización). Podés revocar cuando quieras.</p></div>
     <button class="btn-r" onclick="doGenerarCodigo()" ${S.refbusy?'disabled':''}>${S.refbusy?'Un momento…':'Generar un código'}${S.refbusy?'':chv(15,'cw')}</button>
     ${S.nuevoCodigo?`<div class="card" style="margin-top:.8rem;padding:1rem;text-align:center;background:#fff5f5"><div style="font-size:.72rem;color:var(--gris);font-weight:700">CÓDIGO NUEVO — compartilo con tu referente</div><div style="font-size:1.4rem;font-weight:900;letter-spacing:.12em;color:var(--rojo);margin:.3rem 0">${esc(S.nuevoCodigo)}</div><div style="font-size:.7rem;color:var(--gris)">Vence en 7 días si no se usa.</div></div>`:''}
     <div class="err ${S.err?'on':''}" style="margin-top:.6rem">${esc(S.err)}</div>
     <div class="sec" style="margin-top:1rem"><div class="sec-h">Códigos activos y pendientes</div><div class="card">${list}</div></div>
   </div>`;
+}
+function abrirConsentSintomas(referenteUid, nombre, sintActual){ set({ consentModal:{ referenteUid, nombre, accion: sintActual?'revoca':'otorga' }, consentErr:'', consentBusy:false }); }
+async function doOtorgarSintomas(){
+  const m=S.consentModal; if(!m||S.consentBusy) return; set({ consentBusy:true, consentErr:'' });
+  try{ await fnsCall('otorgarConsentimientoSintomas',{ referenteUid:m.referenteUid }); S.consentModal=null; S.consentBusy=false; await recargarMisCodigos(); }
+  catch(e){ set({ consentBusy:false, consentErr:/failed-precondition/.test((e&&e.code)||'')?((e&&e.message)||'No disponible.'):'No se pudo autorizar. Reintentá.' }); }
+}
+async function doRevocarSintomas(){
+  const m=S.consentModal; if(!m||S.consentBusy) return; set({ consentBusy:true, consentErr:'' });
+  try{ await fnsCall('revocarConsentimientoSintomas',{ referenteUid:m.referenteUid }); S.consentModal=null; S.consentBusy=false; await recargarMisCodigos(); }
+  catch(e){ set({ consentBusy:false, consentErr:'No se pudo revocar. Reintentá.' }); }
 }
 async function doGenerarCodigo(){
   if(S.refbusy) return; set({ refbusy:true, err:'', nuevoCodigo:'' });

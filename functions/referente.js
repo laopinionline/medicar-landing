@@ -45,4 +45,25 @@ function esFormatoCodigo(codigo) {
   return typeof codigo === 'string' && new RegExp('^MED-[' + CODE_ALFABETO + ']{' + CODE_LARGO + '}$').test(codigo);
 }
 
-module.exports = { PONDERACIONES, docEstadoReferido, frasePonderacion, generarCodigo, esFormatoCodigo, CODE_ALFABETO, CODE_LARGO };
+// ── Síntoma-con-consentimiento (Fase 1) ──
+// Texto del consentimiento CONFIRMADO por Lucas (version 1). Es el ARTEFACTO LEGAL: cada registro en
+// consentimientos/ copia texto+version. Si legal lo cambia, sube version (los viejos conservan lo aceptado).
+const CONSENT_SINTOMAS = {
+  version: 1,
+  texto: 'Autorizo a la persona que designé como mi referente en MEDICAR a ver los síntomas que reporto, incluyendo la descripción que yo escriba. Entiendo que es información de mi salud, que la comparto por mi propia decisión, que se comparte solo mi reporte más reciente, y que puedo revocar esta autorización en cualquier momento desde la aplicación.',
+};
+// ¿Hay un texto de consentimiento REAL? (invariante: sin esto, otorgar RECHAZA — nunca se graba consentimiento vacío).
+function consentSintomasOk() { return !!(CONSENT_SINTOMAS && CONSENT_SINTOMAS.version >= 1 && String(CONSENT_SINTOMAS.texto || '').trim().length > 0); }
+
+// Doc derivado per-referente del síntoma exacto: SOLO nombres de síntomas + relato libre (lo que Lucas habilitó).
+// NADA más del reporte crudo (ni banderaRoja, ni score, ni ids). Lo escribe/lee SOLO la CF (Admin SDK).
+function docSintomaReferido(reporte, ts) {
+  const r = reporte || {};
+  return {
+    sintomas: (Array.isArray(r.sintomas) ? r.sintomas : []).map((s) => (s && s.nombre) || '').filter(Boolean),
+    texto: String(r.texto || ''),
+    actualizadoEn: ts,
+  };
+}
+
+module.exports = { PONDERACIONES, docEstadoReferido, frasePonderacion, generarCodigo, esFormatoCodigo, CODE_ALFABETO, CODE_LARGO, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido };
