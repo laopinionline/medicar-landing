@@ -5034,7 +5034,10 @@ function novPendientesView(){
 // Actualización PUNTUAL de la cola (sin full render → no salta el scroll). Reconcilia el DOM con el estado:
 // si el set visible NO cambió (caso típico tras la quita optimista), NO reemplaza las cards (cero flicker), solo los contadores.
 function novRerenderPend(){
-  const cont=document.getElementById('nov-pend-list'); if(!cont) return; // no está montada la vista → nada que actualizar
+  // Si el contenedor NO está montado (primer render en estado "Cargando…", o cualquier caso donde la vista de la lista
+  // no exista todavía), un update puntual no-opearía y la vista quedaría clavada → FULL render UNA vez para montarla.
+  // Solo pasa en el arranque/transición (en la curación el contenedor YA existe → camino puntual, sin saltar).
+  const cont=document.getElementById('nov-pend-list'); if(!cont){ render(); return; }
   const domIds=[...cont.querySelectorAll('[data-nov-card]')].map(e=>e.getAttribute('data-nov-card'));
   const want=novPendFiltrados().slice(0, S.nov.pendMostrar||NOV_PAGE).map(p=>p.id);
   const igual = domIds.length===want.length && domIds.every((id,i)=>id===want[i]);
