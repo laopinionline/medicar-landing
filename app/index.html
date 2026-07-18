@@ -600,8 +600,14 @@ const TAB_DETACH = {
   novedades:    ()=>{ novDetach();   S.nov=null;   }, // NO toca el badge
   marketing:    ()=>{ mktDetach();   S.mkt=null;   },
   auditoria:    ()=>{ audDetach();   S.aud=null;   },
-  monitoreo:    ()=>{ monDetach();   S.mon=null;   }, // S.mon lo comparte el tab 'alertas' del médico; con A no rompe (self-heal)
+  monitoreo:    ()=>{ monDetach();   S.mon=null;   }, // S.mon lo comparte el tab 'alertas' del médico → ambos lo detachan (unificado)
   estadisticas: ()=>{ S.est=null;    },              // on-demand, sin listener
+  // ── tabs ESTRUCTURALES (médico/despachante) ──
+  home:         ()=>{ medTurnosDetach(); medHomeDetach(); },     // home del médico (mHome); no-op para admin(adHome)/chofer (0 listeners)
+  alertas:      ()=>{ monDetach();   S.mon=null;   },            // médico: MISMO S.mon que monitoreo → volver re-inicia fresco (sub correcto)
+  guardia:      ()=>{ alertasDetach();              },            // médico + despachante (alertasDetach ya nulea S.alertas/alertaAbierta/…)
+  despacho:     ()=>{ pedDetach();                  },            // despachante: SOLO el listener; S.dsp (form) y pedidoReporteId (invariante, lo maneja pg) INTACTOS
+  // 🚫 bandeja/episodios NO van acá: los cubre el banDetach destination-based de set() (L589), que mantiene el sharing de S.bandeja entre ambos.
 };
 const set=p=>{
   // Detach de la escucha de la bandeja al navegar a otra pestaña (deja de estar visible → una sola escucha viva).
