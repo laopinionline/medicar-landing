@@ -674,7 +674,7 @@ function navDesc(){
 function navPush(){ if(navRestoring) return; try{ history.pushState(navDesc(),''); }catch(_){} }      // al ABRIR (deeper)
 function navReplace(){ if(navRestoring) return; try{ history.replaceState(navDesc(),''); }catch(_){} } // base (login/entrar/logout)
 function navBack(){ history.back(); }                                                                  // "Volver/Cancelar" internos
-function goTab(id){ const prev=S.tab; if(id!==prev && avisoFormSucio(prev)){ set({ tabAviso:{ destino:id } }); return; } set({tab:id}); if(id!==prev) navPush(); } // Fase 2: cada cambio de tab apila su propio entry (el back navega entre tabs). Antes de salir, avisa si hay un form SUCIO en la sección acotada (parte B).
+function goTab(id){ const prev=S.tab; if(id!==prev && avisoFormSucio(prev)){ set({ tabAviso:{ destino:id, origen:prev } }); return; } set({tab:id, tabAviso:null}); if(id!==prev) navPush(); } // Fase 2: cada cambio de tab apila su entry. Antes de salir avisa si hay form SUCIO (parte B); guarda el origen para poder volver. Un cambio EXITOSO limpia cualquier tabAviso stale (no se monta sobre otra vista).
 // AVISO "cambios sin guardar" — SOLO en las secciones donde perder el form duele (no en triviales de 2-4 campos). Reusa los
 // xxxFormOpen() existentes. 🚩 Excluye el ALTA de afiliados (altaDraft): esa sobrevive SOLA (parte C), no se pregunta por ella.
 const AVISO_SECS = {
@@ -687,8 +687,8 @@ const AVISO_SECS = {
   // NO listadas (no avisan): moviles, agenda, marketing, cronograma (forms triviales); auditoria/estadisticas (sin form).
 };
 function avisoFormSucio(tab){ const p=AVISO_SECS[tab]; return p ? !!p() : false; }
-function avisoSalir(){ const d=S.tabAviso&&S.tabAviso.destino; S.tabAviso=null; if(d){ set({tab:d}); navPush(); } } // el usuario confirma: se detacha y se pierde el form (como pidió)
-function avisoCancelar(){ set({ tabAviso:null }); } // seguir editando
+function avisoSalir(){ const a=S.tabAviso; S.tabAviso=null; if(a){ if(a.origen!=null && TAB_DETACH[a.origen]) TAB_DETACH[a.origen](); /* descarta el form del origen, aunque S.tab ya hubiera driftado */ set({tab:a.destino}); navPush(); } } // confirma: se pierde el form (como pidió) y va al destino
+function avisoCancelar(){ const o=S.tabAviso&&S.tabAviso.origen; if(o!=null){ set({ tab:o, tabAviso:null }); } else set({ tabAviso:null }); } // seguir editando: VUELVE al tab de origen (no te deja en el destino), pase lo que pase con S.tab
 function avisoModalHTML(){
   if(!S.tabAviso) return '';
   return `<div style="position:fixed;inset:0;z-index:500;background:rgba(20,22,25,.5);display:flex;align-items:center;justify-content:center;padding:1.5rem" onclick="avisoCancelar()">
