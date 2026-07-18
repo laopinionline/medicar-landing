@@ -16,12 +16,9 @@ const FEED_SOURCES = [
   { url:'https://www.paho.org/es/rss.xml',                        origen:'externo',   cat:'salud', fuenteNombre:'OPS', excluirLinkEn:true }, // /es/rss.xml mezcla idiomas; los <link> con '/en/' son la versión inglesa → fuera
   { url:'https://www.sac.org.ar/feed/',                           origen:'externo',   cat:'salud', fuenteNombre:'SAC' },
   { url:'https://sanutricion.org.ar/feed/',                       origen:'externo',   cat:'nutri', fuenteNombre:'SANutrición' },
-  { url:'https://medlineplus.gov/spanish/feeds/topics/healthyliving.xml',              origen:'externo', cat:'salud', fuenteNombre:'MedlinePlus' },
-  { url:'https://medlineplus.gov/spanish/feeds/topics/highbloodpressure.xml',          origen:'externo', cat:'salud', fuenteNombre:'MedlinePlus' },
-  { url:'https://medlineplus.gov/spanish/feeds/topics/heartdiseases.xml',              origen:'externo', cat:'salud', fuenteNombre:'MedlinePlus' },
-  { url:'https://medlineplus.gov/spanish/feeds/topics/exerciseandphysicalfitness.xml', origen:'externo', cat:'salud', fuenteNombre:'MedlinePlus' },
-  { url:'https://medlineplus.gov/spanish/feeds/topics/nutrition.xml',                  origen:'externo', cat:'nutri', fuenteNombre:'MedlinePlus' },
-  { url:'https://medlineplus.gov/spanish/feeds/topics/dietaryfats.xml',                origen:'externo', cat:'nutri', fuenteNombre:'MedlinePlus' },
+  // MedlinePlus DADA DE BAJA (jul 2026): sus 6 feeds RSS devolvían leidos:0 los 4 días medidos (15–18/07) — feeds
+  // MUERTOS/rotos, no lentos; 2 docs históricos del backlog, 0 publicados jamás. NO re-agregar sin datos de rinde.
+  // Eran: medlineplus.gov/spanish/feeds/topics/{healthyliving,highbloodpressure,heartdiseases,exerciseandphysicalfitness,nutrition,dietaryfats}.xml
 ];
 
 const DIA = 86400000;
