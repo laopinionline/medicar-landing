@@ -31,6 +31,7 @@ const crypto = require('crypto'); // Referente R1: aleatoriedad del código
 const { generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido, TEXTO_R3, normNombre, resultadoBusqueda, puedeSolicitar } = require('./referente'); // Referente R1 + síntoma (único nivel salud) + R3 alerta + R1.5 búsqueda
 const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); // Guardia G1/G2: shape de la alerta + helpers de cronograma/atendiendo
 const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'); // Autogestión de plan: diff coberturas + carencia diferenciada
+const { origenPorSobrepago } = require('./creditos'); // Crédito a cuenta (Fase 1): fórmula pura del origen por sobrepago
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -966,6 +967,52 @@ exports.cambiarMiPlan = onCall(async (request) => {
   await batch.commit();
   logger.info('[cambiarMiPlan]', { socioId: socioRef.id, de: socio.planId, a: nuevoPlanId, ganadas: ganadas.length, enCarencia: enCarencia.length });
   return { ok: true, coberturasEnCarencia: enCarencia };
+});
+
+/* ===================== CRÉDITO A CUENTA — derivarCredito (Fase 1: generación) =====================
+   onDocumentCreated('pagos/{id}'): al registrarse un pago (manual O pasarela — ambos crean doc en pagos), si la
+   factura queda SOBRE-PAGADA (Σpagos registrados > total), el excedente que aporta ESTE pago se vuelve CRÉDITO a
+   favor del socio. Trigger near-atómico (decisión de Lucas: NO tocamos el pago manual, que funciona).
+   - Doc-id DETERMINISTA creditos/orig_{pagoId} → idempotente ante reintentos del trigger (nunca duplica ni re-suma).
+   - Ledger `creditos` (movimiento 'origen') + doc-saldo `creditos_saldo/{personaId}` se ajustan ATÓMICO (misma tx).
+   - Solo persona (pago.personaId). Empresa (pagadorTipo:'empresa', sin personaId) NO genera crédito de socio en Fase 1.
+   - FASE 1 solo GENERA crédito; NADA lo consume todavía (el consumo llega en la migración de generarFacturas a CF). */
+exports.derivarCredito = onDocumentCreated('pagos/{id}', async (event) => {
+  const pago = event.data && event.data.data();
+  const pagoId = event.params.id;
+  if (!pago) return null;
+  if (pago.estado !== 'registrado') return null;          // solo pagos vigentes generan crédito (anulados NO)
+  const personaId = pago.personaId;
+  if (!personaId) return null;                            // empresa u otro sin persona → sin crédito de socio (Fase 1)
+  const facturaId = pago.facturaId;
+  if (!facturaId) return null;
+
+  // Total de la factura + Σ de sus pagos registrados (incluye este). Lecturas fuera de la tx (una es query).
+  const facSnap = await db.collection('facturas').doc(facturaId).get();
+  if (!facSnap.exists) { logger.warn('[derivarCredito] factura inexistente', { pagoId, facturaId }); return null; }
+  const total = Number((facSnap.data() || {}).total) || 0;
+  const pagosSnap = await db.collection('pagos').where('facturaId', '==', facturaId).where('estado', '==', 'registrado').get();
+  const suma = pagosSnap.docs.reduce((s, d) => s + (Number((d.data() || {}).monto) || 0), 0);
+
+  const origen = origenPorSobrepago(pago.monto, suma, total);
+  if (origen <= 0) return null;                           // no hay sobrepago → sin crédito
+
+  const origRef = db.collection('creditos').doc('orig_' + pagoId); // DETERMINISTA → idempotencia del trigger
+  const saldoRef = db.collection('creditos_saldo').doc(personaId);
+  await db.runTransaction(async (tx) => {
+    const ya = await tx.get(origRef);
+    if (ya.exists) return;                                // ya derivado (retrigger) → NO re-suma al saldo
+    const sSnap = await tx.get(saldoRef);
+    const saldoActual = sSnap.exists ? (Number((sSnap.data() || {}).saldo) || 0) : 0;
+    tx.set(origRef, {
+      personaId, tipo: 'origen', monto: origen, refFacturaId: facturaId, refPagoId: pagoId,
+      motivo: 'sobrepago factura ' + ((facSnap.data() || {}).nroComprobante || facturaId),
+      estado: 'activo', creadoEn: FV(), creadoPor: 'derivarCredito',
+    });
+    tx.set(saldoRef, { saldo: saldoActual + origen, actualizadoEn: FV() }, { merge: true });
+  });
+  logger.info('[derivarCredito]', { pagoId, facturaId, personaId, origen });
+  return null;
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================
