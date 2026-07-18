@@ -584,9 +584,30 @@ const ATENC=[
 ];
 
 let S={user:null,tab:'home',sub:'directos',step:0};
+// TAB_DETACH — al cambiar de cap-tab (staff regular), detachar el listener + nulear el estado de la sección que DEJO.
+// Espeja lo que superNav ya hace para superadmin (líneas ~3319-3331); acá para la nav por tabs (goTab/pg), que no lo hacía
+// → los ~30 onSnapshot ya no se acumulan en paralelo. Cada panel re-inicia solo al volver (if(!S.xxx){...xxxAttach()}).
+// 🔒 novDetach mata SOLO S.novUnsub (los 4 de la vista); el BADGE (S.novBadgeUnsub, always-on) queda intacto.
+// (SCOPE A: solo cap-secciones. Los tabs estructurales del médico/despachante quedan como follow-up.)
+const TAB_DETACH = {
+  moviles:      ()=>{ movDetach();   S.mov=null;   },
+  cronograma:   ()=>{ cronoDetach(); S.crono=null; },
+  agendaturnos: ()=>{ agtDetach();   S.agt=null;   }, // cap-only: ni superNav lo cubría
+  catalogo:     ()=>{ catDetach();   S.cat=null;   },
+  afiliados:    ()=>{ afDetach();    S.af=null;    },
+  facturacion:  ()=>{ facDetach();   S.fac=null;   },
+  cobranza:     ()=>{ cobDetach();   S.cob=null;   },
+  novedades:    ()=>{ novDetach();   S.nov=null;   }, // NO toca el badge
+  marketing:    ()=>{ mktDetach();   S.mkt=null;   },
+  auditoria:    ()=>{ audDetach();   S.aud=null;   },
+  monitoreo:    ()=>{ monDetach();   S.mon=null;   }, // S.mon lo comparte el tab 'alertas' del médico; con A no rompe (self-heal)
+  estadisticas: ()=>{ S.est=null;    },              // on-demand, sin listener
+};
 const set=p=>{
   // Detach de la escucha de la bandeja al navegar a otra pestaña (deja de estar visible → una sola escucha viva).
   if(p && p.tab!==undefined && p.tab!=='bandeja' && p.tab!=='episodios' && typeof banDetach==='function'){ banDetach(); S.bandeja=null; }
+  // Detach de la cap-sección que DEJO (origen-based, como superNav). S.tab todavía es el tab viejo (antes del Object.assign).
+  if(p && p.tab!==undefined && p.tab!==S.tab && TAB_DETACH[S.tab]) TAB_DETACH[S.tab]();
   Object.assign(S,p); render();
 };
 
