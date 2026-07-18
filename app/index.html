@@ -4904,7 +4904,10 @@ function novEsAdmin(){ return puede('curar_novedades'); } // Tablero-Fase1: cura
 function novBadgeAttach(){ // listener GLOBAL del contador de pendientes (para el badge de la tab, siempre-on para admins)
   if(S.novBadgeUnsub) return;
   S.novBadgeUnsub = db.collection('feed_posts').where('estado','==','pendiente').onSnapshot(
-    s=>{ if(s.size!==S.novPendCount){ S.novPendCount=s.size; render(); } }, ()=>{ S.novPendCount=0; });
+    // Actualiza SIEMPRE el conteo, pero NO hace full render mientras estás curando (vista Novedades/Pendientes) → si no,
+    // cada aprobar/descartar reconstruiría #app y saltaría el scroll de div.content.page. La lista y el "Mostrando X de Y"
+    // los actualiza el listener de la vista (novRerenderPend). El badge del menú se auto-corrige en la próxima navegación.
+    s=>{ if(s.size!==S.novPendCount){ S.novPendCount=s.size; if(!(S.superSec==='novedades' && S.nov && S.nov.sub==='pendientes' && !S.nov.edit)) render(); } }, ()=>{ S.novPendCount=0; });
 }
 const NOV_PAGE=15; // items de la cola por pantalla (paginado con "Cargar más")
 function novAttach(){
