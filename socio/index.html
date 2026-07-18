@@ -845,6 +845,13 @@ async function cargarCredencial(uid){
     try{ const fc = await db.collection('facturas').where('personaId','==',personaId).get(); facturas = fc.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
   }
 
+  // Crédito a cuenta (Fase 1): saldo a favor del socio. Doc-saldo creditos_saldo/{personaId}; solo lo escribe la CF,
+  // el socio lo LEE por regla (id == su personaId). Ausente/0 → no se muestra nada.
+  let saldoFavor = 0;
+  if(personaId){
+    try{ const cs = await db.collection('creditos_saldo').doc(personaId).get(); if(cs.exists) saldoFavor = Number(cs.data().saldo)||0; }catch(_){}
+  }
+
   // F5: turnos — franjas activas (la ventana real la enforca la CF; acá se filtra en la UI) + MIS turnos
   // (personaId propio; por reglas el titular NO lee los turnos de sus dependientes → solo los ve como slot tomado).
   let agenda = [], misTurnos = [], waAtencion = '';
@@ -887,7 +894,7 @@ async function cargarCredencial(uid){
     sintomas = sc.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>((a.orden||0)-(b.orden||0)));
   }catch(_){}
 
-  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, facturas, agenda, misTurnos, waAtencion, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
+  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, facturas, saldoFavor, agenda, misTurnos, waAtencion, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
 }
 
 /* ---------- Auth flow ---------- */
@@ -1201,6 +1208,11 @@ function homeView(){
       const notaEmpresa = (socio.facturarA && socio.facturarA.tipo==='empresa')
         ? `<div style="padding:.75rem 1rem;font-size:.76rem;color:var(--tinta);background:#eef4ff;border-bottom:1px solid var(--linea)">Tu facturación se emite a <b>${esc(socio.facturarA.razonSocial||'tu empresa')}</b>.</div>`
         : '';
+      // Crédito a cuenta (Fase 1): si hay saldo a favor, banner arriba de todo. Se genera al sobre-pagar; por ahora
+      // solo se muestra (el consumo automático en la próxima factura llega en fases siguientes).
+      const saldoLinea = (Number(c.saldoFavor)||0) > 0
+        ? `<div style="padding:.8rem 1rem;background:#eafaf0;border-bottom:1px solid var(--linea)"><div style="font-size:.72rem;color:var(--verde,#2E8B57);font-weight:700;text-transform:uppercase;letter-spacing:.02em">Saldo a favor</div><div style="font-size:1.05rem;color:var(--verde,#2E8B57);font-weight:800;margin-top:.1rem">Tenés ${socioMoney(c.saldoFavor)} a favor</div><div style="font-size:.68rem;color:var(--gris);margin-top:.15rem">Se descontará de tu próximo comprobante.</div></div>`
+        : '';
       let inner;
       if(!fac.length){
         inner = `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">Todavía no tenés comprobantes.</div>`;
@@ -1208,7 +1220,7 @@ function homeView(){
         const verHist = fac.length>1 ? `<button onclick="abrirComprobantes()" style="width:100%;background:none;border:none;border-top:1px solid var(--linea);padding:.7rem 1rem;font-size:.8rem;color:var(--rojo);font-weight:700;cursor:pointer;display:flex;justify-content:space-between;align-items:center">Ver historial (${fac.length}) <span style="display:inline-flex">${chv(12)}</span></button>` : '';
         inner = comprobanteRow(fac[0]) + verHist;
       }
-      comprobantesSec = `<div class="sec"><div class="sec-h">Mi cuenta</div><div class="card">${notaEmpresa}${inner}
+      comprobantesSec = `<div class="sec"><div class="sec-h">Mi cuenta</div><div class="card">${saldoLinea}${notaEmpresa}${inner}
         <div style="padding:.75rem 1rem;font-size:.7rem;color:var(--gris);line-height:1.45;border-top:1px solid var(--linea)">Comprobantes internos de tu cuenta — no son facturas fiscales. Los pagos se coordinan con MEDICAR.</div>
       </div></div>`;
     }

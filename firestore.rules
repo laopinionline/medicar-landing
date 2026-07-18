@@ -697,6 +697,25 @@ service cloud.firestore {
       // delete: nadie (default deny; los pagos se conservan como registro historico, la correccion es contra-asiento).
     }
 
+    // creditos/{id}: ledger APPEND-ONLY del credito a favor del socio (Fase 1 = solo 'origen' por sobrepago; 'consumo'
+    // y 'reintegro' llegan en fases siguientes). SOLO la CF (Admin SDK, que bypassa reglas) escribe: doc-id determinista
+    // orig_{pagoId}, movimientos INMUTABLES. Desde la app NADIE crea/edita/borra (write:false). Read TRES CARAS:
+    // facturador, cobrador, o el socio DUENO (personaId == su persona) para ver SUS movimientos.
+    match /creditos/{id} {
+      allow read:  if puedeFacturar() || puedeCobrar()
+                      || (isSignedIn() && resource.data.get('personaId', null) != null && resource.data.get('personaId', null) == miPersonaId());
+      allow write: if false; // SOLO CF/Admin SDK. El ledger nunca se toca desde el cliente.
+    }
+
+    // creditos_saldo/{personaId}: doc-saldo consolidado (saldo a favor). El id ES el personaId. SOLO la CF escribe,
+    // ajustandolo ATOMICO con cada movimiento del ledger (misma tx). Read TRES CARAS: facturador, cobrador, o el socio
+    // DUENO (id == su personaId) para ver "Tenes $X a favor" en la PWA.
+    match /creditos_saldo/{personaId} {
+      allow read:  if puedeFacturar() || puedeCobrar()
+                      || (isSignedIn() && personaId == miPersonaId());
+      allow write: if false; // SOLO CF/Admin SDK; se sincroniza con el ledger en la misma transaccion.
+    }
+
     // leads/{id}: prospectos de captacion (Estructura 2, Marketing — Bloque 1). Datos personales de
     // interesados: NO se abre a todo el personal interno.
     //  - Lectura Y escritura: SOLO admin/superadmin o gestionar_afiliados (quien convierte da altas).
@@ -929,10 +948,12 @@ service cloud.firestore {
     // self-rol/activo ahora EFECTIVA). El create/delete real lo hace la CF por Admin SDK (bypassa reglas).
     // C-1 — 'pagos' EXCLUIDA: ledger append-only de cobranza (delete: nadie, inmutable salvo anulacion logica
     // via su match). Ni el superadmin lo borra/pisa por god-mode; su create/anular legitimos viven en /pagos.
+    // Credito a cuenta — 'creditos'/'creditos_saldo' EXCLUIDAS: ledger + doc-saldo del dinero, SOLO la CF (Admin SDK)
+    // escribe; ni el superadmin los toca por god-mode (su write:false es total). El motor del credito vive en la CF.
     match /{coleccion}/{resto=**} {
       allow read:  if esSuperadmin();
       allow write: if esSuperadmin()
-                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios', 'reportes_sintomas', 'chequeos_parametros', 'pagos']);
+                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios', 'reportes_sintomas', 'chequeos_parametros', 'pagos', 'creditos', 'creditos_saldo']);
     }
   }
 }
