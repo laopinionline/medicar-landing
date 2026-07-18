@@ -594,7 +594,7 @@ const TAB_DETACH = {
   cronograma:   ()=>{ cronoDetach(); S.crono=null; },
   agendaturnos: ()=>{ agtDetach();   S.agt=null;   }, // cap-only: ni superNav lo cubría
   catalogo:     ()=>{ catDetach();   S.cat=null;   },
-  afiliados:    ()=>{ afDetach();    S.af=null;    },
+  afiliados:    ()=>{ afDetach(); if(!(S.af && S.af.altaDraft)) S.af=null; }, // PRESERVA el ALTA en curso (altaDraft) → sobrevive silenciosa el ida-vuelta de tab (afDetach solo corta el listener, no toca S.af). El resto se nulea.
   facturacion:  ()=>{ facDetach();   S.fac=null;   },
   cobranza:     ()=>{ cobDetach();   S.cob=null;   },
   novedades:    ()=>{ novDetach();   S.nov=null;   }, // NO toca el badge
@@ -674,7 +674,31 @@ function navDesc(){
 function navPush(){ if(navRestoring) return; try{ history.pushState(navDesc(),''); }catch(_){} }      // al ABRIR (deeper)
 function navReplace(){ if(navRestoring) return; try{ history.replaceState(navDesc(),''); }catch(_){} } // base (login/entrar/logout)
 function navBack(){ history.back(); }                                                                  // "Volver/Cancelar" internos
-function goTab(id){ const prev=S.tab; set({tab:id}); if(id!==prev) navPush(); } // Fase 2: cada cambio de tab apila su propio entry (el back navega entre tabs); las vistas apiladas de F1 pushean sobre el tab
+function goTab(id){ const prev=S.tab; if(id!==prev && avisoFormSucio(prev)){ set({ tabAviso:{ destino:id } }); return; } set({tab:id}); if(id!==prev) navPush(); } // Fase 2: cada cambio de tab apila su propio entry (el back navega entre tabs). Antes de salir, avisa si hay un form SUCIO en la sección acotada (parte B).
+// AVISO "cambios sin guardar" — SOLO en las secciones donde perder el form duele (no en triviales de 2-4 campos). Reusa los
+// xxxFormOpen() existentes. 🚩 Excluye el ALTA de afiliados (altaDraft): esa sobrevive SOLA (parte C), no se pregunta por ella.
+const AVISO_SECS = {
+  afiliados:   ()=> afFormOpen() && !(S.af && S.af.altaDraft), // el edit de un socio/empresa sí; el ALTA no (sobrevive sola)
+  monitoreo:   ()=> monFormOpen(),
+  facturacion: ()=> facFormOpen(),
+  cobranza:    ()=> cobFormOpen(),
+  catalogo:    ()=> catFormOpen(),
+  novedades:   ()=> !!(S.nov && S.nov.edit!=null),
+  // NO listadas (no avisan): moviles, agenda, marketing, cronograma (forms triviales); auditoria/estadisticas (sin form).
+};
+function avisoFormSucio(tab){ const p=AVISO_SECS[tab]; return p ? !!p() : false; }
+function avisoSalir(){ const d=S.tabAviso&&S.tabAviso.destino; S.tabAviso=null; if(d){ set({tab:d}); navPush(); } } // el usuario confirma: se detacha y se pierde el form (como pidió)
+function avisoCancelar(){ set({ tabAviso:null }); } // seguir editando
+function avisoModalHTML(){
+  if(!S.tabAviso) return '';
+  return `<div style="position:fixed;inset:0;z-index:500;background:rgba(20,22,25,.5);display:flex;align-items:center;justify-content:center;padding:1.5rem" onclick="avisoCancelar()">
+    <div style="background:var(--blanco);border-radius:16px;padding:1.5rem;max-width:340px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.25)" onclick="event.stopPropagation()">
+      <div style="font-weight:800;color:var(--ink);font-size:1rem;margin-bottom:.4rem">Tenés cambios sin guardar</div>
+      <div style="font-size:.85rem;color:var(--ink2);margin-bottom:1.2rem;line-height:1.45">Si salís de esta sección se van a perder. ¿Salir igual?</div>
+      <button class="btn-r" onclick="avisoSalir()">Salir sin guardar</button>
+      <button class="btn-o" style="margin-top:.5rem" onclick="avisoCancelar()">Seguir editando</button>
+    </div></div>`;
+}
 function navRestore(desc){
   if(!S.user) return;                 // sin sesión: onAuthStateChanged/login manejan
   navRestoring=true;
@@ -882,6 +906,7 @@ function shell(){
     ${tabs.map(t=>{const on=S.tab===t.id;return `<button class="nb ${on?'on':''}" onclick="goTab('${t.id}')">${on?`<span class="nb-ind"><svg width="15" height="8" viewBox="0 0 120 60"><rect x="6" y="16" width="108" height="7" rx="3.5" fill="#ED1C24"/><rect x="28" y="30" width="86" height="7" rx="3.5" fill="#ED1C24"/><rect x="50" y="44" width="64" height="7" rx="3.5" fill="#ED1C24"/></svg></span>`:''}${IC[t.icon]}<span>${t.lbl}</span></button>`;}).join('')}
   </nav>
   <div style="text-align:center;padding:.4rem .75rem calc(.4rem + env(safe-area-inset-bottom));font-size:.6rem;color:var(--ink3);background:var(--bg);border-top:1px solid var(--border)">Sus datos son confidenciales y no serán compartidos con terceros. © 2026 Medicar S.R.L.</div>
+  ${avisoModalHTML()}
 </div>`;
 }
 
@@ -5222,6 +5247,7 @@ function afTsToInput(ts){ const ms=afMs(ts); if(ms==null) return ''; const d=new
 function afPanel(){
   if(!puedeAfil()) return `<div class="card"><div class="ch">Afiliados</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para gestionar afiliados.</div></div>`;
   if(!S.af){ S.af={socios:null,personas:null,planes:null,empresas:null,edit:null,emp:null,altaDraft:null,showInact:false,err:'',lk:null}; afAttach(); }
+  else if(!S.afUnsub){ afAttach(); } // volví con el ALTA viva (S.af preservado, listener cortado) → re-attachar; los datos (socios/personas) se recargan solos
   if(S.convOpenAlta){ S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.convOpenAlta=false; } // conversión de lead en curso: abre el alta
   if(S.af.err) return `<div class="card">No se pudo cargar afiliados: ${esc(S.af.err)}</div>`;
   if(S.af.emp) return empPanel();      // ABM de empresas (vista apilada)
