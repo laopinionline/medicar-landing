@@ -575,6 +575,18 @@ const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<'
 /* ── F5 Turnos: Cloud Functions (mismo patrón que el panel), recarga y acciones ── */
 const FNS_REGION='southamerica-east1';
 function fnsCall(name,payload){ return firebase.app().functions(FNS_REGION).httpsCallable(name)(payload).then(r=>r.data); }
+// Errores ESPERADOS = los HttpsError que tiran NUESTRAS CFs con mensaje claro para el usuario. El resto (internal/
+// unknown/unavailable/…) son INESPERADOS: no exponemos el crudo, pero los logueamos completos (diagnóstico sin ir al
+// log de la CF) y agregamos un id corto al mensaje. `overrides` = mensajes propios de la vista por code (opcional).
+const CF_ERRORES_ESPERADOS=['invalid-argument','failed-precondition','permission-denied','not-found','already-exists','resource-exhausted','unauthenticated'];
+function errCF(e, generico, overrides){
+  const code=((e&&e.code)||'').replace(/^functions\//,''); // el SDK callable prefija 'functions/'
+  const msg=(e&&e.message)||'';
+  if(overrides && overrides[code]!=null) return overrides[code];             // mensaje propio de la vista (claridad que ya había)
+  if(CF_ERRORES_ESPERADOS.includes(code) && msg) return msg;                 // esperado → su mensaje claro de la CF
+  console.error('[CF error inesperado]', code||'(sin code)', '·', msg, e);   // LOG completo para diagnóstico
+  return (generico||'No se pudo completar la acción. Reintentá.')+(code?` (err: ${code})`:''); // genérico amable + id corto (NUNCA el crudo)
+}
 async function recargarCred(){ const u=auth.currentUser; if(!u) return; try{ const cred=await cargarCredencial(u.uid); if(cred && cred.estado==='ok'){ S.cred=cred; render(); } }catch(_){} }
 function fechaTurno(fstr){ const p=String(fstr||'').split('-').map(Number); if(p.length!==3) return String(fstr||''); const dt=new Date(p[0],p[1]-1,p[2]); const dias=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']; return dias[dt.getDay()]+' '+String(p[2]).padStart(2,'0')+'/'+String(p[1]).padStart(2,'0'); }
 function turnoSetPara(v){ S.turnoPara=v; render(); }
@@ -588,14 +600,14 @@ async function reservarSlot(agendaId,hora){
     let nom=''; if(para && para!==c.personaId){ const d=(c.dependientes||[]).find(x=>x.personaId===para); nom=(d&&d.nombreVista)||''; }
     S.turnoBusy=false; S.turnoMsg=nom?('✓ Turno reservado para '+nom+'.'):'✓ Turno reservado.';
     await recargarCred();
-  }catch(e){ S.turnoBusy=false; S.turnoErr=(e&&e.message)||'No se pudo reservar el turno.'; render(); }
+  }catch(e){ S.turnoBusy=false; S.turnoErr=errCF(e,'No se pudo reservar el turno. Reintentá.'); render(); }
 }
 async function cancelarTurnoUI(turnoId){
   if(S.turnoBusy) return;
   if(!confirm('¿Cancelar este turno?')) return;
   S.turnoBusy=true; S.turnoErr=''; S.turnoMsg=''; render();
   try{ await fnsCall('cancelarTurno',{ turnoId }); S.turnoBusy=false; S.turnoMsg='✓ Turno cancelado.'; await recargarCred(); }
-  catch(e){ S.turnoBusy=false; S.turnoErr=(e&&e.message)||'No se pudo cancelar el turno.'; render(); }
+  catch(e){ S.turnoBusy=false; S.turnoErr=errCF(e,'No se pudo cancelar el turno. Reintentá.'); render(); }
 }
 
 function set(patch){ Object.assign(S, patch); render(); }
@@ -1700,12 +1712,7 @@ async function procesarCanjePendiente(user){
     navReplace(); registrarPush(user.uid);
   }catch(e){
     modoReferenteOff();
-    const code=(e&&e.code)||''; const m=(e&&e.message)||'';
-    const msg = /already-exists/.test(code)?'Ese código ya no está disponible. Probá con otro.'
-      : /failed-precondition/.test(code)?(m||'Ese código ya no está disponible.')
-      : /not-found/.test(code)?'Ese código ya no está disponible.'
-      : 'No se pudo vincular. Probá con otro código.';
-    set({ view:'referente-canje', busy:false, err:msg }); // cuenta autenticada sin vínculo → puede meter otro código, sin desloguear
+    set({ view:'referente-canje', busy:false, err: errCF(e, 'No se pudo vincular. Probá con otro código.', { 'already-exists':'Ese código ya no está disponible. Probá con otro.', 'not-found':'Ese código ya no está disponible.' }) }); // cuenta autenticada sin vínculo → puede meter otro código, sin desloguear
   }
 }
 
@@ -1773,8 +1780,7 @@ async function doValidarCodigo(){
     // Válido → recién ahora pido la cuenta. Guardo el código validado para canjearlo tras resolver identidad.
     set({ view:'referente-auth', refCrear:true, refCodigo:codigo, refTitularNombre:r.titularNombre||'', busy:false, err:'' });
   }catch(e){
-    const code=(e&&e.code)||'';
-    set({ busy:false, err: /resource-exhausted/.test(code)?'Demasiados intentos. Esperá unos minutos.':'No se pudo validar el código. Revisá tu conexión.' });
+    set({ busy:false, err: errCF(e, 'No se pudo validar el código. Revisá tu conexión.', { 'resource-exhausted':'Demasiados intentos. Esperá unos minutos.' }) });
   }
 }
 
@@ -1865,8 +1871,7 @@ async function doCanjearCodigo(){
     set({ view:'referente', ref, busy:false, err:'', tambienReferente: (!!S.cred || S.tambienReferente) }); navReplace();
     registrarPush(auth.currentUser.uid);
   }catch(e){
-    const code=(e&&e.code)||''; const m=(e&&e.message)||'';
-    set({ busy:false, err: /not-found/.test(code)?'Ese código no existe.' : /already-exists/.test(code)?'Ese código ya fue usado.' : /failed-precondition/.test(code)?(m||'No se pudo vincular.') : 'No se pudo vincular. Revisá el código.' });
+    set({ busy:false, err: errCF(e, 'No se pudo vincular. Revisá el código.', { 'not-found':'Ese código no existe.', 'already-exists':'Ese código ya fue usado.' }) });
   }
 }
 
@@ -1919,8 +1924,7 @@ async function doBuscarTitular(){
     const r=await fnsCall('buscarTitular',{ modo, clave, apellido });
     set({ busqueda:{ resultado: r||{ encontrado:false } } });
   }catch(e){
-    const code=(e&&e.code)||'';
-    set({ busqueda:null, err: /resource-exhausted/.test(code)?'Hiciste muchas búsquedas. Esperá unos minutos e intentá de nuevo.' : /invalid-argument/.test(code)?((e&&e.message)||'Datos incompletos.') : 'No se pudo buscar. Reintentá.' });
+    set({ busqueda:null, err: errCF(e, 'No se pudo buscar. Reintentá.', { 'resource-exhausted':'Hiciste muchas búsquedas. Esperá unos minutos e intentá de nuevo.' }) });
   }
 }
 async function doSolicitarReferente(titularPersonaId){
@@ -1932,8 +1936,7 @@ async function doSolicitarReferente(titularPersonaId){
     await fnsCall('solicitarReferente',{ titularPersonaId, nombreReferente });
     set({ solBusy:false, busqueda:{ enviada:true } });
   }catch(e){
-    const code=(e&&e.code)||''; const m=(e&&e.message)||'';
-    set({ solBusy:false, solErr: /failed-precondition/.test(code)?(m||'No se pudo enviar.') : /invalid-argument/.test(code)?(m||'Faltan datos.') : 'No se pudo enviar la solicitud. Reintentá.' });
+    set({ solBusy:false, solErr: errCF(e, 'No se pudo enviar la solicitud. Reintentá.') });
   }
 }
 
@@ -1963,7 +1966,7 @@ async function doResolverSolicitud(id, accion){
   if(S.solResBusy) return; set({ solResBusy:true });
   const pid=(S.cred&&S.cred.u&&S.cred.u.personaId)||null;
   try{ await fnsCall('resolverSolicitudReferente',{ solicitudId:id, accion }); }
-  catch(_){ /* recargo igual: si otro la resolvió o cambió, la bandeja se sincroniza */ }
+  catch(e){ console.error('[CF error] resolverSolicitudReferente', (e&&e.code)||'', '·', (e&&e.message)||'', e); /* recargo igual: si otro la resolvió o cambió, la bandeja se sincroniza */ }
   S.solResBusy=false;
   await cargarSolicitudesTitular(pid);
 }
@@ -2074,7 +2077,7 @@ async function verSintoma(tid){
     const v=((S.ref&&S.ref.vinculos)||[]).find(x=>x.titularPersonaId===tid);
     if(v && v.ultimoReporteMs) marcarRefVisto(tid, v.ultimoReporteMs);
   }
-  catch(e){ S.sintoma[tid]=/permission-denied/.test((e&&e.code)||'')?{noAuth:true}:{err:true}; }
+  catch(e){ if(/permission-denied/.test((e&&e.code)||'')){ S.sintoma[tid]={noAuth:true}; } else { console.error('[CF error inesperado] leerSintomaReferido', (e&&e.code)||'', '·', (e&&e.message)||'', e); S.sintoma[tid]={err:true}; } }
   render();
 }
 function refSel(i){ if(S.ref){ S.ref.sel=i; render(); } }
@@ -2142,22 +2145,22 @@ function abrirConsentSintomas(referenteUid, nombre, sintActual){ set({ consentMo
 async function doOtorgarSintomas(){
   const m=S.consentModal; if(!m||S.consentBusy) return; set({ consentBusy:true, consentErr:'' });
   try{ await fnsCall('otorgarConsentimientoSintomas',{ referenteUid:m.referenteUid }); S.consentModal=null; S.consentBusy=false; await recargarMisCodigos(); }
-  catch(e){ set({ consentBusy:false, consentErr:/failed-precondition/.test((e&&e.code)||'')?((e&&e.message)||'No disponible.'):'No se pudo autorizar. Reintentá.' }); }
+  catch(e){ set({ consentBusy:false, consentErr: errCF(e,'No se pudo autorizar. Reintentá.') }); } // failed-precondition→mensaje de la CF; internal→genérico+id+log (arreglo del incidente)
 }
 async function doRevocarSintomas(){
   const m=S.consentModal; if(!m||S.consentBusy) return; set({ consentBusy:true, consentErr:'' });
   try{ await fnsCall('revocarConsentimientoSintomas',{ referenteUid:m.referenteUid }); S.consentModal=null; S.consentBusy=false; await recargarMisCodigos(); }
-  catch(e){ set({ consentBusy:false, consentErr:'No se pudo revocar. Reintentá.' }); }
+  catch(e){ set({ consentBusy:false, consentErr: errCF(e,'No se pudo revocar. Reintentá.') }); }
 }
 async function doGenerarCodigo(){
   if(S.refbusy) return; set({ refbusy:true, err:'', nuevoCodigo:'' });
   try{ const r=await fnsCall('generarCodigoReferente',{}); set({ nuevoCodigo:r.codigo }); await recargarMisCodigos(); }
-  catch(e){ set({ refbusy:false, err:'No se pudo generar el código.' }); }
+  catch(e){ set({ refbusy:false, err: errCF(e,'No se pudo generar el código.') }); }
 }
 async function doRevocar(codigo){
   set({ refbusy:true, err:'' });
   try{ await fnsCall('revocarVinculoReferente',{ codigo }); if(S.nuevoCodigo===codigo) S.nuevoCodigo=''; await recargarMisCodigos(); }
-  catch(e){ set({ refbusy:false, err:'No se pudo revocar.' }); }
+  catch(e){ set({ refbusy:false, err: errCF(e,'No se pudo revocar.') }); }
 }
 
 /* ==================== AUTOGESTIÓN DE PLAN (self-service, solo TITULAR responsable de pago) ====================
@@ -2214,7 +2217,7 @@ async function doCambiarPlan(){
     S.planSel=null; S.planBusy=false; S.view='home';
     S.planMsg=`Tu plan cambió a "${sel.nombre}". Rige desde el próximo período.${enCar?` ${enCar} prestación${enCar===1?'':'es'} en carencia.`:''}`;
     render(); navReplace();
-  }catch(e){ const code=(e&&e.code)||''; const m=(e&&e.message)||''; set({ planBusy:false, planErr:/permission-denied|failed-precondition|not-found/.test(code)?(m||'No se pudo cambiar el plan.'):'No se pudo cambiar el plan. Reintentá.' }); }
+  }catch(e){ set({ planBusy:false, planErr: errCF(e,'No se pudo cambiar el plan. Reintentá.') }); }
 }
 
 function render(){
