@@ -681,7 +681,7 @@ const AVISO_SECS = {
   afiliados:   ()=> afFormOpen() && !(S.af && S.af.altaDraft), // el edit de un socio/empresa sí; el ALTA no (sobrevive sola)
   monitoreo:   ()=> monFormOpen(),
   facturacion: ()=> facFormOpen(),
-  cobranza:    ()=> cobFormOpen(),
+  cobranza:    ()=> { const m=document.getElementById('cob-monto'); return !!(m && m.value.trim()); }, // 🚩 cobranza abre por TOCAR-para-ver una factura (detalle=historial), no por "Editar": "abierto" ≠ "editando". El aviso solo si hay un MONTO tipeado de verdad. (NO usa cobFormOpen: ese sigue siendo "detalle abierto" para el guard de re-render.)
   catalogo:    ()=> catFormOpen(),
   novedades:   ()=> !!(S.nov && S.nov.edit!=null),
   // NO listadas (no avisan): moviles, agenda, marketing, cronograma (forms triviales); auditoria/estadisticas (sin form).
