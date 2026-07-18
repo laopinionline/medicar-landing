@@ -4906,11 +4906,16 @@ function novBadgeAttach(){ // listener GLOBAL del contador de pendientes (para e
   S.novBadgeUnsub = db.collection('feed_posts').where('estado','==','pendiente').onSnapshot(
     s=>{ if(s.size!==S.novPendCount){ S.novPendCount=s.size; render(); } }, ()=>{ S.novPendCount=0; });
 }
+const NOV_PAGE=15; // items de la cola por pantalla (paginado con "Cargar más")
 function novAttach(){
   if(S.novUnsub) return;
-  const upd=()=>{ if(!(S.nov && S.nov.edit)) render(); }; // no re-renderizar con el form de edición abierto
+  // upd(): re-render COMPLETO SOLO cuando NO molesta la curación → nunca con el form de edición abierto NI mientras estás
+  // en la pestaña Pendientes (ahí el scroll se preserva con actualización puntual del contenedor, no full render).
+  const upd=()=>{ if(S.nov && (S.nov.edit || S.nov.sub==='pendientes')) return; render(); };
   S.novUnsub=[
-    db.collection('feed_posts').where('estado','==','pendiente').onSnapshot(s=>{ if(!S.nov)return; S.nov.pendientes=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.nov){ S.nov.err=(e.message||String(e)); render(); } }),
+    // Pendientes = la pestaña CALIENTE de curación. Actualización PUNTUAL del contenedor (#nov-pend-list) → NO salta el
+    // scroll ni re-arma el #app entero. Optimista: aprobar/descartar ya quitó la card; el snapshot solo reconcilia.
+    db.collection('feed_posts').where('estado','==','pendiente').onSnapshot(s=>{ if(!S.nov)return; S.nov.pendientes=s.docs.map(d=>({id:d.id,...d.data()})); if(S.nov.edit) return; if(S.nov.sub==='pendientes') novRerenderPend(); }, e=>{ if(S.nov){ S.nov.err=(e.message||String(e)); render(); } }),
     db.collection('feed_posts').where('estado','==','publicado').onSnapshot(s=>{ if(!S.nov)return; S.nov.publicados=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.nov) S.nov.publicados=[]; }),
     db.collection('feed_posts').where('estado','==','descartado').onSnapshot(s=>{ if(!S.nov)return; S.nov.descartados=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.nov) S.nov.descartados=[]; })
   ];
@@ -4963,7 +4968,7 @@ function novImgCampo(currentUrl){
 
 function novPanel(){
   if(!novEsAdmin()) return `<div class="card"><div class="ch">Novedades</div><div style="font-size:.8rem;color:var(--ink3)">Solo para administradores.</div></div>`;
-  if(!S.nov){ S.nov={sub:'pendientes', pendientes:null, publicados:null, descartados:null, edit:null, err:''}; novAttach(); }
+  if(!S.nov){ S.nov={sub:'pendientes', pendientes:null, publicados:null, descartados:null, edit:null, err:'', pendFuente:'todas', pendMostrar:NOV_PAGE}; novAttach(); }
   if(S.nov.err) return `<div class="card">No se pudo cargar novedades: ${esc(S.nov.err)}</div>`;
   const sub=S.nov.sub||'pendientes';
   const nPend=(S.nov.pendientes||[]).length;
@@ -4980,7 +4985,7 @@ function novPanel(){
 function novPostCard(p, acciones){
   const link = p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener" style="font-size:.72rem;color:var(--r);text-decoration:none">Ver fuente ↗</a>` : '';
   const foto = p.imagenUrl ? `<img src="${esc(p.imagenUrl)}" loading="lazy" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-bottom:.4rem">` : '';
-  return `<div class="card" style="margin-bottom:.6rem"><div style="margin-bottom:.3rem">${novChip(p)} <span style="font-size:.62rem;color:var(--ink3)">· ${novFechaLbl(p.fechaFuente)}</span></div>
+  return `<div class="card" data-nov-card="${esc(p.id)}" style="margin-bottom:.6rem"><div style="margin-bottom:.3rem">${novChip(p)} <span style="font-size:.62rem;color:var(--ink3)">· ${novFechaLbl(p.fechaFuente)}</span></div>
     ${foto}
     <div style="font-weight:700;font-size:.92rem;color:var(--ink)">${esc(p.titulo||'—')}</div>
     <div style="font-size:.8rem;color:var(--ink2);margin:.25rem 0 .4rem;line-height:1.4">${esc(p.bajada||'')}</div>
@@ -4988,16 +4993,56 @@ function novPostCard(p, acciones){
     <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem">${acciones}</div></div>`;
 }
 
+// Pendientes filtrados por fuente + ordenados por fecha (desc). Fuente de verdad para lista y contadores.
+function novPendFiltrados(){
+  const f=(S.nov&&S.nov.pendFuente)||'todas';
+  return (S.nov.pendientes||[]).filter(p=>f==='todas'||(p.fuenteNombre||'—')===f)
+    .sort((a,b)=>((b.fechaFuente&&b.fechaFuente.seconds)||0)-((a.fechaFuente&&a.fechaFuente.seconds)||0));
+}
+// Selector de fuente con conteo por fuente ("La Opinión (75)"). Se regenera aparte de la lista (no toca las cards).
+function novFiltroFuenteHTML(){
+  const porFuente={}; (S.nov.pendientes||[]).forEach(p=>{ const f=p.fuenteNombre||'—'; porFuente[f]=(porFuente[f]||0)+1; });
+  const total=(S.nov.pendientes||[]).length;
+  const sel=(S.nov&&S.nov.pendFuente)||'todas';
+  const opt=(v,lbl)=>`<option value="${esc(v)}"${sel===v?' selected':''}>${esc(lbl)}</option>`;
+  const opts=[opt('todas',`Todas (${total})`)].concat(Object.keys(porFuente).sort().map(f=>opt(f,`${f} (${porFuente[f]})`))).join('');
+  const filt=novPendFiltrados();
+  return `<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem;flex-wrap:wrap">
+    <select onchange="novPendFiltrar(this.value)" style="padding:.35rem .5rem;border:1.5px solid var(--border2);border-radius:9px;font-size:.72rem;background:transparent;color:var(--ink2);cursor:pointer">${opts}</select>
+    <span style="font-size:.66rem;color:var(--ink3)">Mostrando ${Math.min(S.nov.pendMostrar||NOV_PAGE, filt.length)} de ${filt.length}</span>
+  </div>`;
+}
+// Cards de la página actual + "Cargar más". Es lo ÚNICO que se re-arma al curar/paginar (contenedor #nov-pend-list).
+function novPendListHTML(){
+  const filt=novPendFiltrados();
+  if(!filt.length) return `<div class="card"><div style="font-size:.82rem;color:var(--ink3);padding:.4rem">${(S.nov.pendFuente&&S.nov.pendFuente!=='todas')?'No hay pendientes de esa fuente.':'No hay novedades pendientes de aprobar. ✓'}</div></div>`;
+  const shown=filt.slice(0, S.nov.pendMostrar||NOV_PAGE);
+  const btn=(txt,fn,cls)=>`<button class="${cls}" style="width:auto;padding:.4rem .7rem;font-size:.72rem" onclick="${fn}">${txt}</button>`;
+  const cards=shown.map(p=>novPostCard(p,
+    btn('✓ Aprobar',`novAprobar('${p.id}')`,'btn-r')+btn('Editar',`novEditarAbrir('${p.id}')`,'btn-o')+btn('Descartar',`novDescartar('${p.id}')`,'btn-o')
+  )).join('');
+  const mas = filt.length>shown.length
+    ? `<button class="btn-o" style="width:100%;margin-top:.2rem" onclick="novCargarMas()">Cargar más (${filt.length-shown.length} restantes)</button>`
+    : (shown.length>NOV_PAGE?`<div style="text-align:center;font-size:.66rem;color:var(--ink3);padding:.4rem">— fin de la cola —</div>`:'');
+  return cards + mas;
+}
 function novPendientesView(){
   if(S.nov.pendientes===null) return `<div class="card">Cargando pendientes…</div>`;
   if(S.nov.edit!=null){ const p=(S.nov.pendientes||[]).find(x=>x.id===S.nov.edit); if(p) return novEditarView(p); }
-  const list=(S.nov.pendientes||[]).slice().sort((a,b)=>((b.fechaFuente&&b.fechaFuente.seconds)||0)-((a.fechaFuente&&a.fechaFuente.seconds)||0));
-  if(!list.length) return `<div class="card"><div style="font-size:.82rem;color:var(--ink3);padding:.4rem">No hay novedades pendientes de aprobar. ✓</div></div>`;
-  const btn=(txt,fn,cls)=>`<button class="${cls}" style="width:auto;padding:.4rem .7rem;font-size:.72rem" onclick="${fn}">${txt}</button>`;
-  return list.map(p=>novPostCard(p,
-    btn('✓ Aprobar',`novAprobar('${p.id}')`,'btn-r')+btn('Editar',`novEditarAbrir('${p.id}')`,'btn-o')+btn('Descartar',`novDescartar('${p.id}')`,'btn-o')
-  )).join('');
+  return `<div id="nov-pend-filtro">${novFiltroFuenteHTML()}</div><div id="nov-pend-list">${novPendListHTML()}</div>`;
 }
+// Actualización PUNTUAL de la cola (sin full render → no salta el scroll). Reconcilia el DOM con el estado:
+// si el set visible NO cambió (caso típico tras la quita optimista), NO reemplaza las cards (cero flicker), solo los contadores.
+function novRerenderPend(){
+  const cont=document.getElementById('nov-pend-list'); if(!cont) return; // no está montada la vista → nada que actualizar
+  const domIds=[...cont.querySelectorAll('[data-nov-card]')].map(e=>e.getAttribute('data-nov-card'));
+  const want=novPendFiltrados().slice(0, S.nov.pendMostrar||NOV_PAGE).map(p=>p.id);
+  const igual = domIds.length===want.length && domIds.every((id,i)=>id===want[i]);
+  if(!igual) cont.innerHTML=novPendListHTML(); // cambió el set visible (ingesta nueva / otro admin) → re-armar cards
+  const f=document.getElementById('nov-pend-filtro'); if(f) f.innerHTML=novFiltroFuenteHTML(); // contadores siempre frescos (barato)
+}
+function novPendFiltrar(v){ if(!S.nov) return; S.nov.pendFuente=v||'todas'; S.nov.pendMostrar=NOV_PAGE; novRerenderPend(); }
+function novCargarMas(){ if(!S.nov) return; S.nov.pendMostrar=(S.nov.pendMostrar||NOV_PAGE)+NOV_PAGE; novRerenderPend(); }
 
 function novEditarView(p){
   const titulo = p.estado==='publicado' ? 'Editar novedad publicada' : 'Editar antes de publicar';
@@ -5042,13 +5087,27 @@ function novNuevaView(){
     <button class="btn-r" onclick="novCrearInterno()">Publicar novedad</button></div>`;
 }
 
+// Quita OPTIMISTA de la cola: saca SOLO esa card del DOM (no re-arma la lista → no salta el scroll) + del estado + refresca
+// contadores. Devuelve el item para poder REPONERLO si la escritura falla. Si el item no está en pendientes, no hace nada.
+function novQuitarPendOptimista(id){
+  if(!S.nov) return null;
+  const item=(S.nov.pendientes||[]).find(x=>x.id===id); if(!item) return null;
+  S.nov.pendientes=(S.nov.pendientes||[]).filter(x=>x.id!==id);
+  const sel=(window.CSS&&CSS.escape)?CSS.escape(id):id;
+  const el=document.querySelector('[data-nov-card="'+sel+'"]'); if(el) el.remove(); // quita SOLO esa card
+  const f=document.getElementById('nov-pend-filtro'); if(f) f.innerHTML=novFiltroFuenteHTML();
+  return item;
+}
+function novRestaurarPend(item){ if(!S.nov||!item) return; S.nov.pendientes=(S.nov.pendientes||[]).concat([item]); if(S.nov.sub==='pendientes') novRerenderPend(); }
 async function novAprobar(id){ if(!novEsAdmin())return; novErr('');
+  const item=novQuitarPendOptimista(id); // desaparece YA, sin saltar; se repone si falla
   try{ await db.collection('feed_posts').doc(id).update({ estado:'publicado', aprobadoEn:FV(), aprobadoPor:S.user.uid }); audit('feed_aprobado','feed_posts',id,''); }
-  catch(e){ novErr('No se pudo aprobar: '+(e.message||e)); }
+  catch(e){ novRestaurarPend(item); novErr('No se pudo aprobar: '+(e.message||e)); }
 }
 async function novDescartar(id){ if(!novEsAdmin())return; novErr('');
+  const item=novQuitarPendOptimista(id);
   try{ await db.collection('feed_posts').doc(id).update({ estado:'descartado', aprobadoEn:FV(), aprobadoPor:S.user.uid }); audit('feed_descartado','feed_posts',id,''); }
-  catch(e){ novErr('No se pudo descartar: '+(e.message||e)); }
+  catch(e){ novRestaurarPend(item); novErr('No se pudo descartar: '+(e.message||e)); }
 }
 // Despublicar = VOLVER A LA COLA (pendiente), NO descartar. Se puede recuperar y republicar. Reset de creadoEn:
 // re-entra a la cola ahora (el reloj de retención de 30d de 'pendiente' se cuenta desde acá, no desde el alta vieja).
