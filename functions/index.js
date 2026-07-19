@@ -32,6 +32,7 @@ const { generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, doc
 const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); // Guardia G1/G2: shape de la alerta + helpers de cronograma/atendiendo
 const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'); // Autogestión de plan: diff coberturas + carencia diferenciada
 const { origenPorSobrepago } = require('./creditos'); // Crédito a cuenta (Fase 1): fórmula pura del origen por sobrepago
+const { agruparFacturas, facturaDoc, fmtComprobante } = require('./facturas-nucleo'); // Facturación Fase 2: núcleo puro (paridad con el motor cliente)
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -1013,6 +1014,88 @@ exports.derivarCredito = onDocumentCreated('pagos/{id}', async (event) => {
   });
   logger.info('[derivarCredito]', { pagoId, facturaId, personaId, origen });
   return null;
+});
+
+/* ===================== FACTURACIÓN — generarFacturasCF (Fase 2: motor server-side) =====================
+   Migra generarFacturas del cliente a una CF, con PARIDAD EXACTA (núcleo puro facturas-nucleo.js) + el link
+   facturaId DENTRO de la tx (hoy es post-tx, ventana no-atómica). generarAbonos/generarCargos siguen en el cliente.
+   - dry:true → NO escribe: computa las facturas que CREARÍA (numeración provisional desde el contador) y las devuelve
+     para comparar contra el motor actual (shadow dry-run). Es el entregable del PASO A.
+   - dry:false → por grupo, una tx atómica: re-lee cada abono/cargo (estado 'generado' && !facturaId; si otro ya
+     linkeó → aborta ESE grupo) + contador + factura + link facturaId de todos. Idempotente por construcción. */
+exports.generarFacturasCF = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const u = (await db.collection('usuarios').doc(uid).get()).data() || {};
+  const roles = Array.isArray(u.roles) ? u.roles : (u.rol ? [u.rol] : []);
+  const puede = roles.includes('superadmin') || (u.permisos && u.permisos.facturar === true); // calco de puedeFacturar()
+  if (!puede) throw new HttpsError('permission-denied', 'No tenés permiso para facturar.');
+  const periodo = String((request.data || {}).periodo || '').trim();
+  if (!/^\d{4}-\d{2}$/.test(periodo)) throw new HttpsError('invalid-argument', 'Período inválido (AAAA-MM).');
+  const dry = (request.data || {}).dry === true;
+  // Año cosmético del comprobante EN HORA ARGENTINA (el cliente usa el año local del navegador = AR; en la CF, UTC,
+  // hay que forzarlo para no cruzar el 1-ene). Calco del patrón ventanaBA().
+  const year = Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date()).slice(0, 4));
+
+  // Mismas 5 lecturas que el motor actual (Admin SDK). cargos = TODOS (period-agnósticos, filtrados por estado/facturaId).
+  const [abSnap, cgSnap, socSnap, empSnap, facSnap] = await Promise.all([
+    db.collection('abonos').where('periodo', '==', periodo).get(),
+    db.collection('cargos').get(),
+    db.collection('socios').get(),
+    db.collection('empresas').get(),
+    db.collection('facturas').where('periodo', '==', periodo).get(),
+  ]);
+  const socMap = {}; socSnap.docs.forEach((d) => { socMap[d.id] = { id: d.id, ...d.data() }; });
+  const empMap = {}; empSnap.docs.forEach((d) => { empMap[d.id] = { id: d.id, ...d.data() }; });
+  const empresasYaFacturadas = new Set(facSnap.docs.map((d) => d.data()).filter((f) => f.clienteTipo === 'empresa').map((f) => f.clienteId));
+  const abonos = abSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const cargos = cgSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  const { grupos, corpExcl } = agruparFacturas({ abonos, cargos, socMap, empMap, empresasYaFacturadas, periodo });
+
+  if (dry) {
+    // Numeración PROVISIONAL: desde el contador actual, secuencial en el orden de inserción de los grupos (idéntico al
+    // motor). NO toca el contador ni escribe nada.
+    const cs = await db.collection('contadores').doc('facturas').get();
+    let next = cs.exists ? (cs.data().ultimo || 0) : 0;
+    const facturas = grupos.map((g) => { next += 1; return facturaDoc(g, { periodo, nroComprobante: fmtComprobante(next, year) }); });
+    logger.info('[generarFacturasCF] DRY', { periodo, count: facturas.length, corpExcl: corpExcl.length });
+    return { dry: true, periodo, year, count: facturas.length,
+      facPersona: facturas.filter((f) => f.clienteTipo !== 'empresa').length,
+      facEmpresa: facturas.filter((f) => f.clienteTipo === 'empresa').length,
+      items: facturas.reduce((s, f) => s + f.items.length, 0), corpExcl: corpExcl.length, facturas };
+  }
+
+  // ── WRITE PATH (PASO B) ── por grupo, una tx atómica con re-verificación del link.
+  const rep = { facturas: 0, items: 0, facPersona: 0, facEmpresa: 0, errores: 0, saltadosYaLinkeados: 0 };
+  for (const g of grupos) {
+    const refItems = g.items.filter((it) => it.refId); // abonos/cargos (los sintéticos de convenio no tienen refId)
+    const facRef = db.collection('facturas').doc();
+    const counterRef = db.collection('contadores').doc('facturas');
+    try {
+      await db.runTransaction(async (tx) => {
+        // 1) RE-LEER cada abono/cargo DENTRO de la tx (todas las lecturas antes de cualquier escritura).
+        const refs = refItems.map((it) => db.collection(it.tipo === 'abono' ? 'abonos' : 'cargos').doc(it.refId));
+        const snaps = refs.length ? await tx.getAll(...refs) : [];
+        for (let i = 0; i < snaps.length; i++) {
+          const dd = snaps[i].exists ? snaps[i].data() : null;
+          // si desapareció, se re-editó, o YA fue linkeado por otra corrida → abortar ESTE grupo (idempotencia).
+          if (!dd || dd.estado !== 'generado' || dd.facturaId) { const err = new Error('YA_LINKEADO'); err._skip = true; throw err; }
+        }
+        const cs = await tx.get(counterRef); const next = (cs.exists ? (cs.data().ultimo || 0) : 0) + 1;
+        // 2) ESCRITURAS: contador + factura + link facturaId de todos los ítems, atómico.
+        tx.set(counterRef, { ultimo: next, actualizadoEn: FV() }, { merge: true });
+        tx.set(facRef, Object.assign(facturaDoc(g, { periodo, nroComprobante: fmtComprobante(next, year) }), { emitidaEn: FV(), emitidaPor: uid }));
+        for (const it of refItems) { tx.set(db.collection(it.tipo === 'abono' ? 'abonos' : 'cargos').doc(it.refId), { facturaId: facRef.id }, { merge: true }); }
+      });
+      rep.facturas += 1; rep.items += g.items.length; if (g.clienteTipo === 'empresa') rep.facEmpresa += 1; else rep.facPersona += 1;
+    } catch (e) {
+      if (e && e._skip) { rep.saltadosYaLinkeados += 1; logger.info('[generarFacturasCF] grupo ya linkeado, saltado', { periodo }); }
+      else { rep.errores += 1; logger.warn('[generarFacturasCF] fallo grupo', { err: e.message || String(e) }); }
+    }
+  }
+  logger.info('[generarFacturasCF] WRITE', { periodo, ...rep, corpExcl: corpExcl.length });
+  return { dry: false, periodo, corpExcl: corpExcl.length, ...rep };
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================
