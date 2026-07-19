@@ -33,6 +33,7 @@ const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); /
 const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'); // Autogestión de plan: diff coberturas + carencia diferenciada
 const { origenPorSobrepago, consumoCredito } = require('./creditos'); // Crédito a cuenta: F1 origen por sobrepago + F3 consumo en factura
 const { agruparFacturas, facturaDoc, fmtComprobante } = require('./facturas-nucleo'); // Facturación Fase 2: núcleo puro (paridad con el motor cliente)
+const { crearPreferencia, verificarWebhook } = require('./pasarela-adapter'); // Pasarela: adaptador del proveedor (SIM completo, real stub)
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -1073,6 +1074,105 @@ exports.reintegroCF = onCall(async (request) => {
   });
   logger.info('[reintegroCF]', { personaId, monto, uid });
   return { ok: true, ...res };
+});
+
+/* ===================== PASARELA DE PAGO (proveedor por configuracion/pasarela.modo) =====================
+   El socio paga online el SALDO COMPLETO de un comprobante. Flujo: crearIntencionPago (crea el mediador
+   intenciones_pago) → el socio paga (simulador → confirmarPagoSimulado, o proveedor real → webhookPasarela) →
+   confirmarPagoIntent crea el pago en tx IDEMPOTENTE. El pago entra por el MISMO carril (/pagos) → el flip de la
+   factura y el trigger del crédito (derivarCredito) funcionan igual. El sobrepago por carrera lo cubre el crédito. */
+const fmtReciboSrv = (n, year) => `RC-${year}-${String(n).padStart(6, '0')}`; // calco de fmtRecibo del cliente
+const yearAR = () => Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date()).slice(0, 4));
+const hoyAR = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+async function pasarelaModo() { const c = await db.collection('configuracion').doc('pasarela').get(); return (c.exists && c.data().modo) ? c.data().modo : 'simulado'; }
+
+// Núcleo COMPARTIDO e IDEMPOTENTE: confirma el pago de un intento. Mediado por intenciones_pago en una tx:
+// si el intento ya está 'pagado' → devuelve el pagoId existente (NO crea otro pago). Dos webhooks del mismo
+// intentId = un solo pago. Crea el pago (mismo shape del carril) + numera el recibo + flipea la factura, atómico.
+async function confirmarPagoIntent(intentId, fuente) {
+  const intentRef = db.collection('intenciones_pago').doc(intentId);
+  const counterRef = db.collection('contadores').doc('recibos');
+  const year = yearAR(); const fecha = hoyAR();
+  return db.runTransaction(async (tx) => {
+    const iSnap = await tx.get(intentRef);
+    if (!iSnap.exists) throw new HttpsError('not-found', 'Intento de pago inexistente.');
+    const intent = iSnap.data();
+    if (intent.estado === 'pagado') return { yaPagado: true, pagoId: intent.pagoId || null }; // ← IDEMPOTENCIA
+    const facRef = db.collection('facturas').doc(intent.facturaId);
+    const fSnap = await tx.get(facRef);
+    if (!fSnap.exists) throw new HttpsError('failed-precondition', 'La factura del intento no existe.');
+    const fac = fSnap.data();
+    const cSnap = await tx.get(counterRef);
+    const next = (cSnap.exists ? (cSnap.data().ultimo || 0) : 0) + 1;
+    const pagoRef = db.collection('pagos').doc();
+    tx.set(counterRef, { ultimo: next, actualizadoEn: FV() }, { merge: true });
+    // Pago con EXACTAMENTE el shape del carril (calco de registrarPago); medio 'pasarela'. derivarCredito verá este
+    // pago (onCreate) y, si sobre-paga por una carrera, generará crédito (F1). registradoPor marca el origen.
+    tx.set(pagoRef, { pagadorId: intent.personaId, pagadorTipo: 'persona', facturaId: intent.facturaId, personaId: intent.personaId, monto: intent.monto, fecha, medio: 'pasarela', reciboNro: fmtReciboSrv(next, year), nota: 'Pago online', estado: 'registrado', registradoEn: FV(), registradoPor: 'pasarela' });
+    // v1 paga el saldo completo → la factura queda saldada. Flip emitida→pagada (si ya estaba pagada por otra vía,
+    // no la toco; este pago igual se registra y el excedente cae en crédito).
+    if (fac.estado === 'emitida') tx.set(facRef, { estado: 'pagada', pagadaEn: FV(), pagadaPor: 'pasarela' }, { merge: true });
+    tx.set(intentRef, { estado: 'pagado', pagoId: pagoRef.id, confirmadoEn: FV(), fuente }, { merge: true });
+    return { yaPagado: false, pagoId: pagoRef.id };
+  });
+}
+
+// crearIntencionPago (socio): valida que la factura sea SUYA + emitida + con saldo>0, calcula el saldo server-side
+// (el socio no lee /pagos), crea el intento y pide la preferencia al adaptador. Devuelve {intentId, modo, initPoint}.
+exports.crearIntencionPago = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const u = (await db.collection('usuarios').doc(uid).get()).data() || {};
+  const persona = u.personaId; if (!persona) throw new HttpsError('permission-denied', 'Cuenta sin persona asociada.');
+  const facturaId = String((request.data || {}).facturaId || '').trim();
+  if (!facturaId) throw new HttpsError('invalid-argument', 'Falta la factura.');
+  const fSnap = await db.collection('facturas').doc(facturaId).get();
+  if (!fSnap.exists) throw new HttpsError('not-found', 'Comprobante no encontrado.');
+  const fac = fSnap.data();
+  if (fac.personaId !== persona) throw new HttpsError('permission-denied', 'Ese comprobante no es tuyo.');
+  if (fac.estado !== 'emitida') throw new HttpsError('failed-precondition', 'El comprobante no está pendiente de pago.');
+  const pSnap = await db.collection('pagos').where('facturaId', '==', facturaId).where('estado', '==', 'registrado').get();
+  const pagado = pSnap.docs.reduce((s, d) => s + (Number(d.data().monto) || 0), 0);
+  const saldo = (Number(fac.total) || 0) - pagado;
+  if (!(saldo > 0)) throw new HttpsError('failed-precondition', 'El comprobante no tiene saldo pendiente.');
+  const modo = await pasarelaModo();
+  const intentRef = db.collection('intenciones_pago').doc();
+  const pref = await crearPreferencia(modo, { intentId: intentRef.id, monto: saldo, descripcion: 'Comprobante ' + (fac.nroComprobante || facturaId), personaId: persona });
+  await intentRef.set({ personaId: persona, facturaId, monto: saldo, estado: 'pendiente', proveedor: modo, preferenciaId: (pref && pref.preferenciaId) || null, creadoEn: FV(), creadoPor: uid });
+  logger.info('[crearIntencionPago]', { intentId: intentRef.id, persona, facturaId, saldo, modo });
+  return { intentId: intentRef.id, modo, monto: saldo, nroComprobante: fac.nroComprobante || null, initPoint: (pref && pref.initPoint) || null };
+});
+
+// confirmarPagoSimulado (socio): el botón del SIMULADOR. Solo funciona si modo==='simulado' (⚠️ el simulador NO se
+// puede usar en modo real → imposible fabricar un pago con el simulador en producción). Solo el DUENO del intento.
+exports.confirmarPagoSimulado = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const u = (await db.collection('usuarios').doc(uid).get()).data() || {};
+  const persona = u.personaId; if (!persona) throw new HttpsError('permission-denied', 'Cuenta sin persona.');
+  const modo = await pasarelaModo();
+  if (modo !== 'simulado') throw new HttpsError('failed-precondition', 'El simulador no está activo.'); // ← candado
+  const intentId = String((request.data || {}).intentId || '').trim();
+  const iSnap = await db.collection('intenciones_pago').doc(intentId).get();
+  if (!iSnap.exists) throw new HttpsError('not-found', 'Intento no encontrado.');
+  if (iSnap.data().personaId !== persona) throw new HttpsError('permission-denied', 'Ese intento no es tuyo.');
+  const r = await confirmarPagoIntent(intentId, 'simulado');
+  logger.info('[confirmarPagoSimulado]', { intentId, persona, yaPagado: r.yaPagado });
+  return { ok: true, ...r };
+});
+
+// webhookPasarela (HTTP): entrada del PROVEEDOR REAL (Xavi). Verifica la FIRMA por el adaptador antes de confiar en
+// nada; si el pago está aprobado → confirmarPagoIntent (idempotente). Responde 200 SIEMPRE tras procesar (el
+// proveedor reintenta ante no-200; la idempotencia por intento cubre los reintentos). En modo simulado NO se usa.
+exports.webhookPasarela = onRequest(async (req, res) => {
+  try {
+    const modo = await pasarelaModo();
+    const secret = process.env.PASARELA_SECRET || ''; // XAVI: el secret del webhook del proveedor (variable de entorno)
+    const v = verificarWebhook(modo, { headers: req.headers, body: req.body, secret });
+    if (!v || !v.valido) { logger.warn('[webhookPasarela] firma inválida o no soportada', { modo }); res.status(401).send('firma invalida'); return; }
+    if (v.estado === 'pagado' && v.intentId) { const r = await confirmarPagoIntent(v.intentId, 'webhook'); logger.info('[webhookPasarela]', { intentId: v.intentId, yaPagado: r.yaPagado }); }
+    res.status(200).send('ok');
+  } catch (e) { logger.error('[webhookPasarela] error', { err: e.message || String(e) }); res.status(200).send('ok'); } // 200 igual → idempotencia cubre el reintento
 });
 
 /* ===================== FACTURACIÓN — generarFacturasCF (Fase 2: motor server-side) =====================
