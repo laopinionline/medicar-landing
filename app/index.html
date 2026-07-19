@@ -4570,7 +4570,7 @@ function facFacturasView(){
   const report = S.fac.reportF ? `<div class="card" style="background:var(--bg)"><div style="font-size:.78rem;font-weight:700;margin-bottom:.3rem">Última corrida</div><div style="font-size:.75rem;color:var(--ink2);line-height:1.6">${S.fac.reportF}</div></div>` : '';
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="facShowAnulF(this.checked)" ${showAnul?'checked':''}>Ver anuladas${nAnul?(' ('+nAnul+')'):''}</label>`;
   return `<div class="field" style="margin-bottom:.6rem"><label>Período</label><input id="fac-fc-periodo" type="month" value="${esc(periodo)}" onchange="facSetPeriodo(this.value)"></div>
-    <button class="btn-r" onclick="generarFacturas()" style="margin-bottom:.4rem">⚙️ GENERAR FACTURAS</button>
+    <button class="btn-r" onclick="generarFacturasRun()" style="margin-bottom:.4rem">⚙️ GENERAR FACTURAS</button>
     <div style="font-size:.66rem;color:var(--ink3);margin:0 0 .7rem">Barrido por persona: abono del período + TODOS los cargos pendientes (sin facturar, no anulados). Idempotente.</div>
     ${report}${toggle}<div class="card">${rows}</div>`;
 }
@@ -4657,6 +4657,34 @@ async function generarFacturas(){
     }
     audit('facturas_generadas','facturas',periodo,rep.facturas+' facturas');
     S.fac.reportF=`Período <b>${esc(periodo)}</b> — Facturas: <b>${rep.facturas}</b> (persona ${rep.facPersona} · empresa ${rep.facEmpresa}) · Items: ${rep.items} · Corporativos sin destinatario (excluidos): <b>${corpExcl.size}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
+    render();
+  }catch(e){ facErr('No se pudieron generar las facturas: '+(e.message||e)); }
+}
+
+// ===================== FACTURACIÓN Fase 2 — dispatcher motor cliente | CF (con ROLLBACK por flag) =====================
+// El botón GENERAR FACTURAS llama a este dispatcher. Lee configuracion/facturacion.motor:
+//   'cf'      (default) → motor SERVER-SIDE (generarFacturasCF): agrupación idéntica + link facturaId atómico + idempotencia.
+//   'cliente'           → motor VIEJO client-side (generarFacturas, INTACTA). ROLLBACK INSTANTÁNEO: se setea el flag a
+//                         'cliente' desde la consola de Firestore (segundos, sin deploy) y el próximo click usa el motor viejo.
+async function generarFacturasRun(){
+  if(!puede('facturar')) return;
+  facErr('');
+  let motor='cf';
+  try{ const cfg=await db.collection('configuracion').doc('facturacion').get(); if(cfg.exists && cfg.data().motor) motor=cfg.data().motor; }
+  catch(_){ /* si el flag no se puede leer, cae al default 'cf' */ }
+  if(motor==='cliente') return generarFacturas();   // ROLLBACK: motor cliente intacto
+  return generarFacturasCF();
+}
+// Fase 2: motor server-side. La CF hace la agrupación idéntica (núcleo puro verificado por paridad) + la tx atómica
+// (re-lee cada abono/cargo → si otro ya linkeó, salta el grupo). Re-run del mismo período → 0 facturas nuevas.
+async function generarFacturasCF(){
+  const periodo=(document.getElementById('fac-fc-periodo')?.value||S.fac.periodo||'').trim();
+  if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
+  try{
+    const r=await fnsCall('generarFacturasCF',{periodo, dry:false});
+    audit('facturas_generadas','facturas',periodo,(r.facturas||0)+' facturas (CF)');
+    const salt = r.saltadosYaLinkeados ? ` · Ya facturados (saltados): <b>${r.saltadosYaLinkeados}</b>` : '';
+    S.fac.reportF=`Período <b>${esc(periodo)}</b> — Facturas: <b>${r.facturas||0}</b> (persona ${r.facPersona||0} · empresa ${r.facEmpresa||0}) · Items: ${r.items||0} · Corporativos sin destinatario (excluidos): <b>${r.corpExcl||0}</b>${salt}${r.errores?(' · Errores: '+r.errores):''} · <i>motor server-side</i>`;
     render();
   }catch(e){ facErr('No se pudieron generar las facturas: '+(e.message||e)); }
 }
