@@ -12,7 +12,7 @@
  *
  * No toca Firestore ni reglas: prueba la LÓGICA. La entrega en vivo la verifica Lucas por navegador.
  */
-const { origenPorSobrepago } = require('../functions/creditos');
+const { origenPorSobrepago, consumoCredito } = require('../functions/creditos');
 
 let ok = 0, fail = 0;
 const eq = (label, got, exp) => { const p = JSON.stringify(got) === JSON.stringify(exp); console.log(`${p ? '✓' : '✗ FALLO'} ${label}${p ? '' : `  → got ${JSON.stringify(got)} exp ${JSON.stringify(exp)}`}`); p ? ok++ : fail++; };
@@ -106,6 +106,16 @@ console.log('\n(B) pago anulado — no cuenta, no genera');
   derivar(db, 'p1');
   eq('anulado no genera crédito',          Object.keys(db.creditos).length, 0);
 }
+
+console.log('\n(C) consumoCredito — Fase 3: consumo en la factura');
+eq('sin saldo → sin ítem, total intacto',        consumoCredito(10000, 0),     { aplicado: 0, itemCredito: null, totalNeto: 10000 });
+eq('saldo < total → aplica saldo, ítem negativo', consumoCredito(10000, 3000),  { aplicado: 3000, itemCredito: { tipo: 'credito', descripcion: 'Crédito a favor', monto: -3000 }, totalNeto: 7000 });
+eq('saldo == total → factura en $0',             consumoCredito(10000, 10000),  { aplicado: 10000, itemCredito: { tipo: 'credito', descripcion: 'Crédito a favor', monto: -10000 }, totalNeto: 0 });
+eq('saldo > total → aplica hasta el total ($0)', consumoCredito(10000, 15000),  { aplicado: 10000, itemCredito: { tipo: 'credito', descripcion: 'Crédito a favor', monto: -10000 }, totalNeto: 0 });
+eq('saldo NEGATIVO → no aplica nada',            consumoCredito(10000, -5000),  { aplicado: 0, itemCredito: null, totalNeto: 10000 });
+eq('total 0 → no aplica',                        consumoCredito(0, 5000),       { aplicado: 0, itemCredito: null, totalNeto: 0 });
+// el saldo remanente lo calcula la CF como saldo − aplicado (acá se comprueba el aplicado)
+eq('remanente tras saldo>total = saldo−aplicado (15000−10000=5000)', 15000 - consumoCredito(10000, 15000).aplicado, 5000);
 
 console.log(`\n${fail ? '✗' : '✓'} smoke-creditos: ${ok} ok, ${fail} fallo(s)\n`);
 process.exit(fail ? 1 : 0);
