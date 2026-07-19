@@ -4852,7 +4852,7 @@ function cobFacturaDetalle(){
     : (f.numeroAfiliado?('N° socio '+esc(f.numeroAfiliado)):'Particular');
   const histRows = pagos.length ? pagos.map(p=>{
     const anul=p.estado==='anulado';
-    const medio=({efectivo:'Efectivo',transferencia:'Transferencia',deposito:'Depósito'})[p.medio]||p.medio||'—';
+    const medio=({efectivo:'Efectivo',transferencia:'Transferencia',deposito:'Depósito',pasarela:'Pago online'})[p.medio]||p.medio||'—';
     const accion = anul
       ? `<span style="font-size:.62rem;color:var(--ink3)">anulado${p.motivoAnulacion?(' · '+esc(p.motivoAnulacion)):''}</span>`
       : `<button class="btn-o" style="width:auto;padding:.2rem .5rem;font-size:.66rem" onclick="cobAnularPagoPrompt('${p.id}')">Anular</button>`;

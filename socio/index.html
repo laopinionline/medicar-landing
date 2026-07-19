@@ -708,6 +708,7 @@ function comprobanteDetalle(f){
     ${grupo('Abono', items.filter(it=>it.tipo==='abono'))}
     ${grupo('Otras prestaciones', items.filter(it=>it.tipo==='cargo'))}
     <div class="row" style="padding:.55rem 1rem;border-top:1px solid var(--linea)"><span class="rl" style="font-weight:800;color:var(--tinta)">TOTAL</span><span class="rv" style="font-weight:800">${socioMoney(f.total)}</span></div>
+    ${f.estado==='emitida' ? `<div style="padding:.6rem 1rem;border-top:1px solid var(--linea)"><button onclick="event.preventDefault();pagarOnline('${esc(f.id)}')" style="width:100%;background:var(--verde,#2E8B57);color:#fff;border:none;border-radius:9px;padding:.65rem;font-size:.85rem;font-weight:800;cursor:pointer">💳 Pagar online</button></div>` : ''}
   </div>`;
 }
 // Fila expandible de un comprobante (nº · período · etiqueta · monto → detalle). Reusada en el home y en el historial.
@@ -721,6 +722,62 @@ function comprobanteRow(f){
 function comprobantesOrdenadas(c){ return (c.facturas||[]).slice().sort((a,b)=> String(b.periodo||'').localeCompare(String(a.periodo||'')) || String(b.nroComprobante||'').localeCompare(String(a.nroComprobante||''))); }
 function abrirComprobantes(){ if(!S.cred) return; S.view='comprobantes'; render(); navPush(); }
 function cerrarComprobantes(){ S.view='home'; render(); }
+
+// ===================== PASARELA — pagar online un comprobante =====================
+// El socio paga el SALDO COMPLETO. crearIntencionPago devuelve el modo: 'simulado' → pantalla del simulador in-app;
+// proveedor real → redirige al checkout (initPoint) que arma Xavi. El pago entra por el mismo carril (/pagos).
+async function pagarOnline(facturaId){
+  if(S.pagoBusy) return; S.pagoBusy=true;
+  try{
+    const r=await fnsCall('crearIntencionPago',{facturaId});
+    S.pagoBusy=false;
+    if(r.modo==='simulado'){
+      S.pagoSim={ intentId:r.intentId, monto:r.monto, nro:r.nroComprobante||'', estado:'pendiente', msg:'' };
+      S.view='pago-sim'; render(); navPush();
+    } else if(r.initPoint){
+      window.location.href=r.initPoint; // proveedor real: checkout externo (vuelve por back_url → pagoRetornoCheck)
+    } else { alert('No se pudo iniciar el pago online.'); }
+  }catch(e){ S.pagoBusy=false; alert(errCF(e,'No se pudo iniciar el pago online.')); }
+}
+function pagoSimView(){
+  const p=S.pagoSim||{}; const done=p.estado==='pagado'; const proc=p.estado==='procesando';
+  return `<div class="home">
+    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Pago online</div><div class="tb-sp"></div><button class="mini" onclick="pagoSimCerrar()">${done?'Listo':'Cancelar'}</button></div>
+    <div class="sec"><div class="card" style="padding:1.1rem 1rem;text-align:center">
+      <div style="font-size:.72rem;color:var(--gris);text-transform:uppercase;letter-spacing:.03em">Simulador de pago</div>
+      <div style="font-size:.68rem;color:var(--gris);margin:.2rem 0 .9rem">Entorno de prueba — no se cobra dinero real.</div>
+      <div style="font-size:.8rem;color:var(--tinta)">${esc(p.nro||'Comprobante')}</div>
+      <div style="font-size:1.6rem;font-weight:800;color:var(--tinta);margin:.15rem 0 1rem">${socioMoney(p.monto)}</div>
+      ${done
+        ? `<div style="background:#eafaf0;color:var(--verde,#2E8B57);border-radius:9px;padding:.75rem;font-weight:800">✓ Pago acreditado</div>
+           <button onclick="pagoSimCerrar()" style="width:100%;margin-top:.8rem;background:var(--verde,#2E8B57);color:#fff;border:none;border-radius:9px;padding:.7rem;font-weight:800;cursor:pointer">Volver a mis comprobantes</button>`
+        : `${p.msg?`<div style="color:var(--rojo);font-size:.8rem;margin-bottom:.6rem">${esc(p.msg)}</div>`:''}
+           <button onclick="simularPagoAprobado()" ${proc?'disabled':''} style="width:100%;background:var(--verde,#2E8B57);color:#fff;border:none;border-radius:9px;padding:.75rem;font-size:.9rem;font-weight:800;cursor:pointer;opacity:${proc?'.6':'1'}">${proc?'Procesando…':'Simular pago aprobado'}</button>`}
+    </div></div>
+  </div>`;
+}
+async function simularPagoAprobado(){
+  const p=S.pagoSim; if(!p || p.estado==='procesando' || p.estado==='pagado') return;
+  p.estado='procesando'; p.msg=''; render();
+  try{
+    await fnsCall('confirmarPagoSimulado',{intentId:p.intentId});
+    p.estado='pagado'; render();
+    recargarCred(); // refresca facturas: la factura pasa a 'pagada'
+  }catch(e){ p.estado='pendiente'; p.msg=errCF(e,'No se pudo confirmar el pago.'); render(); }
+}
+function pagoSimCerrar(){ S.pagoSim=null; S.view='home'; render(); }
+// Retorno del proveedor REAL: back_url = .../socio/?pagoIntent=<intentId>. Al bootear, si está el param, leemos el
+// intento (el socio lee el SUYO por regla) y avisamos el resultado. La confirmación real la hace el webhook (server).
+async function pagoRetornoCheck(){
+  try{
+    const q=new URLSearchParams(location.search); const intentId=q.get('pagoIntent'); if(!intentId) return;
+    history.replaceState({},'',location.pathname); // limpia el query para no repetir
+    const snap=await db.collection('intenciones_pago').doc(intentId).get();
+    const est=snap.exists?snap.data().estado:null;
+    if(est==='pagado'){ recargarCred(); alert('¡Listo! Tu pago se acreditó.'); }
+    else { alert('Tu pago se está procesando. En unos minutos vas a ver el comprobante como pagado.'); }
+  }catch(_){}
+}
 function comprobantesFullView(){
   const c = S.cred || {};
   const fac = comprobantesOrdenadas(c);
@@ -954,6 +1011,7 @@ auth.onAuthStateChanged(async user => {
       modoReferenteOff();
       set({ view:'home', cred, tambienReferente: esRef, busy:false }); navReplace();
       registrarPush(user.uid);
+      pagoRetornoCheck(); // pasarela: si volvió del checkout real (back_url ?pagoIntent=), avisa el resultado
       return;
     }
     if(destino === 'referente'){ // cuenta de referente PURA (no afiliado) → su panel con sus vínculos
@@ -2280,6 +2338,7 @@ function render(){
     case 'reporte': html=reporteFormView(); break;
     case 'parametros': html=paramsFormView(); break;
     case 'comprobantes': html=comprobantesFullView(); break;
+    case 'pago-sim': html=pagoSimView(); break;
     default: html=bootView();
   }
   root.innerHTML=html;
