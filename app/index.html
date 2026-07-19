@@ -4684,7 +4684,8 @@ async function generarFacturasCF(){
     const r=await fnsCall('generarFacturasCF',{periodo, dry:false});
     audit('facturas_generadas','facturas',periodo,(r.facturas||0)+' facturas (CF)');
     const salt = r.saltadosYaLinkeados ? ` · Ya facturados (saltados): <b>${r.saltadosYaLinkeados}</b>` : '';
-    S.fac.reportF=`Período <b>${esc(periodo)}</b> — Facturas: <b>${r.facturas||0}</b> (persona ${r.facPersona||0} · empresa ${r.facEmpresa||0}) · Items: ${r.items||0} · Corporativos sin destinatario (excluidos): <b>${r.corpExcl||0}</b>${salt}${r.errores?(' · Errores: '+r.errores):''} · <i>motor server-side</i>`;
+    const cred = r.creditoAplicado ? ` · Crédito a favor aplicado: <b>${facMoney(r.creditoAplicado)}</b>` : '';
+    S.fac.reportF=`Período <b>${esc(periodo)}</b> — Facturas: <b>${r.facturas||0}</b> (persona ${r.facPersona||0} · empresa ${r.facEmpresa||0}) · Items: ${r.items||0} · Corporativos sin destinatario (excluidos): <b>${r.corpExcl||0}</b>${cred}${salt}${r.errores?(' · Errores: '+r.errores):''} · <i>motor server-side</i>`;
     render();
   }catch(e){ facErr('No se pudieron generar las facturas: '+(e.message||e)); }
 }

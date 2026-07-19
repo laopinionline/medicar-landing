@@ -31,7 +31,7 @@ const crypto = require('crypto'); // Referente R1: aleatoriedad del código
 const { generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, docSintomaReferido, TEXTO_R3, normNombre, resultadoBusqueda, puedeSolicitar } = require('./referente'); // Referente R1 + síntoma (único nivel salud) + R3 alerta + R1.5 búsqueda
 const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); // Guardia G1/G2: shape de la alerta + helpers de cronograma/atendiendo
 const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'); // Autogestión de plan: diff coberturas + carencia diferenciada
-const { origenPorSobrepago } = require('./creditos'); // Crédito a cuenta (Fase 1): fórmula pura del origen por sobrepago
+const { origenPorSobrepago, consumoCredito } = require('./creditos'); // Crédito a cuenta: F1 origen por sobrepago + F3 consumo en factura
 const { agruparFacturas, facturaDoc, fmtComprobante } = require('./facturas-nucleo'); // Facturación Fase 2: núcleo puro (paridad con el motor cliente)
 
 const REGION = 'southamerica-east1';
@@ -1066,29 +1066,47 @@ exports.generarFacturasCF = onCall(async (request) => {
       items: facturas.reduce((s, f) => s + f.items.length, 0), corpExcl: corpExcl.length, facturas };
   }
 
-  // ── WRITE PATH (PASO B) ── por grupo, una tx atómica con re-verificación del link.
-  const rep = { facturas: 0, items: 0, facPersona: 0, facEmpresa: 0, errores: 0, saltadosYaLinkeados: 0 };
+  // ── WRITE PATH (PASO B + Fase 3) ── por grupo, una tx atómica con re-verificación del link + consumo del crédito.
+  const rep = { facturas: 0, items: 0, facPersona: 0, facEmpresa: 0, errores: 0, saltadosYaLinkeados: 0, creditoAplicado: 0 };
   for (const g of grupos) {
     const refItems = g.items.filter((it) => it.refId); // abonos/cargos (los sintéticos de convenio no tienen refId)
+    const personaId = g.clienteTipo === 'empresa' ? null : g.personaId; // el crédito es del SOCIO persona; empresa no consume
     const facRef = db.collection('facturas').doc();
     const counterRef = db.collection('contadores').doc('facturas');
+    const saldoRef = personaId ? db.collection('creditos_saldo').doc(personaId) : null;
+    let aplicado = 0; // crédito consumido por este grupo (para el reporte, fuera de la tx)
     try {
       await db.runTransaction(async (tx) => {
+        aplicado = 0; // reset por si la tx reintenta por contención
         // 1) RE-LEER cada abono/cargo DENTRO de la tx (todas las lecturas antes de cualquier escritura).
         const refs = refItems.map((it) => db.collection(it.tipo === 'abono' ? 'abonos' : 'cargos').doc(it.refId));
         const snaps = refs.length ? await tx.getAll(...refs) : [];
         for (let i = 0; i < snaps.length; i++) {
           const dd = snaps[i].exists ? snaps[i].data() : null;
-          // si desapareció, se re-editó, o YA fue linkeado por otra corrida → abortar ESTE grupo (idempotencia).
+          // si desapareció, se re-editó, o YA fue linkeado por otra corrida → abortar ESTE grupo (idempotencia → tampoco consume).
           if (!dd || dd.estado !== 'generado' || dd.facturaId) { const err = new Error('YA_LINKEADO'); err._skip = true; throw err; }
         }
         const cs = await tx.get(counterRef); const next = (cs.exists ? (cs.data().ultimo || 0) : 0) + 1;
-        // 2) ESCRITURAS: contador + factura + link facturaId de todos los ítems, atómico.
+        // Fase 3: leer el saldo a favor (solo persona) DENTRO de la tx → consumo atómico con la factura.
+        const saldoSnap = saldoRef ? await tx.get(saldoRef) : null;
+        const saldo = saldoSnap && saldoSnap.exists ? (Number(saldoSnap.data().saldo) || 0) : 0;
+        const cc = consumoCredito(g.total, saldo); // aplica solo saldo POSITIVO, hasta el total; puede dejar la factura en $0
+        // 2) ESCRITURAS: contador + factura (con ítem negativo si aplica) + link facturaId + consumo + saldo, atómico.
         tx.set(counterRef, { ultimo: next, actualizadoEn: FV() }, { merge: true });
-        tx.set(facRef, Object.assign(facturaDoc(g, { periodo, nroComprobante: fmtComprobante(next, year) }), { emitidaEn: FV(), emitidaPor: uid }));
+        const doc = Object.assign(facturaDoc(g, { periodo, nroComprobante: fmtComprobante(next, year) }), { emitidaEn: FV(), emitidaPor: uid });
+        if (cc.aplicado > 0) { doc.items = g.items.concat([cc.itemCredito]); doc.total = cc.totalNeto; } // ítem "Crédito a favor −$X", total neto
+        tx.set(facRef, doc);
         for (const it of refItems) { tx.set(db.collection(it.tipo === 'abono' ? 'abonos' : 'cargos').doc(it.refId), { facturaId: facRef.id }, { merge: true }); }
+        if (cc.aplicado > 0) {
+          // movimiento consumo (monto positivo, tipo 'consumo' → resta al saldo) ATADO a la factura (refFacturaId).
+          // doc-id determinista cons_{facRef.id}: facRef.id es estable entre reintentos de la tx → idempotente.
+          tx.set(db.collection('creditos').doc('cons_' + facRef.id), { personaId, tipo: 'consumo', monto: cc.aplicado, refFacturaId: facRef.id, motivo: 'aplicado a ' + fmtComprobante(next, year), estado: 'activo', creadoEn: FV(), creadoPor: 'generarFacturasCF' });
+          tx.set(saldoRef, { saldo: saldo - cc.aplicado, actualizadoEn: FV() }, { merge: true });
+        }
+        aplicado = cc.aplicado; // para el reporte (fuera de la tx)
       });
-      rep.facturas += 1; rep.items += g.items.length; if (g.clienteTipo === 'empresa') rep.facEmpresa += 1; else rep.facPersona += 1;
+      rep.facturas += 1; rep.items += g.items.length + (aplicado > 0 ? 1 : 0); rep.creditoAplicado += aplicado;
+      if (g.clienteTipo === 'empresa') rep.facEmpresa += 1; else rep.facPersona += 1;
     } catch (e) {
       if (e && e._skip) { rep.saltadosYaLinkeados += 1; logger.info('[generarFacturasCF] grupo ya linkeado, saltado', { periodo }); }
       else { rep.errores += 1; logger.warn('[generarFacturasCF] fallo grupo', { err: e.message || String(e) }); }

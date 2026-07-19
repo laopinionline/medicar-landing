@@ -19,4 +19,17 @@ function origenPorSobrepago(montoPago, sumaRegistrados, totalFactura) {
   return Math.min(mp, exceso);        // este pago aporta como mucho su propio monto al excedente
 }
 
-module.exports = { origenPorSobrepago };
+// CONSUMO (Fase 3): cuánto crédito aplica una factura y el ítem negativo resultante. Solo saldo POSITIVO; se aplica
+// hasta el total (nunca deja el total negativo). Devuelve { aplicado, itemCredito|null, totalNeto }.
+//  - saldo <= 0 (incluye negativo por anulación) → aplicado 0, sin ítem, total intacto.
+//  - saldo < total → aplicado = saldo, ítem "Crédito a favor −saldo", totalNeto = total − saldo.
+//  - saldo >= total → aplicado = total, totalNeto = 0 (factura en $0, comprobante válido); el resto del saldo queda.
+function consumoCredito(totalBruto, saldo) {
+  const tb = Number(totalBruto) || 0;
+  const saldoPos = Math.max(0, Number(saldo) || 0);
+  const aplicado = Math.min(saldoPos, Math.max(0, tb));
+  if (aplicado <= 0) return { aplicado: 0, itemCredito: null, totalNeto: tb };
+  return { aplicado, itemCredito: { tipo: 'credito', descripcion: 'Crédito a favor', monto: -aplicado }, totalNeto: tb - aplicado };
+}
+
+module.exports = { origenPorSobrepago, consumoCredito };
