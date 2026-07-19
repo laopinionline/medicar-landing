@@ -683,6 +683,16 @@ function planPrecioTotal(plan, integrantes){
   return base + Math.max(0,(Number(integrantes)||0)-baseInt)*extra;
 }
 // F4: "2026-07" → "Julio 2026". Formato inválido → devuelve el crudo.
+// Vencimiento del comprobante (solo emitida). venceEl guardado (Timestamp); sin venceEl (facturas viejas) → no muestra
+// nada. Vencida = hoy > venceEl. Tono claro pero NO agresivo (es un socio, no un moroso). Fecha en hora AR.
+function vencLineaSocio(f){
+  if(!f || f.estado!=='emitida') return '';
+  const ms=tsMs(f.venceEl); if(ms==null) return '';
+  let venc=''; try{ venc=new Date(ms).toLocaleDateString('es-AR',{timeZone:'America/Argentina/Buenos_Aires'}); }catch(_){ venc=''; }
+  return Date.now()>ms
+    ? `<div style="padding:.6rem 1rem;background:#fdecec;border-top:1px solid var(--linea);font-size:.78rem;color:var(--rojo);font-weight:700">Esta cuota venció el ${esc(venc)}.</div>`
+    : `<div style="padding:.5rem 1rem;border-top:1px solid var(--linea);font-size:.74rem;color:var(--gris)">Vence el ${esc(venc)}</div>`;
+}
 function periodoLbl(p){
   const m=String(p||'').match(/^(\d{4})-(\d{2})$/); if(!m) return String(p||'—');
   const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -708,6 +718,7 @@ function comprobanteDetalle(f){
     ${grupo('Abono', items.filter(it=>it.tipo==='abono'))}
     ${grupo('Otras prestaciones', items.filter(it=>it.tipo==='cargo'))}
     <div class="row" style="padding:.55rem 1rem;border-top:1px solid var(--linea)"><span class="rl" style="font-weight:800;color:var(--tinta)">TOTAL</span><span class="rv" style="font-weight:800">${socioMoney(f.total)}</span></div>
+    ${vencLineaSocio(f)}
     ${f.estado==='emitida' ? `<div style="padding:.6rem 1rem;border-top:1px solid var(--linea)"><button onclick="event.preventDefault();pagarOnline('${esc(f.id)}')" style="width:100%;background:var(--verde,#2E8B57);color:#fff;border:none;border-radius:9px;padding:.65rem;font-size:.85rem;font-weight:800;cursor:pointer">💳 Pagar online</button></div>` : ''}
   </div>`;
 }

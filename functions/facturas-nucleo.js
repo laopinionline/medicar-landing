@@ -77,4 +77,15 @@ function facturaDoc(g, { periodo, nroComprobante }) {
 
 const fmtComprobante = (n, year) => `FC-${year}-${String(n).padStart(6, '0')}`; // calco de app: contador continuo, año cosmético
 
-module.exports = { destinoDe, agruparFacturas, facturaDoc, fmtComprobante };
+// Vencimiento (decisión Lucas): DÍA 5 del MISMO mes del período, FIN del día en hora AR (UTC-3 FIJO — Argentina sin
+// DST desde 2009, calco del offset del resto del sistema). Fin del día (23:59:59) → "vence el 5" incluye todo el 5;
+// vencida = hoy > venceEl recién desde el día 6. Devuelve ISO con offset (la CF lo pasa a Timestamp). null si período
+// mal formado. NOTA: el día 5 existe en todos los meses (28/30/31) → sin overflow. Si se emite DESPUÉS del 5, la
+// factura nace vencida (consecuencia directa de "día fijo del mes del período").
+const DIA_VENCIMIENTO = 5;
+function vencimientoISO(periodo) {
+  if (!/^[0-9]{4}-[0-9]{2}$/.test(String(periodo || ''))) return null;
+  return `${periodo}-${String(DIA_VENCIMIENTO).padStart(2, '0')}T23:59:59-03:00`;
+}
+
+module.exports = { destinoDe, agruparFacturas, facturaDoc, fmtComprobante, vencimientoISO, DIA_VENCIMIENTO };

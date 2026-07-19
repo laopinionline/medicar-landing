@@ -32,7 +32,7 @@ const { generarCodigo, esFormatoCodigo, CONSENT_SINTOMAS, consentSintomasOk, doc
 const { docAlerta, guardiaVigente, personasAtendidas } = require('./guardia'); // Guardia G1/G2: shape de la alerta + helpers de cronograma/atendiendo
 const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'); // Autogestión de plan: diff coberturas + carencia diferenciada
 const { origenPorSobrepago, consumoCredito } = require('./creditos'); // Crédito a cuenta: F1 origen por sobrepago + F3 consumo en factura
-const { agruparFacturas, facturaDoc, fmtComprobante } = require('./facturas-nucleo'); // Facturación Fase 2: núcleo puro (paridad con el motor cliente)
+const { agruparFacturas, facturaDoc, fmtComprobante, vencimientoISO } = require('./facturas-nucleo'); // Facturación Fase 2: núcleo puro (paridad con el motor cliente) + vencimiento
 const { crearPreferencia, verificarWebhook } = require('./pasarela-adapter'); // Pasarela: adaptador del proveedor (SIM completo, real stub)
 
 const REGION = 'southamerica-east1';
@@ -1195,6 +1195,10 @@ exports.generarFacturasCF = onCall(async (request) => {
   // Año cosmético del comprobante EN HORA ARGENTINA (el cliente usa el año local del navegador = AR; en la CF, UTC,
   // hay que forzarlo para no cruzar el 1-ene). Calco del patrón ventanaBA().
   const year = Number(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date()).slice(0, 4));
+  // Vencimiento GUARDADO (decisión Lucas): día 5 del mes del período, fin del día AR. Se calcula UNA vez y se congela
+  // en cada factura del período. El motor cliente viejo (rollback) NO lo calcula → gap conocido y aceptado.
+  const venceISO = vencimientoISO(periodo);
+  const venceEl = venceISO ? admin.firestore.Timestamp.fromDate(new Date(venceISO)) : null;
 
   // Mismas 5 lecturas que el motor actual (Admin SDK). cargos = TODOS (period-agnósticos, filtrados por estado/facturaId).
   const [abSnap, cgSnap, socSnap, empSnap, facSnap] = await Promise.all([
@@ -1217,7 +1221,7 @@ exports.generarFacturasCF = onCall(async (request) => {
     // motor). NO toca el contador ni escribe nada.
     const cs = await db.collection('contadores').doc('facturas').get();
     let next = cs.exists ? (cs.data().ultimo || 0) : 0;
-    const facturas = grupos.map((g) => { next += 1; return facturaDoc(g, { periodo, nroComprobante: fmtComprobante(next, year) }); });
+    const facturas = grupos.map((g) => { next += 1; return Object.assign(facturaDoc(g, { periodo, nroComprobante: fmtComprobante(next, year) }), { venceEl: venceISO }); });
     logger.info('[generarFacturasCF] DRY', { periodo, count: facturas.length, corpExcl: corpExcl.length });
     return { dry: true, periodo, year, count: facturas.length,
       facPersona: facturas.filter((f) => f.clienteTipo !== 'empresa').length,
@@ -1252,7 +1256,7 @@ exports.generarFacturasCF = onCall(async (request) => {
         const cc = consumoCredito(g.total, saldo); // aplica solo saldo POSITIVO, hasta el total; puede dejar la factura en $0
         // 2) ESCRITURAS: contador + factura (con ítem negativo si aplica) + link facturaId + consumo + saldo, atómico.
         tx.set(counterRef, { ultimo: next, actualizadoEn: FV() }, { merge: true });
-        const doc = Object.assign(facturaDoc(g, { periodo, nroComprobante: fmtComprobante(next, year) }), { emitidaEn: FV(), emitidaPor: uid });
+        const doc = Object.assign(facturaDoc(g, { periodo, nroComprobante: fmtComprobante(next, year) }), { emitidaEn: FV(), emitidaPor: uid, venceEl });
         if (cc.aplicado > 0) { doc.items = g.items.concat([cc.itemCredito]); doc.total = cc.totalNeto; } // ítem "Crédito a favor −$X", total neto
         tx.set(facRef, doc);
         for (const it of refItems) { tx.set(db.collection(it.tipo === 'abono' ? 'abonos' : 'cargos').doc(it.refId), { facturaId: facRef.id }, { merge: true }); }
