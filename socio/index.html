@@ -658,6 +658,23 @@ function fmtDni(d){ const s=String(d||'').replace(/\D/g,''); if(!s) return '—'
 function tipoLbl(t){ return t==='corporativo'?'Corporativo':(t==='directo'?'Directo':(t||'—')); }
 // F3: cuota — MISMA fórmula que app/index.html planPrecioTotal (base + max(0,integrantes-base)*extra).
 function socioMoney(n){ const v=Number(n)||0; return '$'+v.toLocaleString('es-AR'); }
+// Crédito a cuenta (Fase 4): detalle de movimientos del socio (origen/consumo/reintegro/origen-revertido) — de dónde
+// salió el crédito y dónde se aplicó. Colapsable. El origen revertido se muestra tachado (no suma al saldo).
+function movimientosCredito(movs){
+  if(!movs || !movs.length) return '';
+  const fila=(m)=>{
+    const t=m.tipo; let label, signo='', color='var(--tinta)', tach='';
+    if(t==='origen'){
+      if(m.estado==='revertido'){ label='Crédito anulado (pago revertido)'; color='var(--gris)'; tach='text-decoration:line-through;'; }
+      else { label='Crédito por pago de más'; signo='+'; color='var(--verde,#2E8B57)'; }
+    } else if(t==='consumo'){ label=m.motivo||'Aplicado a un comprobante'; signo='−'; }
+    else if(t==='reintegro'){ label='Reintegro'+(m.motivo?(' · '+m.motivo):''); signo='−'; }
+    else { label=m.motivo||t||'Movimiento'; }
+    const monto = tach ? '' : `${signo}${socioMoney(Math.abs(Number(m.monto)||0))}`;
+    return `<div style="display:flex;justify-content:space-between;padding:.35rem 0;border-top:1px solid var(--linea);font-size:.76rem"><span style="color:var(--gris);${tach}">${esc(label)}</span><span style="font-weight:700;color:${color};${tach}">${monto}</span></div>`;
+  };
+  return `<details style="margin-top:.5rem"><summary style="font-size:.72rem;color:var(--gris);cursor:pointer;font-weight:600">Ver movimientos (${movs.length})</summary><div style="margin-top:.2rem">${movs.map(fila).join('')}</div></details>`;
+}
 function planPrecioTotal(plan, integrantes){
   const base=Number(plan&&plan.precio)||0;
   if(!plan || plan.modeloPrecio!=='por_integrante') return base;
@@ -846,10 +863,11 @@ async function cargarCredencial(uid){
   }
 
   // Crédito a cuenta (Fase 1): saldo a favor del socio. Doc-saldo creditos_saldo/{personaId}; solo lo escribe la CF,
-  // el socio lo LEE por regla (id == su personaId). Ausente/0 → no se muestra nada.
-  let saldoFavor = 0;
+  // el socio lo LEE por regla (id == su personaId). Ausente/0 → no se muestra nada. Fase 4: + movimientos + tono deuda.
+  let saldoFavor = 0, creditoMovs = [];
   if(personaId){
     try{ const cs = await db.collection('creditos_saldo').doc(personaId).get(); if(cs.exists) saldoFavor = Number(cs.data().saldo)||0; }catch(_){}
+    try{ const cm = await db.collection('creditos').where('personaId','==',personaId).get(); creditoMovs = cm.docs.map(d=>({id:d.id,...d.data()})); }catch(_){}
   }
 
   // F5: turnos — franjas activas (la ventana real la enforca la CF; acá se filtra en la UI) + MIS turnos
@@ -894,7 +912,7 @@ async function cargarCredencial(uid){
     sintomas = sc.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>((a.orden||0)-(b.orden||0)));
   }catch(_){}
 
-  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, facturas, saldoFavor, agenda, misTurnos, waAtencion, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
+  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, facturas, saldoFavor, creditoMovs, agenda, misTurnos, waAtencion, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
 }
 
 /* ---------- Auth flow ---------- */
@@ -1208,11 +1226,18 @@ function homeView(){
       const notaEmpresa = (socio.facturarA && socio.facturarA.tipo==='empresa')
         ? `<div style="padding:.75rem 1rem;font-size:.76rem;color:var(--tinta);background:#eef4ff;border-bottom:1px solid var(--linea)">Tu facturación se emite a <b>${esc(socio.facturarA.razonSocial||'tu empresa')}</b>.</div>`
         : '';
-      // Crédito a cuenta (Fase 1): si hay saldo a favor, banner arriba de todo. Se genera al sobre-pagar; por ahora
-      // solo se muestra (el consumo automático en la próxima factura llega en fases siguientes).
-      const saldoLinea = (Number(c.saldoFavor)||0) > 0
-        ? `<div style="padding:.8rem 1rem;background:#eafaf0;border-bottom:1px solid var(--linea)"><div style="font-size:.72rem;color:var(--verde,#2E8B57);font-weight:700;text-transform:uppercase;letter-spacing:.02em">Saldo a favor</div><div style="font-size:1.05rem;color:var(--verde,#2E8B57);font-weight:800;margin-top:.1rem">Tenés ${socioMoney(c.saldoFavor)} a favor</div><div style="font-size:.68rem;color:var(--gris);margin-top:.15rem">Se descontará de tu próximo comprobante.</div></div>`
-        : '';
+      // Crédito a cuenta: banner del saldo + movimientos. Saldo POSITIVO = a favor (verde, se descuenta del próximo
+      // comprobante). Saldo NEGATIVO = deuda (rojo — crédito revertido tras anular un pago). 0 con historial → solo el detalle.
+      const saldoC = Number(c.saldoFavor)||0;
+      const movsC = (c.creditoMovs||[]).slice().sort((a,b)=>(tsMs(b.creadoEn)||0)-(tsMs(a.creadoEn)||0));
+      let saldoLinea='';
+      if(saldoC>0){
+        saldoLinea = `<div style="padding:.8rem 1rem;background:#eafaf0;border-bottom:1px solid var(--linea)"><div style="font-size:.72rem;color:var(--verde,#2E8B57);font-weight:700;text-transform:uppercase;letter-spacing:.02em">Saldo a favor</div><div style="font-size:1.05rem;color:var(--verde,#2E8B57);font-weight:800;margin-top:.1rem">Tenés ${socioMoney(saldoC)} a favor</div><div style="font-size:.68rem;color:var(--gris);margin-top:.15rem">Se descontará de tu próximo comprobante.</div>${movimientosCredito(movsC)}</div>`;
+      } else if(saldoC<0){
+        saldoLinea = `<div style="padding:.8rem 1rem;background:#fdecec;border-bottom:1px solid var(--linea)"><div style="font-size:.72rem;color:var(--rojo);font-weight:700;text-transform:uppercase;letter-spacing:.02em">Deuda</div><div style="font-size:1.05rem;color:var(--rojo);font-weight:800;margin-top:.1rem">Tenés una deuda de ${socioMoney(-saldoC)}</div><div style="font-size:.68rem;color:var(--gris);margin-top:.15rem">Se coordina con MEDICAR.</div>${movimientosCredito(movsC)}</div>`;
+      } else if(movsC.length){
+        saldoLinea = `<div style="padding:.6rem 1rem;border-bottom:1px solid var(--linea)">${movimientosCredito(movsC)}</div>`;
+      }
       let inner;
       if(!fac.length){
         inner = `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">Todavía no tenés comprobantes.</div>`;

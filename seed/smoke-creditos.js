@@ -117,5 +117,37 @@ eq('total 0 → no aplica',                        consumoCredito(0, 5000),     
 // el saldo remanente lo calcula la CF como saldo − aplicado (acá se comprueba el aplicado)
 eq('remanente tras saldo>total = saldo−aplicado (15000−10000=5000)', 15000 - consumoCredito(10000, 15000).aplicado, 5000);
 
+console.log('\n(D) Fase 4 — reversión (trigger revertirCredito) e idempotencia, simuladas en memoria');
+// calca el invariante del trigger: al anular el pago, si el origen está 'activo' → 'revertido' + saldo −= monto
+// (puede quedar NEGATIVO si el crédito ya se consumió). Idempotente: un origen ya revertido no re-resta.
+function revertir(db, pagoId){
+  const o = db.creditos['orig_' + pagoId]; if(!o) return;      // no generó crédito
+  if(o.estado !== 'activo') return;                            // ya revertido → idempotente
+  o.estado = 'revertido';
+  db.saldo[o.personaId] = (db.saldo[o.personaId] || 0) - o.monto; // puede quedar negativo
+}
+{
+  // origen activo NO consumido → revertir deja el saldo en 0
+  const db = { creditos:{ orig_p1:{ personaId:'pA', tipo:'origen', monto:5000, estado:'activo' } }, saldo:{ pA:5000 } };
+  revertir(db, 'p1');
+  eq('origen marcado revertido',           db.creditos.orig_p1.estado, 'revertido');
+  eq('saldo vuelve a 0',                   db.saldo.pA, 0);
+  revertir(db, 'p1'); revertir(db, 'p1');  // idempotente
+  eq('re-revertir no re-resta (saldo 0)',  db.saldo.pA, 0);
+}
+{
+  // crédito YA consumido (saldo 0 al momento de anular) → revertir deja saldo NEGATIVO (permitido)
+  const db = { creditos:{ orig_p2:{ personaId:'pB', tipo:'origen', monto:5000, estado:'activo' } }, saldo:{ pB:0 } };
+  revertir(db, 'p2');
+  eq('saldo queda negativo −5000 (deuda)', db.saldo.pB, -5000);
+}
+
+console.log('\n(D) Fase 4 — reintegro (reintegroCF), invariante + guard');
+function reintegrar(saldo, monto){ if(!(monto>0)) return { error:'monto' }; if(monto>saldo+0.001) return { error:'excede' }; return { saldoNuevo: saldo - monto }; }
+eq('reintegro parcial baja el saldo',      reintegrar(5000, 2000), { saldoNuevo: 3000 });
+eq('reintegro total deja saldo 0',         reintegrar(5000, 5000), { saldoNuevo: 0 });
+eq('reintegro > saldo → bloqueado',        reintegrar(5000, 6000), { error: 'excede' });
+eq('reintegro sobre saldo negativo → bloq', reintegrar(-1000, 500), { error: 'excede' });
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-creditos: ${ok} ok, ${fail} fallo(s)\n`);
 process.exit(fail ? 1 : 0);
