@@ -34,6 +34,7 @@ const { diffCoberturas, nuevaCarencia, coberturasEnCarencia } = require('./plan'
 const { origenPorSobrepago, consumoCredito } = require('./creditos'); // Crédito a cuenta: F1 origen por sobrepago + F3 consumo en factura
 const { agruparFacturas, facturaDoc, fmtComprobante, vencimientoISO } = require('./facturas-nucleo'); // Facturación Fase 2: núcleo puro (paridad con el motor cliente) + vencimiento
 const { crearPreferencia, verificarWebhook } = require('./pasarela-adapter'); // Pasarela: adaptador del proveedor (SIM completo, real stub)
+const { reciboPublico } = require('./recibo'); // Recibo del socio: proyección pública de un pago (campos limpios)
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -1119,6 +1120,19 @@ async function confirmarPagoIntent(intentId, fuente) {
 
 // crearIntencionPago (socio): valida que la factura sea SUYA + emitida + con saldo>0, calcula el saldo server-side
 // (el socio no lee /pagos), crea el intento y pide la preferencia al adaptador. Devuelve {intentId, modo, initPoint}.
+// misPagos (socio): devuelve los pagos DEL CALLER (gated por su personaId), SOLO con los campos del recibo
+// (reciboPublico oculta nota/registradoPor/etc). El socio no lee /pagos por regla → este es su único acceso.
+exports.misPagos = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const u = (await db.collection('usuarios').doc(uid).get()).data() || {};
+  const persona = u.personaId; if (!persona) return { pagos: [] }; // referente/staff sin persona → sin pagos propios
+  const snap = await db.collection('pagos').where('personaId', '==', persona).get();
+  const pagos = snap.docs.map((d) => reciboPublico({ id: d.id, ...d.data() })); // whitelist de campos
+  logger.info('[misPagos]', { persona, n: pagos.length });
+  return { pagos };
+});
+
 exports.crearIntencionPago = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
   const uid = request.auth.uid;

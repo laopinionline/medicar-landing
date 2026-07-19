@@ -693,6 +693,44 @@ function vencLineaSocio(f){
     ? `<div style="padding:.6rem 1rem;background:#fdecec;border-top:1px solid var(--linea);font-size:.78rem;color:var(--rojo);font-weight:700">Esta cuota venció el ${esc(venc)}.</div>`
     : `<div style="padding:.5rem 1rem;border-top:1px solid var(--linea);font-size:.74rem;color:var(--gris)">Vence el ${esc(venc)}</div>`;
 }
+// ===================== Recibo del pago (socio) =====================
+function medioLabel(m){ return ({efectivo:'Efectivo',transferencia:'Transferencia',deposito:'Depósito',pasarela:'Pago online'})[m]||m||'—'; }
+function fmtFechaRecibo(ymd){ const m=String(ymd||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(ymd||'—'); } // 'YYYY-MM-DD' → DD/MM/YYYY (ya es fecha AR)
+function pagosDeFactura(fid){ return (S.cred&&S.cred.pagos?S.cred.pagos:[]).filter(p=>p.facturaId===fid && p.estado==='registrado').sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||''))); } // solo pagos VÁLIDOS (anulados no son recibo)
+// Línea(s) de recibo en el comprobante: "Pagado el DD/MM/AAAA · RC-... · $X · medio" + botón Ver recibo. Un renglón por
+// pago registrado (si hubo parciales, se muestran todos).
+function recibosComprobante(f){
+  const ps=pagosDeFactura(f.id); if(!ps.length) return '';
+  return ps.map(p=>`<div style="padding:.55rem 1rem;border-top:1px solid var(--linea);background:#eafaf0;display:flex;justify-content:space-between;align-items:center;gap:.5rem">
+    <div style="font-size:.73rem;color:var(--verde,#2E8B57);line-height:1.35"><b>Pagado el ${esc(fmtFechaRecibo(p.fecha))}</b><br>${esc(p.reciboNro||'—')} · ${socioMoney(p.monto)} · ${esc(medioLabel(p.medio))}</div>
+    <button onclick="event.preventDefault();verRecibo('${esc(p.reciboNro||'')}')" style="flex:none;background:var(--verde,#2E8B57);color:#fff;border:none;border-radius:8px;padding:.4rem .6rem;font-size:.7rem;font-weight:800;cursor:pointer">Ver recibo</button>
+  </div>`).join('');
+}
+function verRecibo(reciboNro){ const c=S.cred||{}; const p=(c.pagos||[]).find(x=>x.reciboNro===reciboNro && x.estado==='registrado'); if(!p) return; const f=(c.facturas||[]).find(x=>x.id===p.facturaId)||{}; S.recibo={pago:p,factura:f}; S.view='recibo'; render(); navPush(); }
+function recCerrar(){ S.recibo=null; S.view='home'; render(); }
+// Recibo imprimible (calco de facComprobante del panel: window.print() + @media print, SIN libs). Leyenda NO fiscal.
+function reciboView(){
+  const r=S.recibo||{}; const p=r.pago||{}; const f=r.factura||{};
+  return `<style>@media print{ body *{visibility:hidden!important} .rec-sheet,.rec-sheet *{visibility:visible!important} .rec-sheet{position:absolute;left:0;top:0;width:100%} .no-print{display:none!important} }</style>
+  <div class="home">
+    <div class="topbar no-print">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Recibo de pago</div><div class="tb-sp"></div><button class="mini" onclick="recCerrar()">Volver</button></div>
+    <div class="sec"><div class="card rec-sheet" style="max-width:640px;margin:0 auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid var(--rojo);padding-bottom:.6rem;margin-bottom:.8rem">
+        <div><div style="font-size:1.3rem;font-weight:800;color:var(--rojo);letter-spacing:.02em">MEDICAR</div><div style="font-size:.72rem;color:var(--gris)">Emergencias médicas · Pergamino</div></div>
+        <div style="text-align:right"><div style="font-size:.66rem;color:var(--gris);text-transform:uppercase;letter-spacing:.05em">Recibo de pago</div><div style="font-size:1.05rem;font-weight:800;letter-spacing:.03em">${esc(p.reciboNro||'—')}</div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.5rem">
+        <div><div style="font-weight:700">${esc(f.nombre||'—')}</div>${f.numeroAfiliado?`<div style="color:var(--gris);font-size:.75rem">N° socio ${esc(f.numeroAfiliado)}</div>`:''}</div>
+        <div style="text-align:right"><div style="color:var(--gris);font-size:.72rem">Fecha</div><div style="font-weight:700">${esc(fmtFechaRecibo(p.fecha))}</div></div>
+      </div>
+      <div class="row" style="padding:.45rem 0;border-top:1px solid var(--linea)"><span class="rl" style="color:var(--gris)">Comprobante</span><span class="rv" style="font-weight:700">${esc(f.nroComprobante||f.periodo||'—')}</span></div>
+      <div class="row" style="padding:.35rem 0"><span class="rl" style="color:var(--gris)">Medio de pago</span><span class="rv">${esc(medioLabel(p.medio))}</span></div>
+      <div style="display:flex;justify-content:space-between;margin-top:.6rem;padding-top:.5rem;border-top:2px solid var(--rojo);font-size:1.05rem;font-weight:800"><span>PAGADO</span><span>${socioMoney(p.monto)}</span></div>
+      <div style="margin-top:1rem;padding-top:.6rem;border-top:1px dashed var(--linea);font-size:.66rem;color:var(--gris);line-height:1.5">Comprobante interno — no válido como factura fiscal (ARCA/AFIP). Recibo de pago del club para el socio.</div>
+      <button class="no-print" onclick="window.print()" style="width:100%;margin-top:1rem;background:var(--rojo);color:#fff;border:none;border-radius:9px;padding:.7rem;font-weight:800;cursor:pointer">🖨️ Imprimir / Guardar PDF</button>
+    </div></div>
+  </div>`;
+}
 function periodoLbl(p){
   const m=String(p||'').match(/^(\d{4})-(\d{2})$/); if(!m) return String(p||'—');
   const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -719,6 +757,7 @@ function comprobanteDetalle(f){
     ${grupo('Otras prestaciones', items.filter(it=>it.tipo==='cargo'))}
     <div class="row" style="padding:.55rem 1rem;border-top:1px solid var(--linea)"><span class="rl" style="font-weight:800;color:var(--tinta)">TOTAL</span><span class="rv" style="font-weight:800">${socioMoney(f.total)}</span></div>
     ${vencLineaSocio(f)}
+    ${recibosComprobante(f)}
     ${f.estado==='emitida' ? `<div style="padding:.6rem 1rem;border-top:1px solid var(--linea)"><button onclick="event.preventDefault();pagarOnline('${esc(f.id)}')" style="width:100%;background:var(--verde,#2E8B57);color:#fff;border:none;border-radius:9px;padding:.65rem;font-size:.85rem;font-weight:800;cursor:pointer">💳 Pagar online</button></div>` : ''}
   </div>`;
 }
@@ -938,6 +977,12 @@ async function cargarCredencial(uid){
     try{ const cm = await db.collection('creditos').where('personaId','==',personaId).get(); creditoMovs = cm.docs.map(d=>({id:d.id,...d.data()})); }catch(_){}
   }
 
+  // Recibos de pago: el socio NO lee /pagos por regla → los trae la CF misPagos (campos limpios, sin nota/registradoPor).
+  let pagos = [];
+  if(personaId){
+    try{ const r = await fnsCall('misPagos',{}); pagos = (r && r.pagos) || []; }catch(_){}
+  }
+
   // F5: turnos — franjas activas (la ventana real la enforca la CF; acá se filtra en la UI) + MIS turnos
   // (personaId propio; por reglas el titular NO lee los turnos de sus dependientes → solo los ve como slot tomado).
   let agenda = [], misTurnos = [], waAtencion = '';
@@ -980,7 +1025,7 @@ async function cargarCredencial(uid){
     sintomas = sc.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>((a.orden||0)-(b.orden||0)));
   }catch(_){}
 
-  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, facturas, saldoFavor, creditoMovs, agenda, misTurnos, waAtencion, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
+  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, facturas, saldoFavor, creditoMovs, pagos, agenda, misTurnos, waAtencion, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
 }
 
 /* ---------- Auth flow ---------- */
@@ -2350,6 +2395,7 @@ function render(){
     case 'parametros': html=paramsFormView(); break;
     case 'comprobantes': html=comprobantesFullView(); break;
     case 'pago-sim': html=pagoSimView(); break;
+    case 'recibo': html=reciboView(); break;
     default: html=bootView();
   }
   root.innerHTML=html;
