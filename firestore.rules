@@ -635,7 +635,7 @@ service cloud.firestore {
                        || (isSignedIn() && resource.data.get('personaId', null) != null && resource.data.get('personaId', null) == miPersonaId()); // F-3: el socio lee SOLO sus comprobantes (calco abonos F2). E-1: .get() -> las facturas de empresa (sin personaId) no rompen la evaluacion.
       // create: shape de generarFacturas + estado inicial 'emitida' + total >= 0 + nº comprobante. E-1: cliente POLIMORFICO.
       allow create: if puedeFacturar()
-                       && request.resource.data.keys().hasOnly(['periodo','personaId','socioId','nombre','numeroAfiliado','items','total','estado','emitidaEn','emitidaPor','nroComprobante','clienteTipo','clienteId','clienteNombre'])
+                       && request.resource.data.keys().hasOnly(['periodo','personaId','socioId','nombre','numeroAfiliado','items','total','estado','emitidaEn','emitidaPor','nroComprobante','clienteTipo','clienteId','clienteNombre','venceEl'])
                        && request.resource.data.keys().hasAll(['periodo','items','total','estado','nroComprobante'])
                        && request.resource.data.estado == 'emitida'
                        && request.resource.data.total is number && request.resource.data.total >= 0

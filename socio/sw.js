@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v28'; // Pasarela: "Pagar online" en el comprobante + simulador in-app + manejo del retorno
+const CACHE = 'medicar-socio-v29'; // Vencimiento: 'Vence el DD/MM/AAAA' en el comprobante + aviso si venció (tono no agresivo)
 const SHELL = [
   './',
   './index.html',
