@@ -1016,6 +1016,65 @@ exports.derivarCredito = onDocumentCreated('pagos/{id}', async (event) => {
   return null;
 });
 
+/* ===================== CRÉDITO A CUENTA — revertirCredito (Fase 4: anular un pago que generó crédito) =====================
+   onDocumentUpdated('pagos/{id}'): cuando un pago pasa registrado→anulado, si generó un 'origen' ACTIVO lo revierte
+   (estado 'revertido') y ajusta el saldo, atómico entre sí. Simétrico con derivarCredito (near-atómico por trigger;
+   cobAnularPago queda INTACTA → rollback = desactivar el trigger y la anulación sigue andando).
+   - Si el crédito YA se consumió, el saldo queda NEGATIVO (el socio queda debiendo) — PERMITIDO (decisión de Lucas).
+   - Idempotente: si el origen ya está 'revertido', no hace nada. */
+exports.revertirCredito = onDocumentUpdated('pagos/{id}', async (event) => {
+  const before = event.data && event.data.before && event.data.before.data();
+  const after = event.data && event.data.after && event.data.after.data();
+  const pagoId = event.params.id;
+  if (!before || !after) return null;
+  if (!(before.estado === 'registrado' && after.estado === 'anulado')) return null; // solo la transición de anulación
+  const origRef = db.collection('creditos').doc('orig_' + pagoId);
+  await db.runTransaction(async (tx) => {
+    const orig = await tx.get(origRef);
+    if (!orig.exists) return;                         // el pago no generó crédito → nada que revertir
+    const od = orig.data();
+    if (od.estado !== 'activo') return;               // ya revertido → idempotente
+    const saldoRef = db.collection('creditos_saldo').doc(od.personaId);
+    const sSnap = await tx.get(saldoRef);
+    const saldo = sSnap.exists ? (Number(sSnap.data().saldo) || 0) : 0;
+    tx.set(origRef, { estado: 'revertido', revertidoEn: FV(), revertidoPor: 'revertirCredito', motivoReversion: 'anulación del pago ' + pagoId }, { merge: true });
+    tx.set(saldoRef, { saldo: saldo - (Number(od.monto) || 0), actualizadoEn: FV() }, { merge: true }); // puede quedar NEGATIVO (permitido)
+  });
+  logger.info('[revertirCredito]', { pagoId });
+  return null;
+});
+
+/* ===================== CRÉDITO A CUENTA — reintegroCF (Fase 4: reintegro deliberado) =====================
+   onCall: el admin/cobrador/facturador devuelve crédito a favor (ej: socio dado de baja). Movimiento 'reintegro'
+   (monto>0) + creditos_saldo(−monto), atómico, con motivo. No puede reintegrar más que el saldo a favor. */
+exports.reintegroCF = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const u = (await db.collection('usuarios').doc(uid).get()).data() || {};
+  const roles = Array.isArray(u.roles) ? u.roles : (u.rol ? [u.rol] : []);
+  const permisos = u.permisos || {};
+  const puede = roles.includes('superadmin') || permisos.facturar === true || permisos.gestionar_cobranza === true;
+  if (!puede) throw new HttpsError('permission-denied', 'No tenés permiso para reintegrar crédito.');
+  const personaId = String((request.data || {}).personaId || '').trim();
+  const monto = Number((request.data || {}).monto);
+  const motivo = String((request.data || {}).motivo || '').trim();
+  if (!personaId) throw new HttpsError('invalid-argument', 'Falta personaId.');
+  if (!(monto > 0)) throw new HttpsError('invalid-argument', 'El monto debe ser mayor a 0.');
+  if (!motivo) throw new HttpsError('invalid-argument', 'El motivo del reintegro es requerido.');
+  const saldoRef = db.collection('creditos_saldo').doc(personaId);
+  const movRef = db.collection('creditos').doc();
+  const res = await db.runTransaction(async (tx) => {
+    const sSnap = await tx.get(saldoRef);
+    const saldo = sSnap.exists ? (Number(sSnap.data().saldo) || 0) : 0;
+    if (monto > saldo + 0.001) throw new HttpsError('failed-precondition', 'El reintegro supera el saldo a favor disponible.');
+    tx.set(movRef, { personaId, tipo: 'reintegro', monto, motivo, estado: 'activo', creadoEn: FV(), creadoPor: uid });
+    tx.set(saldoRef, { saldo: saldo - monto, actualizadoEn: FV() }, { merge: true });
+    return { saldoNuevo: saldo - monto };
+  });
+  logger.info('[reintegroCF]', { personaId, monto, uid });
+  return { ok: true, ...res };
+});
+
 /* ===================== FACTURACIÓN — generarFacturasCF (Fase 2: motor server-side) =====================
    Migra generarFacturas del cliente a una CF, con PARIDAD EXACTA (núcleo puro facturas-nucleo.js) + el link
    facturaId DENTRO de la tx (hoy es post-tx, ventana no-atómica). generarAbonos/generarCargos siguen en el cliente.
