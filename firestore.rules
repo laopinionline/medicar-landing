@@ -412,12 +412,20 @@ service cloud.firestore {
                        || ( isSignedIn()
                             && request.resource.data.personaId == miPersonaId()
                             && request.resource.data.estado == 'creado'
-                            && request.resource.data.keys().hasOnly(['fecha','hora','agendaId','personaId','nombreVista','medicoId','medicoNombre','estado','creadoEn']) );
+                            && request.resource.data.keys().hasOnly(['fecha','hora','agendaId','personaId','nombreVista','titularPersonaId','medicoId','medicoNombre','estado','creadoEn']) ); // Fase A: +titularPersonaId
+      // Fase A: el TITULAR (cabeza del grupo) lee los turnos de su grupo (titularPersonaId==su persona), ademas del
+      // propio (personaId==su persona). El dependiente-con-login sigue leyendo los suyos por personaId (rama vieja).
       allow read:   if esOperativo()
-                       || ( isSignedIn() && resource.data.personaId == miPersonaId() );
+                       || ( isSignedIn() && resource.data.personaId == miPersonaId() )
+                       || ( isSignedIn() && resource.data.get('titularPersonaId', null) != null && resource.data.get('titularPersonaId', null) == miPersonaId() );
       allow update: if esOperativo()
                        || ( isSignedIn()
                             && resource.data.personaId == miPersonaId()
+                            && tocadas().hasOnly(['estado','canceladoEn'])
+                            && request.resource.data.estado == 'cancelado' )
+                       // Fase A: el titular cancela cualquier turno de SU grupo (misma forma acotada: solo cancelar).
+                       || ( isSignedIn()
+                            && resource.data.get('titularPersonaId', null) != null && resource.data.get('titularPersonaId', null) == miPersonaId()
                             && tocadas().hasOnly(['estado','canceladoEn'])
                             && request.resource.data.estado == 'cancelado' );
       allow delete: if false;

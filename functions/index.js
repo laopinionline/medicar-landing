@@ -299,7 +299,15 @@ exports.crearLeadWeb = onRequest(async (req, res) => {
 async function resolverDestino(callerPersonaId, paraPersonaId) {
   if (!paraPersonaId || paraPersonaId === callerPersonaId) {
     const per = (await db.collection('personas').doc(callerPersonaId).get()).data() || {};
-    return { personaId: callerPersonaId, nombreVista: nombreDe(per) };
+    // Fase A — titularPersonaId = la CABEZA del grupo: si el caller es dependiente-con-login, su titular; si es
+    // titular (o no tiene socio), él mismo. Así TODOS los turnos del grupo ruedan a la misma cabeza.
+    let titularPersonaId = callerPersonaId;
+    try {
+      const sq = await db.collection('socios').where('personaId', '==', callerPersonaId).get();
+      const s = sq.docs.map((d) => d.data()).find((x) => x.activo !== false) || (sq.docs[0] && sq.docs[0].data());
+      if (s && s.titularPersonaId) titularPersonaId = s.titularPersonaId;
+    } catch (_) {}
+    return { personaId: callerPersonaId, nombreVista: nombreDe(per), titularPersonaId };
   }
   const q = await db.collection('socios')
     .where('personaId', '==', paraPersonaId)
@@ -308,7 +316,8 @@ async function resolverDestino(callerPersonaId, paraPersonaId) {
   if (!dep) throw new HttpsError('permission-denied', 'Solo podés reservar/cancelar para vos o tus dependientes.');
   let nombreVista = dep.nombreVista || '';
   if (!nombreVista) { const per = (await db.collection('personas').doc(paraPersonaId).get()).data() || {}; nombreVista = nombreDe(per); }
-  return { personaId: paraPersonaId, nombreVista };
+  // el dependiente rueda a SU titular = el caller (la query ya validó titularPersonaId==callerPersonaId).
+  return { personaId: paraPersonaId, nombreVista, titularPersonaId: callerPersonaId };
 }
 
 exports.reservarTurno = onCall(async (request) => {
@@ -358,6 +367,7 @@ exports.reservarTurno = onCall(async (request) => {
     tx.set(turnoRef, {
       fecha: franja.fecha, hora, agendaId,
       personaId: destino.personaId, nombreVista: destino.nombreVista,
+      titularPersonaId: destino.titularPersonaId, // Fase A: cabeza del grupo → el titular ve/cancela los turnos de sus dependientes
       medicoId: franja.medicoId || '', medicoNombre: franja.medicoNombre || '',
       // A2: uid de AUTH de quien reserva (el que tiene la app). Para un turno de DEPENDIENTE es el TITULAR por
       // construcción. La CF de push (onDocumentCreated) rutea por ESTE campo — va en el MISMO set que crea el turno
