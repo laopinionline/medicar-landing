@@ -1320,15 +1320,18 @@ function homeView(){
       }
       return `<div style="padding:.7rem 1rem;border-bottom:1px solid var(--linea)"><div style="font-weight:700;font-size:.85rem;color:var(--tinta)">${esc(fechaTurno(f.fecha))} · ${esc(f.horaInicio)}–${esc(f.horaFin)}</div><div style="font-size:.72rem;color:var(--gris);margin-bottom:.45rem">${esc(f.medicoNombre||'Médico de guardia')}</div><div style="display:flex;flex-wrap:wrap;gap:.35rem">${slots}</div></div>`;
     }).join('') : `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">No hay turnos disponibles en los próximos 7 días.</div>`;
-    const mis = (c.misTurnos||[]).slice().sort((a,b)=> (b.fecha+b.hora).localeCompare(a.fecha+a.hora));
+    // Fase B: el socio NO ve 'ausente' ni 'sin_registrar' (métrica interna, nunca reproche) → se filtran (invisibles).
+    // Ve: creado ("Reservado"), atendido ("Atendida ✓"), cancelado ("Cancelada").
+    const mis = (c.misTurnos||[]).filter(t=>!['ausente','sin_registrar'].includes(t.estado)).slice().sort((a,b)=> (b.fecha+b.hora).localeCompare(a.fecha+a.hora));
     const wa = waLink(c.waAtencion||''); // WhatsApp institucional de atención; vacío si no hay número configurado → sin botón (nunca un link roto)
     const misHTML = mis.length ? mis.map(t=>{
       const activo = t.estado==='creado';
       // Fase A: "de quién" es el turno. Propio (personaId==yo) → sin etiqueta; de un dependiente → "para {nombre}".
       const propio = t.personaId===c.personaId;
       const deQuien = !propio && t.nombreVista ? ` <span style="font-size:.66rem;color:var(--rojo);font-weight:700">· para ${esc(t.nombreVista)}</span>` : '';
+      const estadoLbl = activo ? 'Reservado' : (t.estado==='atendido' ? '<span style="color:var(--verde)">Atendida ✓</span>' : 'Cancelada');
       const acciones = activo ? `<div style="display:flex;flex-direction:column;gap:.35rem;align-items:flex-end">${wa?`<a href="${wa}" target="_blank" rel="noopener" style="font-size:.75rem;color:#fff;background:#25D366;padding:.3rem .6rem;border-radius:8px;text-decoration:none;font-weight:700">Iniciar videollamada</a>`:''}<button onclick="cancelarTurnoUI('${esc(t.id)}')" ${S.turnoBusy?'disabled':''} style="font-size:.75rem;color:var(--rojo);background:none;border:none;font-weight:700;cursor:pointer">Cancelar</button></div>` : '';
-      return `<div class="row"><div><div style="font-weight:700;font-size:.85rem;color:var(--tinta)">${esc(fechaTurno(t.fecha))} · ${esc(t.hora)}${deQuien}</div><div style="font-size:.72rem;color:var(--gris)">${esc(t.medicoNombre||'Médico de guardia')} · ${activo?'Reservado':'Cancelado'}</div></div>${acciones}</div>`;
+      return `<div class="row"><div><div style="font-weight:700;font-size:.85rem;color:var(--tinta)">${esc(fechaTurno(t.fecha))} · ${esc(t.hora)}${deQuien}</div><div style="font-size:.72rem;color:var(--gris)">${esc(t.medicoNombre||'Médico de guardia')} · ${estadoLbl}</div></div>${acciones}</div>`;
     }).join('') : `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">No tenés turnos reservados.</div>`;
     const msgHTML = S.turnoErr
       ? `<div style="padding:.55rem 1rem;font-size:.8rem;color:var(--rojo);font-weight:600">${esc(S.turnoErr)}</div>`

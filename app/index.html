@@ -1255,11 +1255,33 @@ function medTurnosAttach(){
   S.medTurnosUnsub=db.collection('turnos').where('medicoId','==',uid).onSnapshot(s=>{
     if(!S.user) return;
     const hoy=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Buenos_Aires'}).format(new Date());
-    S.medTurnos=s.docs.map(d=>({id:d.id,...d.data()})).filter(t=>t.estado==='creado' && t.fecha===hoy).sort((a,b)=>String(a.hora||'').localeCompare(String(b.hora||'')));
+    // Fase B: muestro los de HOY en creado/atendido/ausente (para marcar y deshacer). cancelado/sin_registrar fuera.
+    S.medTurnos=s.docs.map(d=>({id:d.id,...d.data()})).filter(t=>t.fecha===hoy && ['creado','atendido','ausente'].includes(t.estado)).sort((a,b)=>String(a.hora||'').localeCompare(String(b.hora||'')));
     render();
   }, ()=>{ S.medTurnos=[]; render(); });
 }
 function medTurnosDetach(){ if(S.medTurnosUnsub){ try{S.medTurnosUnsub();}catch(_){} S.medTurnosUnsub=null; } S.medTurnos=null; }
+// Fase B: fila del turno del médico con acción. creado → botones Atendido/Ausente. atendido/ausente → badge + Deshacer
+// (solo dentro de las 48hs de la marca). La marca real la hace la CF marcarAsistencia (valida la transición).
+function medTurnoRow(t){
+  const est=t.estado;
+  let der='';
+  if(est==='creado'){
+    der=`<div style="display:flex;gap:.35rem"><button onclick="marcarTurnoUI('${esc(t.id)}','atendido')" style="padding:.25rem .6rem;border:none;border-radius:8px;background:var(--g,#1D9E75);color:#fff;font-size:.7rem;font-weight:700;cursor:pointer">Atendido</button><button onclick="marcarTurnoUI('${esc(t.id)}','ausente')" style="padding:.25rem .6rem;border:1.5px solid var(--border2);border-radius:8px;background:#fff;color:var(--ink2);font-size:.7rem;font-weight:700;cursor:pointer">Ausente</button></div>`;
+  } else {
+    const marcadoMs=tms(t.marcadoEn); const enGracia=marcadoMs!=null && (Date.now()-marcadoMs)<=48*3600*1000;
+    const badge=est==='atendido'?`<span style="background:var(--g,#1D9E75);color:#fff;border-radius:6px;padding:.1rem .45rem;font-size:.62rem;font-weight:700">Atendido</span>`:`<span style="background:#888;color:#fff;border-radius:6px;padding:.1rem .45rem;font-size:.62rem;font-weight:700">Ausente</span>`;
+    der=`<div style="display:flex;align-items:center;gap:.4rem">${badge}${enGracia?`<button onclick="marcarTurnoUI('${esc(t.id)}','creado')" style="padding:.2rem .5rem;border:none;background:none;color:var(--rojo);font-size:.68rem;font-weight:700;cursor:pointer">Deshacer</button>`:''}</div>`;
+  }
+  const sub=est==='creado'?'Videollamada · Reservado':(est==='atendido'?'Videollamada · Atendido':'Videollamada · Ausente');
+  return `<div class="lr"><div class="lrb"><div class="lrn">${esc(t.hora)} · ${esc(t.nombreVista||'—')}</div><div class="lrs">${sub}</div></div>${der}</div>`;
+}
+async function marcarTurnoUI(turnoId, resultado){
+  if(S.medMarcaBusy) return; S.medMarcaBusy=turnoId;
+  try{ await fnsCall('marcarAsistencia',{turnoId, resultado}); } // el onSnapshot re-renderiza con el nuevo estado
+  catch(e){ alert('No se pudo marcar el turno: '+(e.message||e)); }
+  S.medMarcaBusy=null;
+}
 
 // D-1: episodios propios del médico para el HOME (métricas reales). onSnapshot medicoId==uid (regla lo permite).
 // Reusa esHoy/tms/codEmoji. Render solo en el tab home (no pisa clinForm en Episodios). Detach en resetSession.
@@ -1282,7 +1304,7 @@ function mHome(){
   const tHoy=S.medTurnos;
   const turnosCard=`<div class="card"><div class="ch">Turnos de hoy</div>${
     tHoy==null ? `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Cargando…</div>`
-    : (tHoy.length ? tHoy.map(t=>`<div class="lr"><div class="lrb"><div class="lrn">${esc(t.hora)} · ${esc(t.nombreVista||'—')}</div><div class="lrs">Videollamada · Reservado</div></div></div>`).join('')
+    : (tHoy.length ? tHoy.map(t=>medTurnoRow(t)).join('')
        : `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Sin turnos hoy.</div>`)
   }</div>`;
   // D-1 métricas reales del médico

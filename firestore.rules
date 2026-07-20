@@ -418,7 +418,11 @@ service cloud.firestore {
       allow read:   if esOperativo()
                        || ( isSignedIn() && resource.data.personaId == miPersonaId() )
                        || ( isSignedIn() && resource.data.get('titularPersonaId', null) != null && resource.data.get('titularPersonaId', null) == miPersonaId() );
-      allow update: if esOperativo()
+      // Fase B: esOperativo update ACOTADO a los campos de asistencia/cancelación (antes era LIBRE). La marca real la
+      // hace la CF marcarAsistencia (Admin SDK, valida la transición); esta rama es defensa para escrituras directas.
+      allow update: if ( esOperativo()
+                            && tocadas().hasOnly(['estado','marcadoPor','marcadoEn','canceladoEn'])
+                            && request.resource.data.estado in ['creado','atendido','ausente','sin_registrar','cancelado'] )
                        || ( isSignedIn()
                             && resource.data.personaId == miPersonaId()
                             && tocadas().hasOnly(['estado','canceladoEn'])
