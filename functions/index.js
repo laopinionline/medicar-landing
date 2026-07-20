@@ -35,6 +35,7 @@ const { origenPorSobrepago, consumoCredito } = require('./creditos'); // Crédit
 const { agruparFacturas, facturaDoc, fmtComprobante, vencimientoISO } = require('./facturas-nucleo'); // Facturación Fase 2: núcleo puro (paridad con el motor cliente) + vencimiento
 const { crearPreferencia, verificarWebhook } = require('./pasarela-adapter'); // Pasarela: adaptador del proveedor (SIM completo, real stub)
 const { reciboPublico } = require('./recibo'); // Recibo del socio: proyección pública de un pago (campos limpios)
+const { cargoDeEpisodio } = require('./cargos-nucleo'); // Facturación: núcleo puro de cargos (paridad con el motor cliente)
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -1291,6 +1292,48 @@ exports.generarFacturasCF = onCall(async (request) => {
   }
   logger.info('[generarFacturasCF] WRITE', { periodo, ...rep, corpExcl: corpExcl.length });
   return { dry: false, periodo, corpExcl: corpExcl.length, ...rep };
+});
+
+/* ===================== FACTURACIÓN — generarCargosCF (motor de cargos server-side) =====================
+   Migra generarCargos del cliente a una CF: el contable la dispara y el SERVIDOR lee los episodios cerrados (Admin
+   SDK) → el contable NUNCA ve datos clínicos (motivo/triage/examen). La regla de /episodios NO se abre. Paridad
+   EXACTA con el motor cliente vía el núcleo puro cargos-nucleo.js. Idempotente por episodioId (como hoy: pre-lectura
+   del set de cargos existentes). Gate: facturar || gestionar_cobranza (que el contable pueda). */
+exports.generarCargosCF = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const u = (await db.collection('usuarios').doc(uid).get()).data() || {};
+  const roles = Array.isArray(u.roles) ? u.roles : (u.rol ? [u.rol] : []);
+  const permisos = u.permisos || {};
+  const puede = roles.includes('superadmin') || permisos.facturar === true || permisos.gestionar_cobranza === true;
+  if (!puede) throw new HttpsError('permission-denied', 'No tenés permiso para generar cargos.');
+  const dry = (request.data || {}).dry === true;
+
+  // Mismas lecturas que el motor actual, pero SERVER-SIDE (incluye tarifas, que el contable no puede leer client-side).
+  const [epsSnap, cgSnap, tarSnap] = await Promise.all([
+    db.collection('episodios').where('estado', '==', 'cerrado').get(),
+    db.collection('cargos').get(),
+    db.collection('tarifas').get(),
+  ]);
+  const conCargo = new Set(cgSnap.docs.map((d) => d.data().episodioId)); // idempotencia por episodioId (incluye anulados)
+  const tarifas = tarSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const rep = { generados: 0, sinTarifa: 0, sinCargo: 0, yaTenian: 0, sinAtribucion: 0, enCarencia: 0, errores: 0 };
+  const nuevos = []; // dry: lo que crearía (para la comparación de paridad)
+
+  for (const doc of epsSnap.docs) {
+    const ep = doc.data(), epId = doc.id;
+    if (conCargo.has(epId)) { rep.yaTenian += 1; continue; }
+    const anio = ep.creadoEn && ep.creadoEn.toDate ? ep.creadoEn.toDate().getFullYear() : yearAR();
+    const r = cargoDeEpisodio(ep, epId, tarifas, anio);
+    if (r.skip) { rep[r.skip] += 1; continue; }          // 'sinTarifa' | 'sinCargo'
+    if (r.sinAtrib) rep.sinAtribucion += 1;
+    if (r.enCarencia) rep.enCarencia += 1;
+    if (dry) { nuevos.push(r.cargo); rep.generados += 1; continue; }
+    try { await db.collection('cargos').add(Object.assign({}, r.cargo, { generadoEn: FV(), generadoPor: uid })); rep.generados += 1; }
+    catch (e) { rep.errores += 1; logger.warn('[generarCargosCF] fallo al crear cargo', { epId, err: e.message || String(e) }); }
+  }
+  logger.info('[generarCargosCF]', { dry, ...rep });
+  return dry ? { dry: true, ...rep, cargos: nuevos } : { dry: false, ...rep };
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================

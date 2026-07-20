@@ -4271,9 +4271,10 @@ function facCargosView(){
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin cargos${showAnul?'':' activos'}</div>`;
   const report = S.fac.report ? `<div class="card" style="background:var(--bg)"><div style="font-size:.78rem;font-weight:700;margin-bottom:.3rem">Última corrida</div><div style="font-size:.75rem;color:var(--ink2);line-height:1.6">${S.fac.report}</div></div>` : '';
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="facShowAnul(this.checked)" ${showAnul?'checked':''}>Ver anulados${nAnul?(' ('+nAnul+')'):''}</label>`;
-  // Fase2: GENERAR CARGOS lee episodios (datos clínicos) → solo configurar_sistema/admin. El contable factura sobre los cargos ya generados.
-  const genBtn = puedeConfig() ? `<button class="btn-r" onclick="generarCargos()" style="margin-bottom:.4rem">⚙️ GENERAR CARGOS</button>
-    <div style="font-size:.66rem;color:var(--ink3);margin:0 0 .7rem">Sobre episodios <b>cerrados</b> sin cargo. Idempotente (no duplica). Solo lee episodios.</div>` : '';
+  // Cargos-CF: GENERAR CARGOS ahora corre server-side (la CF lee episodios; el contable NUNCA ve datos clínicos) →
+  // el botón se abre a facturar/cobranza (el contable cierra su ciclo). El motor cliente queda de rollback por flag.
+  const genBtn = (puede('facturar') || puedeCobrar()) ? `<button class="btn-r" onclick="generarCargosRun()" style="margin-bottom:.4rem">⚙️ GENERAR CARGOS</button>
+    <div style="font-size:.66rem;color:var(--ink3);margin:0 0 .7rem">Sobre episodios <b>cerrados</b> sin cargo. Idempotente (no duplica). El servidor lee los episodios; vos no ves datos clínicos.</div>` : '';
   return `${genBtn}${report}${toggle}<div class="card">${rows}</div>`;
 }
 function facShowAnul(on){ if(!S.fac) return; S.fac.showAnul=!!on; render(); }
@@ -4336,6 +4337,26 @@ async function generarCargos(){
     }
     audit('cargos_generados','cargos','',rep.generados+' generados, '+rep.sinTarifa+' sin tarifa');
     S.fac.report=`Generados: <b>${rep.generados}</b>${rep.enCarencia?(' (en carencia: '+rep.enCarencia+')'):''} · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
+    render();
+  }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
+}
+
+// ===================== Cargos-CF — dispatcher motor cliente | CF (mismo flag que generarFacturas) =====================
+// El botón GENERAR CARGOS llama a este dispatcher. Reusa configuracion/facturacion.motor (un solo flag para todo el
+// motor de facturación server-side): 'cf' (default) → generarCargosCF; 'cliente' → generarCargos (INTACTA, rollback).
+async function generarCargosRun(){
+  if(!(puede('facturar') || puedeCobrar())) return;
+  facErr('');
+  let motor='cf';
+  try{ const cfg=await db.collection('configuracion').doc('facturacion').get(); if(cfg.exists && cfg.data().motor) motor=cfg.data().motor; }catch(_){}
+  if(motor==='cliente') return generarCargos();   // ROLLBACK: motor cliente intacto (requiere leer episodios → solo config/admin)
+  return generarCargosCF();
+}
+async function generarCargosCF(){
+  try{
+    const r=await fnsCall('generarCargosCF',{dry:false});
+    audit('cargos_generados','cargos','',(r.generados||0)+' generados (CF)');
+    S.fac.report=`Generados: <b>${r.generados||0}</b>${r.enCarencia?(' (en carencia: '+r.enCarencia+')'):''} · Salteados sin tarifa: ${r.sinTarifa||0} · Sin cargo (cubierto por abono): ${r.sinCargo||0} · Ya tenían: ${r.yaTenian||0} · Sin atribución (históricos): <b>${r.sinAtribucion||0}</b>${r.errores?(' · Errores: '+r.errores):''} · <i>motor server-side</i>`;
     render();
   }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
 }
