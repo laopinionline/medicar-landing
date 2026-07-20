@@ -36,6 +36,7 @@ const { agruparFacturas, facturaDoc, fmtComprobante, vencimientoISO } = require(
 const { crearPreferencia, verificarWebhook } = require('./pasarela-adapter'); // Pasarela: adaptador del proveedor (SIM completo, real stub)
 const { reciboPublico } = require('./recibo'); // Recibo del socio: proyección pública de un pago (campos limpios)
 const { cargoDeEpisodio } = require('./cargos-nucleo'); // Facturación: núcleo puro de cargos (paridad con el motor cliente)
+const { RESULTADOS, puedeMarcar, debeBarrer } = require('./asistencia'); // Turnos Fase B: transiciones atendido/ausente + barrido
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -425,6 +426,57 @@ exports.cancelarTurno = onCall(async (request) => {
   }
   return { ok: true };
 });
+
+/* ===================== TURNOS FASE B — marcarAsistencia (atendido/ausente) =====================
+   El médico (o admin/despachante) marca el resultado de la videoconsulta. Gate esOperativo; el MÉDICO solo los
+   turnos de SU agenda (medicoId==uid), admin/despachante/superadmin cualquiera. Valida la transición (núcleo puro:
+   creado→atendido|ausente, deshacer/corregir dentro de 48hs, cancelado terminal). Estampa marcadoPor/marcadoEn. */
+const MOTIVO_MSG = { 'resultado-invalido': 'Resultado inválido.', 'cancelado-terminal': 'El turno está cancelado; no se puede marcar.', 'nada-que-deshacer': 'No hay una marca previa para deshacer.', 'sin-marca': 'El turno no tiene marca previa.', 'fuera-de-gracia': 'Pasaron más de 48hs desde que se marcó; ya no se puede corregir.', 'estado-desconocido': 'Estado del turno inesperado.' };
+exports.marcarAsistencia = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const u = (await db.collection('usuarios').doc(uid).get()).data() || {};
+  const roles = Array.isArray(u.roles) ? u.roles : (u.rol ? [u.rol] : []);
+  const esOperativo = roles.some((r) => ['despachante', 'medico', 'admin', 'superadmin'].includes(r));
+  if (!esOperativo) throw new HttpsError('permission-denied', 'No tenés permiso para marcar asistencia.');
+  const turnoId = String((request.data || {}).turnoId || '').trim();
+  const resultado = String((request.data || {}).resultado || '').trim();
+  if (!turnoId) throw new HttpsError('invalid-argument', 'turnoId requerido.');
+  if (!RESULTADOS.includes(resultado)) throw new HttpsError('invalid-argument', 'Resultado inválido.');
+  const esAdminOp = roles.some((r) => ['despachante', 'admin', 'superadmin'].includes(r));
+  const ref = db.collection('turnos').doc(turnoId);
+  const res = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError('not-found', 'El turno no existe.');
+    const t = snap.data() || {};
+    // el médico solo marca su agenda; admin/despachante/superadmin marcan cualquiera
+    if (!esAdminOp && roles.includes('medico') && t.medicoId !== uid) throw new HttpsError('permission-denied', 'Solo podés marcar los turnos de tu agenda.');
+    const marcadoEnMs = t.marcadoEn && t.marcadoEn.toMillis ? t.marcadoEn.toMillis() : null;
+    const v = puedeMarcar(t.estado, resultado, marcadoEnMs, Date.now());
+    if (!v.ok) throw new HttpsError('failed-precondition', MOTIVO_MSG[v.motivo] || 'No se puede marcar el turno.');
+    tx.update(ref, { estado: resultado, marcadoPor: uid, marcadoEn: FV() });
+    return { estado: resultado };
+  });
+  logger.info('[marcarAsistencia]', { turnoId, uid, ...res });
+  return { ok: true, ...res };
+});
+
+/* ===================== TURNOS FASE B — barrerTurnos (cierra los 'creado' colgados) =====================
+   onSchedule diario (04:00 AR): los turnos 'creado' cuya fecha quedó >=2 días atrás (1 pasado + 1 de gracia) sin que
+   nadie los marcara → 'sin_registrar' (marcadoPor:'sistema'). Mantiene las métricas limpias, sin 'creado' eternos.
+   Query solo por estado (equality) + filtro de fecha en memoria (sin índice compuesto). El socio no ve 'sin_registrar'. */
+exports.barrerTurnos = onSchedule(
+  { schedule: 'every day 04:00', timeZone: 'America/Argentina/Buenos_Aires' },
+  async () => {
+    const hoy = hoyAR();
+    const snap = await db.collection('turnos').where('estado', '==', 'creado').get();
+    let barridos = 0;
+    for (const d of snap.docs) {
+      if (debeBarrer((d.data() || {}).fecha, hoy)) { await d.ref.update({ estado: 'sin_registrar', marcadoPor: 'sistema', marcadoEn: FV() }); barridos += 1; }
+    }
+    logger.info('[barrerTurnos]', { hoy, revisados: snap.size, barridos });
+  }
+);
 
 /* ===================== A2 — Push nativa a los dispositivos de un uid =====================
    Helper compartido por avisarTurno (A2-a) y recordarTurno (A2-b): envía { title, body } a TODOS los
