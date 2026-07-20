@@ -113,7 +113,7 @@ exports.createUser = onCall(async (request) => {
   }
   const uid = userRec.uid;
   await db.collection('usuarios').doc(uid).set({
-    rol, roles: [rol], email, nombre, afiliadoId: null, medicoId: null, activo: true,
+    rol, roles: [rol], email, nombre, medicoId: null, activo: true,
     creadoEn: admin.firestore.FieldValue.serverTimestamp(),
   });
   if (rol === 'medico') {

@@ -88,7 +88,7 @@ const SOC = {
   // usuarios/{uid}: shape completo de afiliado (MISMO que afiliadodemo) — el gate de la PWA exige rol/roles.
   // Idempotente: un re-run completa los campos faltantes; creadoEn solo en el primer alta.
   const uref = db.collection('usuarios').doc(uid);
-  const ubase = { rol: 'afiliado', roles: ['afiliado'], email: EMAIL, nombre: 'Titular Demo', afiliadoId: null, medicoId: null, personaId: 'demo-titular' };
+  const ubase = { rol: 'afiliado', roles: ['afiliado'], email: EMAIL, nombre: 'Titular Demo', medicoId: null, personaId: 'demo-titular' };
   if (!(await uref.get()).exists) ubase.creadoEn = FV();
   await uref.set(ubase, { merge: true });
 

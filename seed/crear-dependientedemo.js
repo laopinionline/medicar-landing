@@ -46,7 +46,7 @@ const PERSONA_ID = 'demo-dep-uno'; // dependiente activo del titulardemo (ya sem
   else { await auth.updateUser(uid, { password: PASSWORD }).catch(() => {}); } // re-asegura el pass demo
 
   const uref = db.collection('usuarios').doc(uid);
-  const ubase = { rol: 'afiliado', roles: ['afiliado'], email: EMAIL, nombre: 'Dependiente Demo', afiliadoId: null, medicoId: null, personaId: PERSONA_ID };
+  const ubase = { rol: 'afiliado', roles: ['afiliado'], email: EMAIL, nombre: 'Dependiente Demo', medicoId: null, personaId: PERSONA_ID };
   if (!(await uref.get()).exists) ubase.creadoEn = FV();
   await uref.set(ubase, { merge: true });
 

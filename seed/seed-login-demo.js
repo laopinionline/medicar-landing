@@ -5,7 +5,7 @@
  * Y sus docs en usuarios/{uid} (y staff_medico/{uid} para el médico), en una sola
  * pasada consistente. Mismo patrón y estructura que seed.js.
  *
- * Datos de JUGUETE: nombres "… Demo", sin DNI reales, afiliadoId/medicoId = null.
+ * Datos de JUGUETE: nombres "… Demo", sin DNI reales, medicoId = null.
  * (Los demos viejos @demo.com se retiraron en el Tramo 7a: 4 borrados, 2 deshabilitados.)
  *
  * Requiere la service account key del proyecto medicar-sistema (misma que seed.js).
@@ -70,7 +70,6 @@ async function ensureUserDoc(uid, u) {
       rol: u.rol,
       email: u.email,
       nombre: u.nombre,
-      afiliadoId: null, // gancho a la estructura de Administracion (vacio por ahora)
       medicoId: null,   // gancho a la estructura Medica (vacio por ahora)
       creadoEn: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -79,7 +78,6 @@ async function ensureUserDoc(uid, u) {
     // Idempotente: refresca campos base sin pisar creadoEn ni vinculos ya seteados.
     const cur = snap.data() || {};
     const upd = { rol: u.rol, email: u.email, nombre: u.nombre };
-    if (cur.afiliadoId === undefined) upd.afiliadoId = null;
     if (cur.medicoId === undefined) upd.medicoId = null;
     await ref.set(upd, { merge: true });
     console.log(`[doc]  ok:       usuarios/${uid} (merge)`);
