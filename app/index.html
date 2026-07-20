@@ -4837,9 +4837,17 @@ function cobAttach(){
 }
 function cobDetach(){ if(S.cobUnsub){ S.cobUnsub.forEach(u=>{ try{u();}catch(_){} }); S.cobUnsub=null; } }
 function cobErr(t){ const e=document.getElementById('cob-err'); if(e){ e.textContent=t||''; e.style.display=t?'block':'none'; } }
-function cobSub(id){ if(!S.cob) return; S.cob.sub=id; S.cob.fedit=null; render(); navPush(); }
+function cobSub(id){ if(!S.cob) return; S.cob.sub=id; S.cob.fedit=null; S.cob.empVer=null; S.cob.recibo=null; render(); navPush(); }
 function cobVerFactura(id){ if(!puedeCobrar()) return; S.cob.fedit=id; render(); navPush(); }
 function cobCerrarFactura(){ if(S.cob) S.cob.fedit=null; render(); }
+// Cuenta corriente por empresa (drill-down desde "Deuda por cliente")
+function cobEmpVer(empId){ if(!puedeCobrar()) return; S.cob.empVer=empId; S.cob.fedit=null; render(); navPush(); }
+function cobEmpCerrar(){ if(S.cob) S.cob.empVer=null; render(); }
+// Recibo imprimible (empresa o persona) en el PANEL — interno, lo imprime el staff
+function cobVerReciboEmpresa(pagoId){ if(!puedeCobrar()) return; const p=(S.cob.pagos||[]).find(x=>x.id===pagoId); if(!p) return; const f=(S.cob.facturas||[]).find(x=>x.id===p.facturaId)||{}; S.cob.recibo={pago:p,factura:f}; render(); navPush(); }
+function cobReciboCerrar(){ if(S.cob) S.cob.recibo=null; render(); }
+function cobFechaRecibo(ymd){ const m=String(ymd||'').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(ymd||'—'); } // 'YYYY-MM-DD' → DD/MM/YYYY (fecha AR)
+function cobMedioLbl(m){ return ({efectivo:'Efectivo',transferencia:'Transferencia',deposito:'Depósito',pasarela:'Pago online'})[m]||m||'—'; }
 
 function cobPanel(){
   if(!puedeCobrar()) return `<div class="card"><div class="ch">Cobranza</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para registrar cobranza.</div></div>`;
@@ -4851,7 +4859,12 @@ function cobPanel(){
   <div class="panel-h"><b>Cobranza</b><span class="live-tag">en vivo</span></div>
   <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${tab('porcobrar','Por cobrar')}${tab('deuda','Deuda por cliente')}${tab('credito','Crédito a favor')}</div>
   <div id="cob-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
-  const body = sub==='deuda' ? cobDeudaView() : (sub==='credito' ? cobCreditoView() : cobPorCobrarView());
+  // Ruteo: recibo (imprimible) y detalle de factura se muestran sobre cualquier sub-tab; en 'deuda', empVer abre la
+  // cuenta corriente de una empresa (drill-down).
+  const body = S.cob.recibo ? cobReciboView()
+    : (S.cob.fedit!=null ? cobFacturaDetalle()
+      : (sub==='deuda' ? (S.cob.empVer ? cobEmpCuentaView() : cobDeudaView())
+        : (sub==='credito' ? cobCreditoView() : cobPorCobrarView())));
   return head + body;
 }
 
@@ -4922,17 +4935,81 @@ function cobDeudaView(){
   const porCliente={}; // E-3: agrupa por CLIENTE — empresa por clienteId (razón social), persona por socio/persona.
   emit.forEach(f=>{ const saldo=(Number(f.total)||0)-cobPagadoDe(f.id); if(saldo<=0) return;
     const esEmp=f.clienteTipo==='empresa'; const k=esEmp?('e:'+f.clienteId):('p:'+(f.socioId||f.personaId||f.id));
-    if(!porCliente[k]) porCliente[k]={ nombre:f.nombre||'—', ref:esEmp?'convenio':(f.numeroAfiliado||null), esEmp, deuda:0, n:0, maxDias:null };
+    if(!porCliente[k]) porCliente[k]={ nombre:f.nombre||'—', ref:esEmp?'convenio':(f.numeroAfiliado||null), esEmp, empId:esEmp?f.clienteId:null, deuda:0, n:0, maxDias:null };
     porCliente[k].deuda+=saldo; porCliente[k].n++;
     const d=facDiasVencida(f); if(d!=null && d>0) porCliente[k].maxDias=Math.max(porCliente[k].maxDias||0, d); }); // antigüedad = la factura más vencida
   const list=Object.values(porCliente).sort((a,b)=>(b.maxDias||0)-(a.maxDias||0) || b.deuda-a.deuda); // los más atrasados primero
   if(!list.length) return `<div class="card"><div style="font-size:.82rem;color:var(--ink3);padding:.4rem">Nadie con deuda. Todo al día. 🎉</div></div>`;
   const total=list.reduce((s,x)=>s+x.deuda,0);
   const antig=(d)=> d==null ? '' : `<div style="font-size:.62rem;color:var(--r);font-weight:800">⚠ ${d} día${d===1?'':'s'} vencida</div>`;
-  const rows=list.map(x=>`<div class="ir"><span class="il">${esc(x.nombre)}${x.esEmp?' <span style="font-size:.58rem;font-weight:800;color:var(--r)">EMPRESA</span>':(x.ref?(' · N° '+esc(x.ref)):'')} <span style="color:var(--ink3);font-size:.7rem">(${x.n} fact.)</span>${antig(x.maxDias)}</span><span class="iv" style="font-weight:700;color:var(--r)">${facMoney(x.deuda)}</span></div>`).join('');
+  // Empresa → fila CLICKEABLE (cuenta corriente). Persona → fila estática (su detalle se cobra desde "Por cobrar").
+  const rows=list.map(x=>{
+    const inner=`<span class="il">${esc(x.nombre)}${x.esEmp?' <span style="font-size:.58rem;font-weight:800;color:var(--r)">EMPRESA</span>':(x.ref?(' · N° '+esc(x.ref)):'')} <span style="color:var(--ink3);font-size:.7rem">(${x.n} fact.)</span>${antig(x.maxDias)}</span><span class="iv" style="font-weight:700;color:var(--r)">${facMoney(x.deuda)}${x.esEmp?' ›':''}</span>`;
+    return x.esEmp
+      ? `<div class="ir" style="cursor:pointer" onclick="cobEmpVer('${esc(x.empId)}')">${inner}</div>`
+      : `<div class="ir">${inner}</div>`;
+  }).join('');
   return `<div class="card" style="background:var(--bg);display:flex;justify-content:space-between;align-items:center"><span style="font-size:.78rem;font-weight:700">Deuda total (${list.length} cliente${list.length===1?'':'s'})</span><span style="font-weight:800;color:var(--r)">${facMoney(total)}</span></div>
     <div class="card">${rows}</div>`;
 }
+
+// Cuenta corriente de UNA empresa: sus facturas (pendientes y pagadas, con vencimiento/antigüedad), sus pagos, y el
+// saldo consolidado. Reusa el form polimórfico (cobVerFactura→cobFacturaDetalle) para registrar el pago. Interno.
+function cobEmpCuentaView(){
+  if(S.cob.facturas===null || S.cob.pagos===null) return `<div class="card">Cargando…</div>`;
+  const E=S.cob.empVer;
+  const facs=(S.cob.facturas||[]).filter(f=>f.clienteTipo==='empresa' && f.clienteId===E && f.estado!=='anulada')
+    .sort((a,b)=>String(b.periodo||'').localeCompare(String(a.periodo||'')) || String(b.nroComprobante||'').localeCompare(String(a.nroComprobante||'')));
+  const nombre=(facs[0] && (facs[0].clienteNombre||facs[0].nombre)) || E;
+  const saldoTot=facs.filter(f=>f.estado==='emitida').reduce((s,f)=>s+((Number(f.total)||0)-cobPagadoDe(f.id)),0);
+  const facRows = facs.length ? facs.map(f=>{
+    const pagado=cobPagadoDe(f.id); const saldo=(Number(f.total)||0)-pagado; const pend=f.estado==='emitida' && saldo>0.001;
+    const accion = pend ? `<button class="btn-r" style="width:auto;padding:.25rem .6rem;font-size:.66rem;margin-top:.3rem" onclick="cobVerFactura('${f.id}')">Registrar pago</button>` : '';
+    return `<div style="padding:.55rem 0;border-top:1px solid var(--border2)"><div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div><div style="font-weight:700;font-size:.82rem">${esc(f.nroComprobante||'—')} ${facEstBadge(f.estado)}</div>
+      <div style="font-size:.68rem;color:var(--ink3)">${esc(periodoLbl2(f.periodo))} · Total ${facMoney(f.total)}${pagado>0?(' · Pagado '+facMoney(pagado)):''}</div>
+      <div style="margin-top:.15rem">${facVencChip(f)}</div>${accion}</div>
+      <div style="text-align:right"><div style="font-size:.66rem;color:var(--ink3)">saldo</div><div style="font-weight:800;color:${saldo>0.001?'var(--r)':'var(--verde,#1D9E75)'}">${facMoney(saldo)}</div></div></div></div>`;
+  }).join('') : `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem">Sin facturas.</div>`;
+  const pagos=(S.cob.pagos||[]).filter(p=>facs.some(f=>f.id===p.facturaId)).slice()
+    .sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')));
+  const pagoRows = pagos.length ? pagos.map(p=>{
+    const anul=p.estado==='anulado'; const rec = !anul ? `<button class="btn-o" style="width:auto;padding:.2rem .5rem;font-size:.64rem" onclick="cobVerReciboEmpresa('${p.id}')">Ver recibo</button>` : `<span style="font-size:.62rem;color:var(--ink3)">anulado</span>`;
+    return `<div class="ir"><span class="il" style="${anul?'text-decoration:line-through;color:var(--ink3)':''}">${esc(p.reciboNro||'—')} · ${esc(cobFechaRecibo(p.fecha))} · ${esc(cobMedioLbl(p.medio))}</span><span class="iv" style="display:flex;align-items:center;gap:.5rem"><b style="${anul?'text-decoration:line-through;color:var(--ink3)':''}">${facMoney(p.monto)}</b>${rec}</span></div>`;
+  }).join('') : `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem">Sin pagos registrados.</div>`;
+  return `<div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="cobEmpCerrar()">← Volver</button></div>
+    <div class="card"><div class="ch">${esc(nombre)} <span style="font-size:.58rem;font-weight:800;color:var(--r)">EMPRESA</span></div>
+      <div class="ir" style="border-bottom:2px solid var(--border2);padding-bottom:.4rem;margin-bottom:.3rem"><span class="il" style="font-weight:700">Saldo consolidado</span><span class="iv" style="font-weight:800;color:${saldoTot>0.001?'var(--r)':'var(--verde,#1D9E75)'}">${facMoney(saldoTot)}</span></div>
+      <div style="font-size:.72rem;font-weight:700;color:var(--ink2);margin:.5rem 0 .1rem">Facturas (${facs.length})</div>${facRows}
+      <div style="font-size:.72rem;font-weight:700;color:var(--ink2);margin:.8rem 0 .1rem">Pagos (${pagos.length})</div>${pagoRows}
+    </div>`;
+}
+// Recibo imprimible del pago (empresa o persona) — en el PANEL, lo imprime el staff. Calco de facComprobante.
+function cobReciboView(){
+  const r=S.cob.recibo||{}; const p=r.pago||{}; const f=r.factura||{};
+  const esEmp=f.clienteTipo==='empresa';
+  const aQuien = esEmp ? (f.clienteNombre||f.nombre||'—') : (f.nombre||'—');
+  const sub = esEmp ? 'Empresa' : (f.numeroAfiliado?('N° socio '+esc(f.numeroAfiliado)):'Particular');
+  return `<style>@media print{ body *{visibility:hidden!important} .rec-sheet,.rec-sheet *{visibility:visible!important} .rec-sheet{position:absolute;left:0;top:0;width:100%;padding:0!important} .no-print{display:none!important} }</style>
+  <div style="display:flex;gap:.4rem;margin-bottom:.8rem" class="no-print">
+    <button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="cobReciboCerrar()">← Volver</button>
+    <button class="btn-r" style="width:auto;padding:.4rem 1rem" onclick="window.print()">🖨️ Imprimir</button></div>
+  <div class="card rec-sheet" style="max-width:640px;margin:0 auto">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid var(--r);padding-bottom:.6rem;margin-bottom:.8rem">
+      <div><div style="font-size:1.3rem;font-weight:800;color:var(--r);letter-spacing:.02em">MEDICAR</div><div style="font-size:.72rem;color:var(--ink3)">Emergencias médicas · Pergamino</div></div>
+      <div style="text-align:right"><div style="font-size:.66rem;color:var(--ink3);text-transform:uppercase;letter-spacing:.05em">Recibo de pago</div><div style="font-size:1.05rem;font-weight:800;letter-spacing:.03em">${esc(p.reciboNro||'—')}</div></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.5rem">
+      <div><div style="font-weight:700">${esc(aQuien)}</div><div style="color:var(--ink3);font-size:.75rem">${sub}</div></div>
+      <div style="text-align:right"><div style="color:var(--ink3);font-size:.72rem">Fecha</div><div style="font-weight:700">${esc(cobFechaRecibo(p.fecha))}</div></div>
+    </div>
+    <div class="ir" style="padding:.4rem 0;border-top:1px solid var(--border2)"><span class="il" style="color:var(--ink3)">Comprobante</span><span class="iv" style="font-weight:700">${esc(f.nroComprobante||f.periodo||'—')}</span></div>
+    <div class="ir" style="padding:.3rem 0"><span class="il" style="color:var(--ink3)">Medio de pago</span><span class="iv">${esc(cobMedioLbl(p.medio))}</span></div>
+    <div style="display:flex;justify-content:space-between;margin-top:.6rem;padding-top:.5rem;border-top:2px solid var(--r);font-size:1.05rem;font-weight:800"><span>PAGADO</span><span>${facMoney(p.monto)}</span></div>
+    <div style="margin-top:1rem;padding-top:.6rem;border-top:1px dashed var(--border2);font-size:.66rem;color:var(--ink3);line-height:1.5">Comprobante interno — no válido como factura fiscal (ARCA/AFIP). Recibo de pago del club.</div>
+  </div>`;
+}
+function periodoLbl2(p){ const m=String(p||'').match(/^(\d{4})-(\d{2})$/); if(!m) return String(p||'—'); const ms=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; return (ms[parseInt(m[2],10)-1]||m[2])+' '+m[1]; }
 
 function facHoyISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 
