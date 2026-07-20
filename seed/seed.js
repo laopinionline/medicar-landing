@@ -69,7 +69,6 @@ async function ensureUserDoc(uid, u) {
       rol: u.rol,
       email: u.email,
       nombre: u.nombre,
-      afiliadoId: null, // gancho a la estructura de Administracion (vacio por ahora)
       medicoId: null,   // gancho a la estructura Medica (vacio por ahora)
       creadoEn: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -78,7 +77,6 @@ async function ensureUserDoc(uid, u) {
     // Idempotente: refresca campos base sin pisar creadoEn ni vinculos ya seteados.
     const cur = snap.data() || {};
     const upd = { rol: u.rol, email: u.email, nombre: u.nombre };
-    if (cur.afiliadoId === undefined) upd.afiliadoId = null;
     if (cur.medicoId === undefined) upd.medicoId = null;
     await ref.set(upd, { merge: true });
     console.log(`[doc]  ok:       usuarios/${uid} (merge)`);

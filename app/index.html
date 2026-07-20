@@ -812,7 +812,6 @@ async function enterWithFbUser(fbUser){
     roles:roles,            // array completo (multi-rol)
     rol:roles[0],           // rol ACTIVO de sesión (arranca en el espejo; se fija al elegir)
     nombre:data.nombre||fbUser.email||'',
-    afiliadoId:(data.afiliadoId!==undefined?data.afiliadoId:null),
     medicoId:(data.medicoId!==undefined?data.medicoId:null),
     personaId:(data.personaId!==undefined?data.personaId:null),
     unidad:(data.unidad!==undefined?data.unidad:null),
