@@ -1899,6 +1899,7 @@ function dspAltaDirecta(){ const d=dspState(); const q=/^\d+$/.test((d&&d.q)||''
 function dspReset(){ S.dsp={stage:'buscar'}; render(); }
 
 function dDespForm(d){
+  afEnsureCalles(); // F1: precarga NO-bloqueante del callejero para el datalist del domicilio (jamás se espera)
   return `
   ${ d.paciente ? dCapsula(d) : dAlta(d) }
   ${ dAntecedentes(d) }
@@ -1912,8 +1913,8 @@ function dDespForm(d){
   </div>
   <div class="card">
     <div class="st">Ubicación de la atención</div>
-    <div class="field"><label>Domicilio</label><input id="dom" type="text" placeholder="Calle y número" autocomplete="off"></div>
-    <div style="font-size:.62rem;color:var(--ink3);margin:-.35rem 0 .55rem">Normalización contra callejero/IDE Pergamino: pendiente (llega con el módulo de arribo/geo).</div>
+    <div class="field"><label>Domicilio</label><input id="dom" list="calles-list" type="text" placeholder="Calle y número" autocomplete="off"><datalist id="calles-list">${afCallesOpts()}</datalist></div>
+    <div style="font-size:.62rem;color:var(--ink3);margin:-.35rem 0 .55rem">El callejero sugiere la calle; se admite texto libre (rural, calle nueva). La normalización canónica se resuelve al guardar.</div>
     <div class="field"><label>Tipo de lugar</label><select id="tlugar">
       <option value="">Seleccionar…</option>
       <option value="domiciliaria">Domiciliaria</option>
@@ -2092,6 +2093,7 @@ async function dspCrear(){
   const motivo=(document.getElementById('mot')?.value||'').trim();
   const codigo=d.codigo||'';
   const domicilio=(document.getElementById('dom')?.value||'').trim();
+  const domCanon=resolverCalleId(domicilio); // F1: {calleId,altura} SÍNCRONO desde el callejero ya en memoria (sin red; null si no cargó/no matchea)
   const tipoLugar=document.getElementById('tlugar')?.value||'';
   const antec=[...document.querySelectorAll('.dsp-ant:checked')].map(c=>c.value);
   const antecedentesOtros = antec.includes('otros') ? (document.getElementById('ant-otros-txt')?.value||'').trim() : '';
@@ -2147,6 +2149,7 @@ async function dspCrear(){
         movilId:null, choferId:null, medicoId:null, // recursos: se asignan en fases siguientes
         despachadorId:S.user.uid,          // gancho de atribución (quién despachó)
         domicilio:domicilio, tipoLugar:tipoLugar,
+        calleId:domCanon.calleId, altura:domCanon.altura, // F1: clave canónica (calleId,altura) para el eje LUGAR; null si no matchea callejero (fallback honesto)
         motivoLlamado:motivo, codigoPresuntivo:codigo,
         antecedentes:antec,
         antecedentesOtros:antecedentesOtros, // texto libre del "otros" (campo aparte, lista queda limpia)
@@ -5399,7 +5402,7 @@ function afForm(){ return S.af.edit==='new' ? afFormNew() : afFormEdit(); }
 
 /* ---- Callejero (datalist offline) + geocode-on-save (Tramo 3). REUSA el motor geo de episodios. ---- */
 function afCallesOpts(){ return (S.callesPergamino||[]).map(c=>`<option value="${esc(c)}"></option>`).join(''); }
-function afInjectCalles(){ const dl=document.getElementById('af-calles-list'); if(dl && S.callesPergamino && dl.childElementCount!==S.callesPergamino.length){ dl.innerHTML=afCallesOpts(); } }
+function afInjectCalles(){ const opts=afCallesOpts(); ['af-calles-list','calles-list'].forEach(id=>{ const dl=document.getElementById(id); if(dl && S.callesPergamino && dl.childElementCount!==S.callesPergamino.length){ dl.innerHTML=opts; } }); } // F1: llena el datalist del alta Y el del domicilio del episodio
 function afEnsureCalles(){ // lazy-load una sola vez del callejero (589 nombres); no bloquea el render
   if(S.callesPergamino){ afInjectCalles(); return Promise.resolve(S.callesPergamino); }
   if(S._callesP) return S._callesP;
@@ -7009,6 +7012,30 @@ function normalizarDireccion(dom){
   if(m){ const calle=geoNormStreet(m[1]), altura=parseInt(m[2],10); if(calle&&altura>0&&altura<20000) return {calle,altura,isRural:false}; }
   const calle=geoNormStreet(d);
   return { calle:calle||null, altura:null, isRural:!calle };
+}
+/* ===================== F1 — CALLEJERO CANÓNICO (precondición del eje LUGAR / Área Protegida) =====================
+   calleId ESTABLE = slug determinista del nombre EXACTO del callejero (589 entradas → 589 ids únicos, 0 colisión).
+   Identidad ≠ matcheo: el slug identifica; geoNormStreet (tolerante a Av/Dr/Pasaje/acentos) sólo BUSCA.
+   Las claves de búsqueda ambiguas (2+ calles distintas colapsan bajo geoNormStreet, p.ej. "Belgrano"/"Pasaje
+   Belgrano") NO adivinan → resuelven a null. El alias VERDADERO (Mitre/Bartolomé Mitre) queda como residual
+   pendiente de F2 (mapa curado a mano). Todo client-side y SÍNCRONO: jamás bloquea el camino crítico del despacho. */
+function calleSlug(nombre){ return geoStripAccents(String(nombre||'')).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
+function callesIndex(){ // índice de búsqueda memoizado: geoNormStreet(entrada) -> {calleId,nombre} | null (ambiguo)
+  if(S._callesIdx) return S._callesIdx;
+  const list=S.callesPergamino||[]; const m=new Map();
+  for(const nombre of list){ const k=geoNormStreet(nombre); if(!k) continue;
+    if(m.has(k)) m.set(k,null);                               // 2+ calles distintas bajo la misma clave → ambiguo
+    else m.set(k,{ calleId:calleSlug(nombre), nombre }); }
+  if(list.length) S._callesIdx=m;                            // sólo memoizo si YA cargó (no cachear índice vacío)
+  return m;
+}
+function resolverCalleId(domicilio){ // texto libre del episodio -> {calleId,altura}; miss/rural/ambiguo/sin-cargar => calleId null
+  const nd=normalizarDireccion(domicilio||'');
+  const out={ calleId:null, altura:(nd && typeof nd.altura==='number')?nd.altura:null };
+  if(!nd || nd.isRural || !nd.calle) return out;
+  const hit=callesIndex().get(nd.calle);                     // undefined=miss · null=ambiguo · {calleId} = hit
+  if(hit && hit.calleId){ out.calleId=hit.calleId; }
+  return out;
 }
 /* ---- Lazy-load de librerías (CDN) + assets ---- */
 /* Cache de promesas de carga por src: las llamadas concurrentes (p.ej. bind() disparado por
