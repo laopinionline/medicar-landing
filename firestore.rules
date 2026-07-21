@@ -549,6 +549,25 @@ service cloud.firestore {
                        && convenioOk();
     }
 
+    // direcciones_protegidas/{id} (F2, eje LUGAR): direcciones que cubre el contrato de un area protegida.
+    // empresaId -> empresas (tipo area_protegida). SIN datos de salud (solo calle/altura/etiqueta).
+    //  - read: staff operativo (el DESPACHO las lee en F3 para matchear el domicilio del episodio) + el ABM
+    //    (gestionar_afiliados). Read amplio a staff = sin PII sensible.
+    //  - create/update: SOLO el ABM del padron (gestionar_afiliados) o admin/superadmin. NO el contable, NO el
+    //    medico. Baja LOGICA via 'activo' (sin delete desde la app; superadmin conserva el catch-all). calleId
+    //    NULLABLE a proposito (calle fuera del callejero se admite con aviso). altura entero.
+    match /direcciones_protegidas/{id} {
+      allow read:   if esOperativo() || tienePermiso('gestionar_afiliados');
+      allow create: if (tienePermiso('gestionar_afiliados') || isAdmin() || esSuperadmin())
+                       && request.resource.data.keys().hasOnly(['empresaId','calleId','altura','calleTexto','etiqueta','activo','creadoEn','actualizadoEn'])
+                       && request.resource.data.keys().hasAll(['empresaId','altura','calleTexto','activo'])
+                       && request.resource.data.empresaId is string
+                       && request.resource.data.altura is int
+                       && (request.resource.data.calleId == null || request.resource.data.calleId is string);
+      allow update: if (tienePermiso('gestionar_afiliados') || isAdmin() || esSuperadmin())
+                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['calleId','altura','calleTexto','etiqueta','activo','actualizadoEn']);
+    }
+
     // staff/{id}: padron laboral del personal (Estructura 3, Bloque 3). id == uid del usuario; apunta a
     // personas via personaId (== id). rol laboral medico|chofer|despachante|administrativo + matricula.
     //  - Lectura: rol INTERNO.
