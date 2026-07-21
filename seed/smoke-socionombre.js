@@ -1,7 +1,7 @@
 // Smoke — socioNombreDe(): no duplica el apellido cuando `nombre` ya lo trae (bug "Torres, Lucía Torres").
-const fs=require('fs'), vm=require('vm'), path=require('path');
-const lines=fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8').split('\n');
-const src=lines.slice(5207,5216).join('\n'); // function socioNombreDe(per){...}
+const vm=require('vm');
+const { lines, fn }=require('./lib/extract'); // extracción POR NOMBRE
+const src=fn(lines('app/index.html'), 'socioNombreDe');
 const sandbox={}; vm.runInNewContext(`${src}\n globalThis.__f__=socioNombreDe;`, sandbox, {timeout:3000});
 const f=sandbox.__f__;
 let ok=0, fail=0; const t=(l,got,exp)=>{ const c=got===exp; (c?ok++:fail++); console.log(`${c?'✓':'✗'} ${l} → "${got}"${c?'':' (esperaba "'+exp+'")'}`); };

@@ -14,9 +14,8 @@ const bundled=fs.readFileSync(path.join(root,'android','app','src','main','asset
 t('el index bundleado tiene la guarda staff-nativo', /staffNativoView/.test(bundled) && /esAppNativa/.test(bundled));
 
 // 3) esAppNativa: false en web (sin window.Capacitor), true en nativo
-const lines=socio.split('\n');
-const a=lines.findIndex(l=>/^function esAppNativa\(/.test(l));
-const src=lines.slice(a,a+1).join('\n')+'\n';
+const { lines: extractLines, fn }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const src=fn(extractLines('socio/index.html'), 'esAppNativa')+'\n';
 const run=(cap)=>{ const sb={ window: cap?{Capacitor:{isNativePlatform:()=>true}}:{} }; vm.runInNewContext(`var window=this.window;${src}\n this.r=esAppNativa();`, sb, {timeout:2000}); return sb.r; };
 t('esAppNativa() = false en el NAVEGADOR (sin window.Capacitor)', run(false)===false);
 t('esAppNativa() = true en la app NATIVA (Capacitor inyecta window.Capacitor)', run(true)===true);

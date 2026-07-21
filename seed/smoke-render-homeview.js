@@ -1,18 +1,16 @@
 // Smoke de RENDER (no de sintaxis): ejecuta homeView() real con fixtures de credencial.
 // Objetivo: cazar referencias peladas (ReferenceError) en el template — clase de bug F-3.
-const fs = require('fs');
 const vm = require('vm');
-const path = require('path');
-
-const html = fs.readFileSync(path.join(__dirname, '..', 'socio', 'index.html'), 'utf8');
-const lines = html.split('\n');
-const slice = (a, b) => lines.slice(a - 1, b).join('\n'); // 1-based inclusivo
+const { lines, sym, syms } = require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código; auto función/const)
+const L = lines('socio/index.html');
 
 // Funciones REALES que toca la sección (renderizan de verdad):
-const esc        = slice(573, 573);
-const socioMoney = slice(646, 646);
-const periodoLbl = slice(655, 659);
-const homeView   = slice(934, 1154);
+const esc        = sym(L, 'esc');
+const socioMoney = sym(L, 'socioMoney');
+const periodoLbl = sym(L, 'periodoLbl');
+// helpers reales de la lista de comprobantes (los usa homeView; las sub-partes nuevas —venc/recibo— van stubeadas abajo)
+const cuentaHelpers = syms(L, ['facBadge', 'comprobantesOrdenadas', 'comprobanteDetalle', 'comprobanteRow']);
+const homeView   = sym(L, 'homeView');
 
 // Stubs de dependencias externas de homeView (browser/otras vistas). Devuelven '' → no importan para el render smoke.
 const stubs = `
@@ -28,9 +26,15 @@ const stubs = `
   function homeParamsBlock(){return '';} function homeReporteBlock(){return '';}
   function instalar(){} function salir(){} function reservarSlot(){} function cancelarTurnoUI(){}
   function turnoSetPara(){}
+  // deps sumadas después de la calibración (turnos/crédito/recibo/vencimiento) → stub a '' para conservar lo que el smoke probaba.
+  function waLink(){return '';} function vencLineaSocio(){return '';} function recibosComprobante(){return '';}
+  function movimientosCredito(){return '';} function tsMs(){return null;} function medioLabel(){return '';}
+  function fmtFechaRecibo(){return '';} function pagosDeFactura(){return [];} function fechaTurnoLbl(){return '';}
+  function solicitudesBandejaBlock(){return '';} function misReferentesBlock(){return '';} function seguirFamiliarBlock(){return '';}
+  function cargarSolicitudesTitular(){}
 `;
 
-const src = `${esc}\n${socioMoney}\n${periodoLbl}\n${stubs}\n${homeView}\n; homeView();`;
+const src = `${esc}\n${socioMoney}\n${periodoLbl}\n${cuentaHelpers}\n${stubs}\n${homeView}\n; homeView();`;
 
 const FACT = (o={}) => Object.assign({
   id:'f'+Math.random().toString(36).slice(2,6), periodo:'2099-07',

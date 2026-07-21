@@ -3,17 +3,17 @@
  *  - cobEmpCuentaView: cuenta corriente (facturas pend/pagadas + vencimiento, pagos, saldo consolidado, Registrar pago).
  *  - cobReciboView: recibo imprimible A NOMBRE DE LA EMPRESA (razón social) + leyenda no-fiscal + "Recibo de pago".
  * node seed/smoke-render-empresa-cobro.js */
-const fs = require('fs'), vm = require('vm'), path = require('path');
-const L = fs.readFileSync(path.join(__dirname, '..', 'app', 'index.html'), 'utf8').split('\n');
-const slice = (a, b) => L.slice(a - 1, b).join('\n');
+const vm = require('vm');
+const { lines, fn, fns } = require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L = lines('app/index.html');
 let ok = 0, fail = 0;
 const has = (l, s, n) => { const p = typeof s === 'string' && s.includes(n); console.log(`${p ? '✓' : '✗ FALLO'} ${l}`); p ? ok++ : fail++; };
 const noThrow = (l, fn) => { try { const r = fn(); ok++; console.log('✓ ' + l); return r; } catch (e) { fail++; console.log('✗ FALLO ' + l + ' → ' + e.message); return null; } };
 
 // helpers reales usados por las vistas
-const helpers = slice(4849, 4850) + '\n' + slice(5012, 5012); // cobFechaRecibo, cobMedioLbl, periodoLbl2
-const cobEmp = slice(4958, 4986);   // cobEmpCuentaView
-const cobRec = slice(4988, 5011);   // cobReciboView
+const helpers = fns(L, ['cobFechaRecibo', 'cobMedioLbl', 'periodoLbl2']);
+const cobEmp = fn(L, 'cobEmpCuentaView');
+const cobRec = fn(L, 'cobReciboView');
 
 const stubs = `
   function esc(s){ return String(s==null?'':s); }

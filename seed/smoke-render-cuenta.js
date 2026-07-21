@@ -1,8 +1,9 @@
 // Smoke de RENDER — Vista de cuenta del socio (bloque único de comprobantes).
-const fs=require('fs'); const vm=require('vm'); const path=require('path');
-const lines=fs.readFileSync(path.join(__dirname,'..','socio','index.html'),'utf8').split('\n');
-const sl=(a,b)=>lines.slice(a-1,b).join('\n');
-const esc=sl(573,573), socioMoney=sl(648,648), periodoLbl=sl(657,661), chv=sl(925,925), cuenta=sl(664,705), homeView=sl(974,1155);
+const vm=require('vm');
+const { lines, sym, fns }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L=lines('socio/index.html');
+const esc=sym(L,'esc'), socioMoney=sym(L,'socioMoney'), periodoLbl=sym(L,'periodoLbl'), chv=sym(L,'chv');
+const cuenta=fns(L,['facBadge','comprobanteDetalle','comprobanteRow','comprobantesOrdenadas','comprobantesFullView']), homeView=sym(L,'homeView');
 
 const stubs=`
   const S=__S__;
@@ -11,7 +12,12 @@ const stubs=`
   function planPrecioTotal(){return 0;} function fmtDni(){return '';} function fechaTurno(){return '';} function fromMin(){return '';}
   function toMin(){return 0;} function fstr(){return '';} function pad2(n){return String(n);}
   function homeChequeoBlock(){return '';} function homeFeedBlock(){return '';} function homeParamsBlock(){return '';} function homeReporteBlock(){return '';}
-  function instalar(){} function salir(){} function reservarSlot(){} function cancelarTurnoUI(){} function turnoSetPara(){} function abrirComprobantes(){} function navBack(){}
+  function instalar(){} function salir(){} function reservarSlot(){} function cancelarTurnoUI(){} function turnoSetPara(){} function navBack(){}
+  // deps sumadas después de la calibración (turnos/crédito/recibo/vencimiento/referente) → stub a '' (conserva lo probado).
+  function waLink(){return '';} function vencLineaSocio(){return '';} function recibosComprobante(){return '';}
+  function movimientosCredito(){return '';} function tsMs(){return null;} function badgeDe(){return '';}
+  function solicitudesBandejaBlock(){return '';} function misReferentesBlock(){return '';} function seguirFamiliarBlock(){return '';}
+  function cargarSolicitudesTitular(){} function pagosDeFactura(){return [];}
 `;
 const src=`${esc}\n${socioMoney}\n${periodoLbl}\n${chv}\n${stubs}\n${cuenta}\n${homeView}\n`;
 

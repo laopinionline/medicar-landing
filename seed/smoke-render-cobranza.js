@@ -1,18 +1,15 @@
 // Smoke de RENDER (leccion F-3): ejecuta las vistas de Cobranza con fixtures, no solo compila.
 // Verifica que cobPanel/cobPorCobrarView/cobFacturaDetalle/cobDeudaView devuelven string sin throw
 // y que el saldo derivado (total - Σ pagos registrados no anulados) sale bien.
-const fs = require('fs');
 const vm = require('vm');
-const path = require('path');
+const { lines, fn, range } = require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
 
-const html = fs.readFileSync(path.join(__dirname, '..', 'app', 'index.html'), 'utf8');
-const lines = html.split('\n');
-const slice = (a, b) => lines.slice(a - 1, b).join('\n');
-
-const esc        = slice(1608, 1608);
-const facMoney   = slice(3931, 3931);
-const facEstBadge= slice(4327, 4327);
-const cobranza   = slice(4527, 4721); // bloque C-2/E-3 completo (helpers + vistas + motor)
+const L = lines('app/index.html');
+const esc        = fn(L, 'esc');
+const facMoney   = fn(L, 'facMoney');
+const facEstBadge= fn(L, 'facEstBadge');
+// región C-2/E-3 (helpers + vistas) por nombres, + las vistas de crédito que quedaron después de facHoyISO.
+const cobranza   = range(L, 'cobPagosDe', 'periodoLbl2') + '\n' + fn(L, 'facHoyISO') + '\n' + fn(L, 'cobCreditoView') + '\n' + fn(L, 'cobReintegroPrompt');
 
 const stubs = `
   const S = __S__;

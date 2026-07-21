@@ -5,10 +5,10 @@
 //  - pg() afiliado NO rutea hist/turnos/aHome/plan (solo perfil; resto '').
 //  - pg() admin NO rutea guardias/atenciones (solo home/perfil de esos ids).
 //  - entrarConRol('afiliado') REDIRIGE a ../socio/ y NO fija S.user.rol.
-const fs=require('fs'), vm=require('vm'), path=require('path');
-const lines=fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8').split('\n');
-const sl=(a,b)=>lines.slice(a-1,b).join('\n');
-const entrarConRol=sl(785,792), getTabs=sl(882,905), pg=sl(907,921);
+const vm=require('vm');
+const { lines, fn }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L=lines('app/index.html');
+const entrarConRol=fn(L,'entrarConRol'), getTabs=fn(L,'getTabs'), pg=fn(L,'pg');
 
 // Vistas y helpers stubeados: cada vista devuelve su propio nombre para poder assertar el ruteo.
 const VIEWS=['miPerfil','movPanel','cronoPanel','agendaTurnosPanel','mHome','bandeja','medAlertas',
