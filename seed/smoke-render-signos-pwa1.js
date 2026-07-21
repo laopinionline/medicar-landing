@@ -1,9 +1,9 @@
 // Smoke de RENDER (PWA-1): ejecuta paramsFormView() con fixture y verifica los 4 signos + su botón "i".
-const fs=require('fs'); const vm=require('vm'); const path=require('path');
-const lines=fs.readFileSync(path.join(__dirname,'..','socio','index.html'),'utf8').split('\n');
-const sl=(a,b)=>lines.slice(a-1,b).join('\n');
+const vm=require('vm');
+const { lines, sym, konst, fn }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L=lines('socio/index.html');
 
-const esc=sl(571,571); const TEL=sl(565,565); const PARAMS=sl(1419,1424); const paramsFormView=sl(1471,1503);
+const esc=sym(L,'esc'); const TEL=konst(L,'TEL_EMERG'); const PARAMS=konst(L,'PARAMS')+'\n'+konst(L,'SIGNOS_INFO'); const paramsFormView=fn(L,'paramsFormView');
 const stubs=`const S=__S__; function chv(){return '';} const IC={phone:''};`;
 const src=`${esc}\n${TEL}\n${PARAMS}\n${stubs}\n${paramsFormView}\n`;
 

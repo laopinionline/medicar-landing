@@ -3,10 +3,10 @@
  *  - cobCreditoView (panel): socios con saldo != 0 → a favor (verde + Reintegrar) / deuda (rojo, sin botón).
  *  - movimientosCredito (socio): lista origen/consumo/reintegro/origen-revertido con el tono correcto.
  * node seed/smoke-render-credito-f4.js */
-const fs = require('fs'), vm = require('vm'), path = require('path');
-const appLines = fs.readFileSync(path.join(__dirname, '..', 'app', 'index.html'), 'utf8').split('\n');
-const socLines = fs.readFileSync(path.join(__dirname, '..', 'socio', 'index.html'), 'utf8').split('\n');
-const slice = (arr, a, b) => arr.slice(a - 1, b).join('\n');
+const vm = require('vm');
+const { lines, fn } = require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const appLines = lines('app/index.html');
+const socLines = lines('socio/index.html');
 
 let ok = 0, fail = 0;
 const has = (label, str, needle) => { const p = typeof str === 'string' && str.includes(needle); console.log(`${p ? '✓' : '✗ FALLO'} ${label}`); p ? ok++ : fail++; };
@@ -19,7 +19,7 @@ const stubsApp = `
   function facMoney(n){ return '$'+(Number(n)||0); }
   function puedeCobrar(){ return true; }
 `;
-const cobCredito = slice(appLines, 4986, 5002); // function cobCreditoView(){...}
+const cobCredito = fn(appLines, 'cobCreditoView');
 function runCob(saldos, fact) {
   const src = stubsApp.replace('__SALDOS__', JSON.stringify(saldos)).replace('__FACT__', JSON.stringify(fact)) + '\n' + cobCredito + '\n; cobCreditoView();';
   return vm.runInNewContext(src, {});
@@ -50,7 +50,7 @@ const stubsSoc = `
   function esc(s){ return String(s==null?'':s); }
   function socioMoney(n){ return '$'+(Number(n)||0); }
 `;
-const movCred = slice(socLines, 663, 677); // function movimientosCredito(movs){...}
+const movCred = fn(socLines, 'movimientosCredito');
 function runMov(movs) { return vm.runInNewContext(stubsSoc + '\n' + movCred + '\n; movimientosCredito(' + JSON.stringify(movs) + ');', {}); }
 
 console.log('\n— movimientosCredito (socio) —');

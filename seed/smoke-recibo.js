@@ -3,10 +3,10 @@
  *  (A) whitelist de la CF (functions/recibo.js): reciboPublico NO filtra… digo, NO EXPONE nota/registradoPor/etc.
  *  (B) render: recibosComprobante muestra solo pagos REGISTRADOS (anulados fuera) y reciboView imprimible con la
  *      leyenda no-fiscal, ejecutados con fixtures. node seed/smoke-recibo.js */
-const fs = require('fs'), vm = require('vm'), path = require('path');
+const vm = require('vm');
+const { lines, range } = require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
 const { reciboPublico } = require('../functions/recibo');
-const L = fs.readFileSync(path.join(__dirname, '..', 'socio', 'index.html'), 'utf8').split('\n');
-const slice = (a, b) => L.slice(a - 1, b).join('\n');
+const L = lines('socio/index.html');
 
 let ok = 0, fail = 0;
 const chk = (l, c, e) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}${c ? '' : (e ? '  → ' + e : '')}`); c ? ok++ : fail++; };
@@ -23,7 +23,7 @@ chk('exactamente 6 claves', Object.keys(limpio).length === 6, Object.keys(limpio
 chk('valores correctos', limpio.reciboNro === 'RC-2026-000012' && limpio.monto === 13456 && limpio.medio === 'pasarela');
 
 // (B) render — slice del bloque de helpers del recibo (medioLabel..reciboView)
-const bloque = slice(697, 733);
+const bloque = range(L, 'medioLabel', 'reciboView');
 const stubs = `
   function esc(s){ return String(s==null?'':s); }
   function socioMoney(n){ return '$'+(Number(n)||0); }

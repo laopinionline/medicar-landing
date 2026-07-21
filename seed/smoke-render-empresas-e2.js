@@ -1,17 +1,14 @@
 // Smoke de RENDER (lección F-3): ejecuta las piezas nuevas de E-2 con fixtures, no solo compila.
 // convenioLbl/Chip, facturarAField/Chip, y empFormEdit (editor contable vs chip read-only afiliados).
-const fs = require('fs');
 const vm = require('vm');
-const path = require('path');
-const html = fs.readFileSync(path.join(__dirname, '..', 'app', 'index.html'), 'utf8');
-const lines = html.split('\n');
-const slice = (a, b) => lines.slice(a - 1, b).join('\n');
+const { lines, fn, fns } = require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L = lines('app/index.html');
 
-const esc         = slice(1608, 1608);
-const facMoney    = slice(3931, 3931);
-const empPlanOpts = slice(5098, 5098);
-const empFormEdit = slice(5113, 5138);
-const e2helpers   = slice(5165, 5210);
+const esc         = fn(L, 'esc');
+const facMoney    = fn(L, 'facMoney');
+const empPlanOpts = fn(L, 'empPlanOpts');
+const empFormEdit = fn(L, 'empFormEdit');
+const e2helpers   = fns(L, ['convenioLbl', 'convenioChip', 'facturarAField', 'facturarAChip', 'empConvErr', 'empConvModoChange']);
 
 const stubs = `
   const S = __S__;

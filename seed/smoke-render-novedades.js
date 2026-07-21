@@ -1,9 +1,12 @@
 // Smoke de RENDER (PWA-2a): ejecuta el ABM de Novedades (novPanel + vistas) con fixtures.
-const fs=require('fs'); const vm=require('vm'); const path=require('path');
-const lines=fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8').split('\n');
-const sl=(a,b)=>lines.slice(a-1,b).join('\n');
-const esc=sl(1612,1612); const nov=sl(4729,4926);
-const stubs=`const S=__S__; function render(){} function navPush(){} function audit(){} const FV=()=>1; const db=null;`;
+const vm=require('vm');
+const { lines, fn, konst, range }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L=lines('app/index.html');
+const esc=fn(L,'esc'); const nov=range(L,'novEsAdmin','novEditarCerrar'); // región completa del ABM (incluye NOV_CAT y helpers)
+const stubs=`const S=__S__; function render(){} function navPush(){} function audit(){} const FV=()=>1; const db=null;
+  function puede(){return true;} function curandoNovedades(){return true;} function novRerenderPend(){} function audita(){}
+  const localStorage={getItem:()=>null,setItem:()=>{}};
+  const document={getElementById:()=>null,createElement:()=>({}),querySelector:()=>null};`;
 const src=`${esc}\n${stubs}\n${nov}\n`;
 
 const POSTS_PEND=[

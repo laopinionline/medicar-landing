@@ -1,8 +1,8 @@
 // Smoke — TABLERO FASE 1: getTabs por perfil de caps (la visibilidad de tabs = las caps, sin bypass de rol).
-const fs=require('fs'), vm=require('vm'), path=require('path');
-const lines=fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8').split('\n');
-const sl=(a,b)=>lines.slice(a-1,b).join('\n');
-const puedes=sl(876,881), getTabs=sl(883,911); // puede/puedeConfig/puedeCobrar/puedeAfil + getTabs
+const vm=require('vm');
+const { lines, fns, fn }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L=lines('app/index.html');
+const puedes=fns(L,['puede','puedeConfig','puedeCobrar','puedeAfil']), getTabs=fn(L,'getTabs');
 
 const src=`
   const IC={home:'',history:'',plan:'',dispatch:'',user:'',chart:'',users:'',register:'',settings:''};

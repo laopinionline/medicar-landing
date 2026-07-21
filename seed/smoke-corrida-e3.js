@@ -76,9 +76,9 @@ chk('corp1 (cargo) excluido de facturación (RED)', corpExcl.has('corp1') && !fa
 
 // ---- Render del COMPROBANTE de la factura de empresa (membrete N° convenio + ítem sintético) ----
 const fs = require('fs'); const vm = require('vm'); const path = require('path');
-const lines = fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8').split('\n');
-const sl = (a,b)=>lines.slice(a-1,b).join('\n');
-const srcC = `${sl(1608,1608)}\n${sl(3931,3931)}\n${sl(4327,4327)}\nconst S=__S__;\n${sl(4467,4498)}\n`;
+const { lines: xlines, fn } = require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L = xlines('app/index.html');
+const srcC = `${fn(L,'esc')}\n${fn(L,'facMoney')}\n${fn(L,'facEstBadge')}\nconst S=__S__;\n${fn(L,'facComprobante')}\n`;
 try{
   const facEmpFix = { id:'fE', clienteTipo:'empresa', clienteId:'eDemo', clienteNombre:'DEMO Convenios SA', nombre:'DEMO Convenios SA', periodo:'2099-09', total:80000, estado:'emitida', nroComprobante:'FC-2099-000009', items:[{ tipo:'convenio', descripcion:'Convenio mensual DEMO Convenios SA · 2099-09', monto:80000 }] };
   const sandbox = { console, __S__:{ fac:{ comprobante:'fE', facturas:[facEmpFix], empresas:[{ id:'eDemo', numeroConvenio:'30703' }] } } };

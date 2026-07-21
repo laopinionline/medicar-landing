@@ -1,8 +1,7 @@
 // Smoke — pg() cap-driven: el router COMPARTIDO de cap-tabs rutea para CUALQUIER rol.
-const fs=require('fs'), vm=require('vm'), path=require('path');
-const lines=fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8').split('\n');
-const sl=(a,b)=>lines.slice(a-1,b).join('\n');
-const pgSrc=sl(913,934); // function pg(){ ... }
+const vm=require('vm');
+const { lines, fn }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const pgSrc=fn(lines('app/index.html'), 'pg');
 
 const PANELS=['miPerfil','movPanel','cronoPanel','agendaTurnosPanel','catPanel','afPanel','facPanel','cobPanel','novPanel','mktPanel','audPanel','estPanel','monPanel','bandeja','medAlertas','mHome','dDesp','choferHome','superView','adHome'];
 const stubs=`

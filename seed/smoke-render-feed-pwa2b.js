@@ -1,8 +1,8 @@
 // Smoke de RENDER (PWA-2b): ejecuta homeFeedBlock() con fixtures de feed_posts (los 4 cat + vacío).
-const fs=require('fs'); const vm=require('vm'); const path=require('path');
-const lines=fs.readFileSync(path.join(__dirname,'..','socio','index.html'),'utf8').split('\n');
-const sl=(a,b)=>lines.slice(a-1,b).join('\n');
-const esc=sl(573,573); const feedBlock=sl(1158,1199);
+const vm=require('vm');
+const { lines, sym, fn, konst }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L=lines('socio/index.html');
+const esc=sym(L,'esc'); const feedBlock=konst(L,'FEED_CAT')+'\n'+fn(L,'homeFeedBlock');
 const stubs=`const S=__S__; function render(){} const db=null;`;
 const src=`${esc}\n${stubs}\n${feedBlock}\n`;
 

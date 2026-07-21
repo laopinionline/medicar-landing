@@ -1,8 +1,8 @@
 // Smoke — Fase2: plantillas de permisos (CAP_PRESETS) + render de spCardPermisos.
-const fs=require('fs'), vm=require('vm'), path=require('path');
-const lines=fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8').split('\n');
-const sl=(a,b)=>lines.slice(a-1,b).join('\n');
-const CAPS=sl(862,875), PRESETS=sl(6849,6854), spCard=sl(6862,6882);
+const vm=require('vm');
+const { lines, konst, fn }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L=lines('app/index.html');
+const CAPS=konst(L,'CAPS'), PRESETS=konst(L,'CAP_PRESETS'), spCard=fn(L,'spCardPermisos');
 
 const src=`
   function esc(s){ return String(s); }

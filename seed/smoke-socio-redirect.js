@@ -1,8 +1,8 @@
 // Smoke — /socio/ redirect del staff puro (espejo de /app/, sin loop por doble-rol).
 // Extrae la clasificación REAL de cargarCredencial (socio/index.html) y verifica la tabla de verdad.
-const fs=require('fs'), path=require('path');
-const lines=fs.readFileSync(path.join(__dirname,'..','socio','index.html'),'utf8').split('\n');
-const bloque=lines.slice(792,798).join('\n'); // 793-798: roles + STAFF + if(!afiliado){...}
+const { lines, blockFrom }=require('./lib/extract'); // extracción POR MARCADOR (robusta a mover código)
+// clasificación de acceso en cargarCredencial: desde `const roles = ...` hasta que cierra el if(!afiliado){...}.
+const bloque=blockFrom(lines('socio/index.html'), /const roles = \(Array\.isArray\(u\.roles\)/);
 
 // Envuelvo el bloque en una función: si retorna, es 'staff'/'no-afiliado'; si cae, es 'afiliado' (sigue el flujo normal).
 const clasificar=new Function('u', `${bloque}\n return { estado:'afiliado', u };`);

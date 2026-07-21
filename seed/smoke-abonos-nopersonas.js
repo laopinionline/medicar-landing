@@ -1,12 +1,9 @@
 // Smoke CRÍTICO — generarAbonos NO debe leer `personas` (el contable no puede, y leería dato clínico).
 // Extrae el cuerpo REAL de generarAbonos y grepea: cero 'personas', y usa el denorm socios.nombreVista.
-const fs=require('fs'), path=require('path');
-const src=fs.readFileSync(path.join(__dirname,'..','app','index.html'),'utf8');
-const lines=src.split('\n');
-const a=lines.findIndex(l=>/async function generarAbonos\(/.test(l));
-if(a<0){ console.log('✗ no se encontró generarAbonos'); process.exit(1); }
-let b=a; for(let i=a+1;i<lines.length;i++){ if(/^}/.test(lines[i])){ b=i; break; } }
-const body=lines.slice(a,b+1).join('\n');
+const { lines, fn }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const L=lines('app/index.html');
+const src=L.join('\n');                 // archivo completo (para el check del botón genBtn)
+const body=fn(L, 'generarAbonos');      // cuerpo de la función por nombre
 
 let ok=0, fail=0; const t=(l,c,x)=>{ (c?ok++:fail++); console.log(`${c?'✓':'✗'} ${l}${x?' → '+x:''}`); };
 
