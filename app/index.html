@@ -5329,7 +5329,7 @@ function afTsToInput(ts){ const ms=afMs(ts); if(ms==null) return ''; const d=new
 
 function afPanel(){
   if(!puedeAfil()) return `<div class="card"><div class="ch">Afiliados</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para gestionar afiliados.</div></div>`;
-  if(!S.af){ S.af={socios:null,personas:null,planes:null,empresas:null,edit:null,emp:null,altaDraft:null,showInact:false,err:'',lk:null}; afAttach(); }
+  if(!S.af){ S.af={socios:null,personas:null,planes:null,empresas:null,edit:null,emp:null,altaDraft:null,showInact:false,err:'',lk:null,dirs:null}; afAttach(); }
   else if(!S.afUnsub){ afAttach(); } // volví con el ALTA viva (S.af preservado, listener cortado) → re-attachar; los datos (socios/personas) se recargan solos
   if(S.convOpenAlta){ S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.convOpenAlta=false; } // conversión de lead en curso: abre el alta
   if(S.af.err) return `<div class="card">No se pudo cargar afiliados: ${esc(S.af.err)}</div>`;
@@ -5665,7 +5665,11 @@ function empErr(t){ const e=document.getElementById('emp-err'); if(e){ e.textCon
 function empSet(emp){ if(S.af){ S.af.emp=emp; } render(); }                 // setter puro (lo usa navRestore y el sub-nav interno)
 function empAbrir(){ if(!puedeAfil())return; if(S.af) S.af.flash=null; empSet({view:'list'}); navPush(); }   // desde el panel de afiliados
 function empNuevo(fromAlta){ if(!puedeAfil())return; if(fromAlta) afSnapshotDraft(); empSet({view:'new'}); navPush(); }
-function empEditar(id){ if(!puedeAfil())return; empSet({view:'edit',id}); navPush(); }
+function empEditar(id){ if(!puedeAfil())return; empSet({view:'edit',id});
+  const e=(S.af&&S.af.empresas||[]).find(x=>x.id===id); // F2: si es área protegida, precargo sus direcciones + el callejero (no bloquea)
+  if(e && e.tipo==='area_protegida'){ afEnsureCalles(); empDirsCargar(id); }
+  navPush();
+}
 function empCerrar(){ if(S.af) S.af.emp=null; render(); }                   // puro (lo llama navRestore al hacer atrás)
 function empPanel(){
   const emp=S.af.emp||{view:'list'};
@@ -5714,6 +5718,7 @@ function empFormEdit(id){
     <div class="field"><label>Plan por defecto</label><select id="emp-plan">${empPlanOpts(e.planIdDefault)}</select></div>
     <div class="field"><label>Estado</label><select id="emp-activo"><option value="si" ${e.activo!==false?'selected':''}>Activa</option><option value="no" ${e.activo===false?'selected':''}>Inactiva</option></select></div>
     <button class="btn-r" onclick="empGuardarEdit('${id}')">Guardar cambios</button>
+    ${e.tipo==='area_protegida' ? empDireccionesBlock(id) : ''}
     ${puedeConfig() ? `
     <div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)">Convenio de cobro <span style="text-transform:none;color:var(--ink3)">(contable)</span></div>
     <div id="emp-conv-err" class="err" style="display:none;margin-bottom:.4rem"></div>
@@ -5725,6 +5730,73 @@ function empFormEdit(id){
     <button class="btn-r" onclick="empGuardarConvenio('${id}')">Guardar convenio</button>`
     : `<div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem">${convenioChip(e.convenio)} <span style="font-size:.66rem;color:var(--ink3)">· lo edita el contable</span></div>`}
     <button class="btn-o" onclick="empSet({view:'list'})" style="margin-top:.5rem">Cancelar</button></div>`;
+}
+
+/* ===================== F2 — DIRECCIONES PROTEGIDAS (eje LUGAR) =====================
+   ABM de las direcciones que cubre el contrato del área (empresa tipo area_protegida). El "área" ES la empresa
+   (reusa razonSocial/contacto/convenio/facturación); acá solo se cargan sus N direcciones. La calle se elige del
+   callejero y se resuelve con el MISMO resolverCalleId del episodio (F1) → área y despacho canonizan idéntico por
+   construcción. calleId null (rural/nueva/ambigua) SE PERMITE con aviso: no se bloquea un contrato real. Gate:
+   gestionar_afiliados (padrón/identidad; el contable solo toca 'convenio'). El match/banner/atribución es F3. */
+function empDirErr(t){ const el=document.getElementById('emp-dir-err'); if(el){ el.textContent=t||''; el.style.display=t?'block':'none'; } }
+function empDirsCargar(empresaId){ // lazy get() de las direcciones del área (bajo volumen; no amerita onSnapshot)
+  S.af.dirs={ empresaId, items:null, err:'' }; render();
+  db.collection('direcciones_protegidas').where('empresaId','==',empresaId).get()
+    .then(s=>{ if(!S.af) return; const items=s.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.activo!==false)
+        .sort((a,b)=>(a.calleTexto||'').localeCompare(b.calleTexto||'')||((a.altura||0)-(b.altura||0)));
+      S.af.dirs={ empresaId, items, err:'' }; render(); })
+    .catch(e=>{ if(S.af){ S.af.dirs={ empresaId, items:[], err:'No se pudieron cargar las direcciones: '+(e.message||e) }; render(); } });
+}
+function empDirBadge(d){ // ✓ reconocible por el despacho / ⚠ no matcheará automáticamente
+  return d.calleId
+    ? `<span style="font-size:.58rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:var(--g,#1a7f37);color:#fff">✓ reconocible</span>`
+    : `<span style="font-size:.58rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#8a6d00;color:#fff" title="Fuera del callejero o calle ambigua: el despacho no la reconoce automáticamente; se resuelve a mano.">⚠ manual</span>`;
+}
+function empDireccionesBlock(empresaId){
+  const st=S.af.dirs;
+  const cargando = !st || st.empresaId!==empresaId || st.items===null;
+  const items = (st && st.empresaId===empresaId && Array.isArray(st.items)) ? st.items : [];
+  const rows = cargando
+    ? `<div style="font-size:.76rem;color:var(--ink3)">Cargando direcciones…</div>`
+    : (items.length ? items.map(d=>`<div class="lr"><div class="lrb"><div class="lrn" style="font-size:.86rem">${esc(d.calleTexto||'—')} ${d.altura?esc(String(d.altura)):''} ${empDirBadge(d)}</div><div class="lrs">${d.etiqueta?esc(d.etiqueta)+' · ':''}${d.calleId?('calleId: '+esc(d.calleId)):'sin calleId'}</div></div><button class="btn-o" style="padding:.3rem .6rem;font-size:.72rem" onclick="empDirQuitar('${d.id}','${empresaId}')">Quitar</button></div>`).join('')
+       : `<div style="font-size:.76rem;color:var(--ink3)">Sin direcciones cargadas.</div>`);
+  return `
+    <div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)">Direcciones protegidas <span style="text-transform:none;color:var(--ink3)">(cubiertas por el contrato)</span></div>
+    <div id="emp-dir-err" class="err" style="display:none;margin-bottom:.4rem"></div>
+    <div class="card" style="padding:.5rem">${rows}</div>
+    <div style="display:grid;grid-template-columns:1fr 5rem;gap:.4rem;margin-top:.5rem">
+      <input id="emp-dir-calle" list="calles-list" autocomplete="off" placeholder="Calle (del callejero)"><datalist id="calles-list">${afCallesOpts()}</datalist>
+      <input id="emp-dir-altura" type="number" min="1" max="19999" placeholder="Altura">
+    </div>
+    <input id="emp-dir-etiqueta" autocomplete="off" placeholder="Etiqueta opcional (portería, pileta…)" style="margin-top:.4rem">
+    <div style="font-size:.64rem;color:var(--ink3);margin:.3rem 0 .5rem">Elegí la calle del callejero para que el despacho la reconozca. Se admite una calle fuera del callejero (queda ⚠ y se resuelve a mano).</div>
+    <button class="btn-r" onclick="empDirAgregar('${empresaId}')">+ Agregar dirección</button>`;
+}
+async function empDirAgregar(empresaId){
+  if(!puedeAfil()){ return; } empDirErr('');
+  const calleTexto=(document.getElementById('emp-dir-calle')?.value||'').trim();
+  const alturaRaw=(document.getElementById('emp-dir-altura')?.value||'').trim();
+  const etiqueta=(document.getElementById('emp-dir-etiqueta')?.value||'').trim();
+  if(!calleTexto){ empDirErr('Cargá la calle.'); return; }
+  const altura=parseInt(alturaRaw,10);
+  if(!(altura>0 && altura<20000)){ empDirErr('La altura debe ser un número entre 1 y 19999.'); return; }
+  // MISMO resolver que el episodio (F1): área y despacho canonizan idéntico. null si rural/ambigua/fuera-de-callejero.
+  const canon=resolverCalleId(calleTexto+' '+altura);
+  try{
+    await db.collection('direcciones_protegidas').add({
+      empresaId, calleId:canon.calleId, altura, calleTexto, etiqueta:etiqueta||null, activo:true, creadoEn:FV()
+    });
+    audit('direccion_protegida_creada','empresa',empresaId, calleTexto+' '+altura+(canon.calleId?'':' (sin calleId)'));
+    empDirsCargar(empresaId); // recarga la lista (limpia inputs al re-render)
+  }catch(e){ empDirErr('No se pudo agregar: '+(e.message||e)); }
+}
+async function empDirQuitar(dirId, empresaId){
+  if(!puedeAfil()){ return; } empDirErr('');
+  try{
+    await db.collection('direcciones_protegidas').doc(dirId).set({ activo:false, actualizadoEn:FV() }, { merge:true }); // baja lógica (el ABM no borra)
+    audit('direccion_protegida_baja','empresa',empresaId, dirId);
+    empDirsCargar(empresaId);
+  }catch(e){ empDirErr('No se pudo quitar: '+(e.message||e)); }
 }
 async function empGuardarNuevo(){
   if(!puedeAfil()) return; empErr('');
@@ -7017,9 +7089,30 @@ function normalizarDireccion(dom){
    calleId ESTABLE = slug determinista del nombre EXACTO del callejero (589 entradas → 589 ids únicos, 0 colisión).
    Identidad ≠ matcheo: el slug identifica; geoNormStreet (tolerante a Av/Dr/Pasaje/acentos) sólo BUSCA.
    Las claves de búsqueda ambiguas (2+ calles distintas colapsan bajo geoNormStreet, p.ej. "Belgrano"/"Pasaje
-   Belgrano") NO adivinan → resuelven a null. El alias VERDADERO (Mitre/Bartolomé Mitre) queda como residual
-   pendiente de F2 (mapa curado a mano). Todo client-side y SÍNCRONO: jamás bloquea el camino crítico del despacho. */
+   Belgrano") NO adivinan → resuelven a null. El alias VERDADERO (Mitre/Bartolomé Mitre) lo pliega CALLE_ALIAS
+   (F2). Todo client-side y SÍNCRONO: jamás bloquea el camino crítico del despacho. */
 function calleSlug(nombre){ return geoStripAccents(String(nombre||'')).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,''); }
+/* F2 — MAPA DE ALIAS (residual de F1). El callejero trae la MISMA calle física con dos nombres (p.ej. "Mitre"
+   y "Bartolomé Mitre") como entradas separadas → calleIds distintos → un área declarada con una y un episodio
+   tipeado con la otra NO matchearían = se le facturaría a alguien cubierto. calleCanon() pliega la variante al
+   slug canónico, aplicado en LAS DOS PUNTAS (episodio y alta de dirección), así ambas aterrizan en el mismo id.
+   ⚠️ PROPUESTA CONSERVADORA — PENDIENTE DE VALIDACIÓN DE LUCAS (conocimiento local: si "Liniers" y "Boulevard
+   Liniers" son la misma calle o dos, lo sabe él). Se incluyeron solo variantes tipográficas (título/artículo/
+   nombre completo del MISMO referente); se EXCLUYERON todos los "Pasaje X" y los homónimos de personas distintas.
+   Editar/borrar según Lucas. clave = slug variante · valor = slug canónico. */
+const CALLE_ALIAS = {
+  'mitre': 'bartolome-mitre',                                  // Mitre ⇄ Bartolomé Mitre (nombre completo)
+  'felipe-gomez': 'dr-felipe-gomez',                           // Dr (título)
+  'monsenor-scalabrini': 'avenida-monsenor-scalabrini',        // Avenida (tipo de vía)
+  'marcelino-ugarte': 'boulevard-marcelino-ugarte',            // Boulevard (tipo de vía)
+  'liniers': 'boulevard-liniers',                              // Boulevard (tipo de vía)
+  'saenz-pena': 'roque-saenz-pena',                            // Roque (nombre completo)
+  'scalabrini-ortiz': 'raul-scalabrini-ortiz',                 // Raúl (nombre completo; ≠ Monseñor Scalabrini)
+  'pedroni': 'jose-pedroni',                                   // José (nombre completo)
+  'saucedo': 'dr-manuel-saucedo',                              // Saucedo ⇄ Dr Manuel Saucedo (3 entradas → 1)
+  'doctor-m-saucedo': 'dr-manuel-saucedo'                      // Doctor M. Saucedo ⇄ Dr Manuel Saucedo
+};
+function calleCanon(slug){ return (slug && CALLE_ALIAS[slug]) || slug || null; } // pliega variante→canónico; identidad si no hay alias
 function callesIndex(){ // índice de búsqueda memoizado: geoNormStreet(entrada) -> {calleId,nombre} | null (ambiguo)
   if(S._callesIdx) return S._callesIdx;
   const list=S.callesPergamino||[]; const m=new Map();
@@ -7034,7 +7127,7 @@ function resolverCalleId(domicilio){ // texto libre del episodio -> {calleId,alt
   const out={ calleId:null, altura:(nd && typeof nd.altura==='number')?nd.altura:null };
   if(!nd || nd.isRural || !nd.calle) return out;
   const hit=callesIndex().get(nd.calle);                     // undefined=miss · null=ambiguo · {calleId} = hit
-  if(hit && hit.calleId){ out.calleId=hit.calleId; }
+  if(hit && hit.calleId){ out.calleId=calleCanon(hit.calleId); } // F2: pliega alias verdadero al slug canónico
   return out;
 }
 /* ---- Lazy-load de librerías (CDN) + assets ---- */
