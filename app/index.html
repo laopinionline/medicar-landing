@@ -1913,7 +1913,8 @@ function dDespForm(d){
   </div>
   <div class="card">
     <div class="st">Ubicación de la atención</div>
-    <div class="field"><label>Domicilio</label><input id="dom" list="calles-list" type="text" placeholder="Calle y número" autocomplete="off"><datalist id="calles-list">${afCallesOpts()}</datalist></div>
+    <div class="field"><label>Domicilio</label><input id="dom" list="calles-list" type="text" placeholder="Calle y número" autocomplete="off" oninput="dspDomChange()"><datalist id="calles-list">${afCallesOpts()}</datalist></div>
+    <div id="dsp-area-banner"></div>
     <div style="font-size:.62rem;color:var(--ink3);margin:-.35rem 0 .55rem">El callejero sugiere la calle; se admite texto libre (rural, calle nueva). La normalización canónica se resuelve al guardar.</div>
     <div class="field"><label>Tipo de lugar</label><select id="tlugar">
       <option value="">Seleccionar…</option>
@@ -2085,6 +2086,32 @@ async function resolverAtribucion(personaId){
     console.warn('[resolverAtribucion] degradado a null (la atención sigue):', e);
     return { socioId:null, planSnapshot:null };
   }
+}
+
+/* ===================== F3a — BANNER de Área Protegida (señal read-only en el despacho) =====================
+   Al tipear el domicilio, si (calleId,altura) matchea una dirección protegida ACTIVA de un área (empresa
+   tipo area_protegida) ACTIVA, muestra un aviso INFORMATIVO. NO bloqueante. NO toca dspCrear ni la atribución
+   (eso es F3b). Fire-and-forget: actualiza SOLO el nodo #dsp-area-banner, JAMÁS llama render() → no interrumpe
+   el tipeo. Falla/tarda/calleId-null → banner vacío y el despacho sigue igual. */
+let _dspAreaT=null;
+function dspDomChange(){ if(_dspAreaT) clearTimeout(_dspAreaT); _dspAreaT=setTimeout(dspAreaMatch, 400); } // debounce ~400ms
+function dspAreaSet(html){ const el=document.getElementById('dsp-area-banner'); if(el) el.innerHTML=html||''; }
+function dspAreaKey(){ try{ const c=resolverCalleId((document.getElementById('dom')?.value||'').trim()); return (c.calleId && c.altura>0)?(c.calleId+'|'+c.altura):null; }catch(_){ return null; } }
+async function dspAreaMatch(){
+  const el=document.getElementById('dsp-area-banner'); if(!el) return;      // sólo en el form de despacho
+  const key=dspAreaKey();
+  if(!key){ dspAreaSet(''); return; }                                       // rural / ⚠ manual / vacío → sin banner
+  const [calleId, alturaStr]=key.split('|'); const altura=parseInt(alturaStr,10);
+  try{
+    const qs=await db.collection('direcciones_protegidas').where('calleId','==',calleId).where('altura','==',altura).where('activo','==',true).limit(5).get();
+    if(dspAreaKey()!==key) return;                                          // stale: el domicilio cambió → gana la query nueva
+    let area=null;
+    for(const dd of qs.docs){ const empId=dd.data().empresaId; if(!empId) continue;
+      const es=await db.collection('empresas').doc(empId).get();
+      if(dspAreaKey()!==key) return;
+      if(es.exists){ const e=es.data(); if(e.activo!==false && e.tipo==='area_protegida'){ area=e.razonSocial||'Área protegida'; break; } } }
+    dspAreaSet(area ? `<div style="background:#0a7d34;color:#fff;border-radius:10px;padding:.5rem .7rem;margin:.15rem 0 .5rem;font-size:.82rem;font-weight:600">🏠 Dirección en Área Protegida: ${esc(area)} — cubierto por contrato</div>` : '');
+  }catch(_){ dspAreaSet(''); }                                             // falla/red → sin banner, el despacho sigue igual
 }
 
 async function dspCrear(){
