@@ -35,7 +35,7 @@ const { origenPorSobrepago, consumoCredito } = require('./creditos'); // Crédit
 const { agruparFacturas, facturaDoc, fmtComprobante, vencimientoISO } = require('./facturas-nucleo'); // Facturación Fase 2: núcleo puro (paridad con el motor cliente) + vencimiento
 const { crearPreferencia, verificarWebhook } = require('./pasarela-adapter'); // Pasarela: adaptador del proveedor (SIM completo, real stub)
 const { reciboPublico } = require('./recibo'); // Recibo del socio: proyección pública de un pago (campos limpios)
-const { cargoDeEpisodio } = require('./cargos-nucleo'); // Facturación: núcleo puro de cargos (paridad con el motor cliente)
+const { cargoDeEpisodio, fmtIncidente } = require('./cargos-nucleo'); // Facturación: núcleo puro de cargos + formato INC (F4: traza del área)
 const { RESULTADOS, puedeMarcar, debeBarrer } = require('./asistencia'); // Turnos Fase B: transiciones atendido/ausente + barrido
 const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: escaneo determinista de banderas rojas (server-side)
 const guardrailAsistente = require('./asistente-guardrail').revisar; // MEDICAR IA: guardrail de salida
@@ -1400,6 +1400,42 @@ exports.generarCargosCF = onCall(async (request) => {
   }
   logger.info('[generarCargosCF]', { dry, ...rep });
   return dry ? { dry: true, ...rep, cargos: nuevos } : { dry: false, ...rep };
+});
+
+/* ===================== F4 — episodiosDeArea (TRAZA del contrato del área) =====================
+   El contable NO lee /episodios (clínico). Esta CF (Admin SDK) cuenta los episodios que cubrió el contrato del
+   área (atribucion.tipo==='lugar' && atribucion.empresaId==area) y devuelve SOLO lo administrativo: count +
+   {nroIncidente, nroIncidenteFmt, fecha}. NUNCA motivo/triage/desenlace/domicilio ni ningún campo clínico.
+   periodo opcional 'YYYY-MM' (AR) filtra por creadoEn. Gate = puedeFinanzas (facturar||cobranza) o superadmin. */
+exports.episodiosDeArea = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const u = (await db.collection('usuarios').doc(request.auth.uid).get()).data() || {};
+  const roles = Array.isArray(u.roles) ? u.roles : (u.rol ? [u.rol] : []);
+  const permisos = u.permisos || {};
+  const puede = roles.includes('superadmin') || permisos.facturar === true || permisos.gestionar_cobranza === true;
+  if (!puede) throw new HttpsError('permission-denied', 'No tenés permiso para ver la traza del área.');
+  const empresaId = String((request.data || {}).empresaId || '').trim();
+  if (!empresaId) throw new HttpsError('invalid-argument', 'Falta empresaId.');
+  const periodo = String((request.data || {}).periodo || '').trim(); // 'YYYY-MM' opcional
+
+  const snap = await db.collection('episodios').where('atribucion.empresaId', '==', empresaId).get();
+  const items = [];
+  const mesAR = (d) => (d && d.toDate) ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(d.toDate()).slice(0, 7) : null;
+  const fechaAR = (d) => (d && d.toDate) ? new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Argentina/Buenos_Aires' }).format(d.toDate()) : null;
+  for (const doc of snap.docs) {
+    const ep = doc.data();
+    if (!(ep.atribucion && ep.atribucion.tipo === 'lugar')) continue;      // solo atribución por LUGAR
+    if (periodo && mesAR(ep.creadoEn) !== periodo) continue;               // filtro de período opcional
+    const anio = ep.creadoEn && ep.creadoEn.toDate ? ep.creadoEn.toDate().getFullYear() : yearAR();
+    items.push({
+      nroIncidente: (ep.nroIncidente != null ? ep.nroIncidente : null),
+      nroIncidenteFmt: (ep.nroIncidente != null ? fmtIncidente(ep.nroIncidente, anio) : '—'),
+      fecha: fechaAR(ep.creadoEn),
+    }); // SOLO administrativo — ningún campo clínico sale de acá
+  }
+  items.sort((a, b) => (b.nroIncidente || 0) - (a.nroIncidente || 0));
+  logger.info('[episodiosDeArea]', { empresaId, periodo: periodo || 'todos', count: items.length });
+  return { empresaId, periodo: periodo || null, count: items.length, items };
 });
 
 /* ===================== MEDICAR IA — asistenteChat (proxy del modelo) =====================

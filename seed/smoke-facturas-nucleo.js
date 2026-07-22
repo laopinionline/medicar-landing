@@ -105,5 +105,22 @@ console.log('\n(7) facturaDoc — forma polimórfica persona vs empresa');
   eq('empresa: clienteId', dE.clienteId, 'E2');
 }
 
+console.log('\n(8) F4 — ÁREA PROTEGIDA fijo factura SIN socios; corporativo fijo sin socios NO factura');
+{
+  const empArea = { E3: { id: 'E3', tipo: 'area_protegida', razonSocial: 'Barrio Los Robles', activo: true, convenio: { modo: 'fijo', montoMensual: 50000 } } };
+  const empCorp = { E2: { id: 'E2', tipo: 'corporativo', razonSocial: 'FIJO SA', activo: true, convenio: { modo: 'fijo', montoMensual: 80000 } } };
+  // socMap base NO tiene socios que facturen a E3 ni a E2.
+  const rArea = agruparFacturas({ abonos: [], cargos: [], socMap, empMap: empArea, empresasYaFacturadas: new Set(), periodo: '2099-07' });
+  eq('área protegida fijo SIN socios → factura igual (1 grupo)', rArea.grupos.length, 1);
+  eq('  ítem convenio del área', rArea.grupos[0].items[0].descripcion, 'Convenio mensual Barrio Los Robles · 2099-07');
+  eq('  monto del área', rArea.grupos[0].total, 50000);
+  const rCorp = agruparFacturas({ abonos: [], cargos: [], socMap, empMap: empCorp, empresasYaFacturadas: new Set(), periodo: '2099-07' });
+  eq('corporativo fijo SIN socios → NO factura (0 grupos)', rCorp.grupos.length, 0);
+  const rDup = agruparFacturas({ abonos: [], cargos: [], socMap, empMap: empArea, empresasYaFacturadas: new Set(['E3']), periodo: '2099-07' });
+  eq('área ya facturada este período → no re-factura (idempotente)', rDup.grupos.length, 0);
+  const rPC = agruparFacturas({ abonos: [], cargos: [], socMap, empMap: { E4: { id: 'E4', tipo: 'area_protegida', activo: true, convenio: { modo: 'per_capita' } } }, empresasYaFacturadas: new Set(), periodo: '2099-07' });
+  eq('área per_capita (no fijo) → 0 grupos', rPC.grupos.length, 0);
+}
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-facturas-nucleo: ${ok} ok, ${fail} fallo(s)\n`);
 process.exit(fail ? 1 : 0);

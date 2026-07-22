@@ -21,6 +21,7 @@ const stubs = `
   function facEstBadge(e){ return '['+e+']'; }
   function facVencChip(f){ return f.venceEl ? '<venc>' : '<sinvenc>'; }
   function cobPagadoDe(fid){ return (S.cob.pagos||[]).filter(p=>p.facturaId===fid && p.estado==='registrado').reduce((s,p)=>s+(Number(p.monto)||0),0); }
+  function cobTrazaAreaBlock(){ return ''; } // F4: la traza (episodios cubiertos) tiene su propio smoke; acá stub
 `;
 const run = (fnCall, cob) => vm.runInNewContext(`var S={cob:${JSON.stringify(cob)}};` + stubs + helpers + cobEmp + cobRec + `\n; (${fnCall});`, {});
 
