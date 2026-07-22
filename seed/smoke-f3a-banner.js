@@ -10,7 +10,7 @@ const L = lines('app/index.html');
 const CALLES = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'app', 'calles-pergamino.json'), 'utf8'));
 const src = konst(L, 'CALLE_ALIAS') + '\n' +
   fns(L, ['geoStripAccents','geoNormStreet','normalizarDireccion','calleSlug','callesIndex','resolverCalleId','calleCanon',
-          'dspDomChange','dspAreaSet','dspAreaKey','dspAreaMatch']);
+          'tsMsOf','areaVigente','dspDomChange','dspAreaSet','dspAreaKey','dspAreaMatch']); // F3b sumó vigencia al banner
 
 // --- fábrica de un mundo mockeado: domicilio tipeado + data de direcciones/empresas ---
 function mundo({ domValue, dirs=[], empresas={} }) {
@@ -53,7 +53,7 @@ async function run(label, cfg, expect) {
 
 (async () => {
   let ok = 0, fail = 0; const t = b => b ? ok++ : fail++;
-  const AREA = { razonSocial:'Barrio Los Robles', tipo:'area_protegida', activo:true };
+  const AREA = { razonSocial:'Barrio Los Robles', tipo:'area_protegida', activo:true, vigenciaDesde:1 }; // F3b: vigencia requerida (estricto) para que el banner muestre "cubierto"
   const DIR = (o={}) => Object.assign({ empresaId:'eA', calleId:'bartolome-mitre', altura:1234, activo:true }, o);
 
   // 1. MATCH: "Bartolomé Mitre 1234" → dir activa + área activa → muestra
