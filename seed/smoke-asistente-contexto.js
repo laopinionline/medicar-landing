@@ -32,6 +32,8 @@ t('SYSTEM prohíbe medicación', /NUNCA sugieras ni menciones medicamentos/.test
 t('SYSTEM no diagnostica', /NO diagnostic/.test(SYSTEM));
 t('SYSTEM define la etiqueta [[ESCALAR]]', SYSTEM.includes('[[ESCALAR]]'));
 t('SYSTEM: no ejecuta acciones', /NO EJECUTÁS ACCIONES/.test(SYSTEM));
+t('SYSTEM (fix 3): 443044 SOLO emergencias, no turnos', /443044 ES LA LÍNEA DE EMERGENCIAS/.test(SYSTEM) && /NUNCA lo ofrezcas para pedir turnos/.test(SYSTEM));
+t('SYSTEM (fix 1): regla de retractación de síntomas', /CORRIGE o DESMIENTE un síntoma/.test(SYSTEM));
 
 // --- stripEscalar ---
 const s1 = stripEscalar('Eso conviene verlo con un médico ahora.\n[[ESCALAR]]');

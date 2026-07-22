@@ -32,8 +32,22 @@ verde('resfrío común', 'estoy resfriado, con un poco de tos');
 verde('dolor leve muscular', 'me duele un poco la espalda de dormir mal');
 verde('fuera de tema', 'contame un chiste');
 
-// falso-positivo tolerado por diseño (error hacia escalar): lo dejamos documentado, no lo forzamos.
-console.log('\n— nota: el diseño acepta falsos positivos (error hacia derivar). Los VERDE de arriba son los que importan. —');
+console.log('\n— NEGACIÓN: supresión CONSERVADORA (solo negación limpia y adyacente) —');
+// DEBEN suprimir (negación inequívoca y adyacente, sin ambigüedad):
+verde('negado limpio: "no me falta el aire"', 'no me falta el aire');
+verde('negado limpio: "ya no me duele el pecho"', 'ya no me duele el pecho');
+verde('negado limpio: "ya no me falta el aire, estoy bien"', 'ya no me falta el aire, estoy bien');
+verde('negado limpio: "no me duele el pecho"', 'no me duele el pecho');
+
+console.log('\n— NEGACIÓN: casos que DEBEN SEGUIR DISPARANDO (ambigüedad/contraste/duda) —');
+rojo('ambiguo "no sé si es dolor de pecho pero me duele"', 'no sé si es dolor de pecho pero me duele');
+rojo('hedge "no me falta tanto el aire"', 'no me falta tanto el aire');
+rojo('contraste "no fue un desmayo pero me mareé mucho"', 'no fue un desmayo pero me mareé mucho');
+rojo('temporal "no me duele el pecho ahora, pero antes sí"', 'no me duele el pecho ahora, pero antes sí');
+rojo('"no" NO adyacente: "no fue nada, un dolor de pecho fuerte"', 'no fue nada, un dolor de pecho fuerte');
+rojo('"no puedo respirar" (no INTRÍNSECO al síntoma)', 'no puedo respirar');
+
+// nota: error hacia ESCALAR — la supresión solo aplica a la negación limpia y adyacente; ante duda, dispara.
 
 console.log(`\n${fail ? '✗' : '✓'} smoke-banderas-rojas: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);
