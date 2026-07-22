@@ -12,6 +12,9 @@ yarn-error.log*
 
 # App nativa (Capacitor) — Fase A
 /node_modules/
-# android/ NO se commitea todavía: el appId (ar.com.medicaronline.socio) es PROVISORIO;
-# se regenera con `npx cap add android` cuando ITECNIS/Atelier defina la convención de nombres.
+# android/ NO se commitea: lo regenera Capacitor (`npx cap add/sync android`) desde socio/ + capacitor.config.
+# El appId ya es DEFINITIVO (ar.com.medicaronline.socio, confirmado ITECNIS). El ÚNICO archivo no regenerable es
+# android/app/google-services.json (credenciales Firebase) → NO se versiona (decisión de Lucas): vive LOCAL y se
+# recoloca a mano si android/ se rehace. Fuente canónica = Firebase console → medicar-sistema → app Android.
+# Ver docs/android-native.md.
 /android/
