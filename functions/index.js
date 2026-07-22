@@ -40,7 +40,7 @@ const { RESULTADOS, puedeMarcar, debeBarrer } = require('./asistencia'); // Turn
 const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: escaneo determinista de banderas rojas (server-side)
 const guardrailAsistente = require('./asistente-guardrail').revisar; // MEDICAR IA: guardrail de salida
 const { neutralizarEmergencia } = require('./asistente-guardrail'); // MEDICAR IA: neutraliza 443044 si rojo=false (determinista)
-const { SYSTEM: IA_SYSTEM, buildContexto, stripEscalar, parseBotones } = require('./asistente-prompt'); // MEDICAR IA: prompt v4 + contexto + salida
+const { SYSTEM: IA_SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto } = require('./asistente-prompt'); // MEDICAR IA: prompt + contexto + salida
 const { responder: iaResponder } = require('./asistente-adapter'); // MEDICAR IA: adaptador del modelo (ollama|claude)
 
 const REGION = 'southamerica-east1';
@@ -1481,15 +1481,21 @@ exports.asistenteChat = onCall(async (request) => {
       if (ps.exists) { const p = ps.data(); plan = { nombre: p.nombre || 'tu plan', precio: p.precio != null ? p.precio : 0 };
         cubre = Object.keys(p.coberturas || {}).filter((k) => p.coberturas[k] === true); }
     }
-    let factura = null;
-    const fq = await db.collection('facturas').where('personaId', '==', personaId).where('estado', '==', 'emitida').get();
+    // Facturación EXPLÍCITA: pendiente (si hay) + última factura (cualquier estado) → el contexto afirma el estado, no deja hueco.
+    let factura = null, ultimaFactura = null;
     const vMs = (x) => (x && x.toMillis) ? x.toMillis() : 0;
-    if (!fq.empty) { const f = fq.docs.map((d) => d.data()).sort((a, b) => vMs(a.venceEl) - vMs(b.venceEl))[0];
-      factura = { monto: Number(f.total) || 0, vence: f.venceEl && f.venceEl.toDate ? new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }).format(f.venceEl.toDate()) : null }; }
+    const allFq = await db.collection('facturas').where('personaId', '==', personaId).get();
+    if (!allFq.empty) {
+      const facs = allFq.docs.map((d) => d.data());
+      const pend = facs.filter((f) => f.estado === 'emitida').sort((a, b) => vMs(a.venceEl) - vMs(b.venceEl));
+      if (pend.length) factura = { monto: Number(pend[0].total) || 0, vence: pend[0].venceEl && pend[0].venceEl.toDate ? new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }).format(pend[0].venceEl.toDate()) : null };
+      const ult = facs.slice().sort((a, b) => String(b.periodo || '').localeCompare(String(a.periodo || '')) || vMs(b.emitidaEn) - vMs(a.emitidaEn))[0];
+      if (ult) ultimaFactura = { nro: ult.nroComprobante || '—', estado: ult.estado || '—' };
+    }
     const plSnap = await db.collection('planes').where('activo', '==', true).get();
     const planes = plSnap.docs.map((d) => d.data()).map((p) => ({ nombre: p.nombre || '', precio: p.precio != null ? p.precio : 0 })).filter((p) => p.nombre).slice(0, 8);
     const nombre = (socio && socio.nombreVista) ? String(socio.nombreVista).split(',').pop().trim().split(' ')[0] : 'socio';
-    contexto = buildContexto({ nombre, plan, cubre, factura, planes, tel: '443044' });
+    contexto = buildContexto({ nombre, plan, cubre, factura, ultimaFactura, planes, tel: '443044' });
   } catch (e) {
     logger.warn('[asistenteChat] contexto degradado', { err: e.message }); // sin contexto sigue: el modelo orienta genérico
     contexto = buildContexto({ nombre: 'socio', planes: [], tel: '443044' });
@@ -1523,7 +1529,8 @@ exports.asistenteChat = onCall(async (request) => {
   const neu = neutralizarEmergencia(texto, scan.rojo);
   if (neu.cambiado) logger.info('[asistenteChat] 443044 neutralizado (rojo=false)');
   const botones = gr.motivo ? [{ label: 'Hablar con un médico', accion: 'medico' }] : parseBotones(gr.respuesta);
-  return { respuesta: neu.texto, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
+  const respuesta = limpiarBotonesDelTexto(neu.texto); // saca los tokens [Botón] de la prosa (el chip ya lo emite el parser)
+  return { respuesta, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================

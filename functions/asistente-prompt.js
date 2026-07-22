@@ -10,8 +10,8 @@ QUÉ HACÉS (sé ÚTIL):
 1) EXPLICÁS con soltura. Si preguntan qué es una lumbalgia, qué significa una presión 14/9, para qué sirve un estudio o qué es tal síntoma → explicalo claro y completo. Eso es INFORMACIÓN general, no un diagnóstico de la persona: dala sin vueltas.
 2) DECÍS QUÉ SE HACE. Ante un cuadro, contá qué se suele hacer: medidas de cuidado y también los TIPOS de medicación que habitualmente se usan (p.ej. "para la fiebre suele usarse un antitérmico como el paracetamol"), aclarando que cada caso es distinto y que la indicación puntual —y la dosis— la da el médico que evalúa. NO le indiques a ESTA persona una dosis ni un tratamiento a su medida.
 3) ORIENTÁS Y CERRÁS. Si no hay señal de alarma, orientá con criterio y CERRÁ la respuesta. NO mandes al médico en cada mensaje: derivá cuando de verdad hace falta (algo que necesita que lo examinen, que no mejora, o una señal de alarma). Una molestia leve se orienta y se cierra.
-4) CUENTA DEL SOCIO: respondés sobre SU plan y SUS facturas con el CONTEXTO de abajo. Si el dato ESTÁ en el contexto, respondelo directo con el número; si NO está, orientá dónde verlo en la app. No inventes datos de la cuenta.
-5) PLANES: si le conviene otro, sugerilo con el motivo y cerrá con [Cambiar mi plan]. Orientás, no ejecutás.
+4) CUENTA DEL SOCIO: respondés sobre SU plan y SUS facturas con el CONTEXTO de abajo. Si el dato ESTÁ en el contexto, respondelo directo con el número; si NO está, orientá dónde verlo en la app. NUNCA afirmes deudas ni importes que el contexto no traiga TEXTUALMENTE: si el contexto dice que no hay factura pendiente, decí con claridad que NO debe nada; la cuota mensual del plan NO es una deuda. No inventes datos de la cuenta.
+5) PLANES: si le conviene otro, sugerilo con el motivo y cerrá con [Cambiar mi plan]. Cambiar o elegir un plan es un tema COMERCIAL/administrativo: NUNCA lo derives a un médico ni a emergencias. Orientás, no ejecutás.
 
 NO EJECUTÁS ACCIONES. Llevás a los botones que YA existen: [Cambiar mi plan], [Ver comprobantes], [Pagar], [Pedir turno], [Hablar con un médico], [Emergencias 443044]. Nunca digas que hiciste vos el cambio/pago/reserva.
 
@@ -39,10 +39,14 @@ function buildContexto(d) {
   const L = [];
   L.push('CONTEXTO DEL SOCIO (usalo solo si pregunta por lo suyo; no lo recites entero):');
   L.push('- Nombre: ' + (d.nombre || 'socio') + '.');
-  if (d.plan) L.push('- Plan actual: ' + d.plan.nombre + ', $' + d.plan.precio + '/mes.' + (d.cubre && d.cubre.length ? ' Cubre: ' + d.cubre.join(', ') + '.' : ''));
+  if (d.plan) L.push('- Plan actual: ' + d.plan.nombre + ', cuota $' + d.plan.precio + '/mes (esto es el PRECIO DEL PLAN, NO una deuda).' + (d.cubre && d.cubre.length ? ' Cubre: ' + d.cubre.join(', ') + '.' : ''));
   else L.push('- Plan actual: sin plan asignado.');
-  if (d.factura) L.push('- Factura pendiente: $' + d.factura.monto + (d.factura.vence ? (', vence el ' + d.factura.vence) : '') + '.');
-  else L.push('- Facturas: sin deuda pendiente.');
+  // Estado de facturación EXPLÍCITO y AFIRMATIVO (aun en ausencia) para que el modelo no rellene con el precio del plan.
+  if (d.factura) L.push('- Facturas: TENÉS una factura PENDIENTE de $' + d.factura.monto + (d.factura.vence ? (', vence el ' + d.factura.vence) : '') + '.');
+  else {
+    const est = d.ultimaFactura ? (' Tu última factura (' + d.ultimaFactura.nro + ') figura ' + (d.ultimaFactura.estado === 'pagada' ? 'PAGADA' : String(d.ultimaFactura.estado || '')) + '.') : ' No hay facturas registradas todavía.';
+    L.push('- Facturas: NO tenés ninguna factura pendiente. NO debés nada.' + est);
+  }
   if (d.planes && d.planes.length) {
     L.push('CATÁLOGO DE PLANES MEDICAR:');
     d.planes.forEach((p) => L.push('- ' + p.nombre + ' $' + p.precio + (p.detalle ? (' — ' + p.detalle) : '') + '.'));
@@ -76,4 +80,15 @@ function parseBotones(texto) {
   return out;
 }
 
-module.exports = { SYSTEM, buildContexto, stripEscalar, parseBotones, BOTONES };
+// Limpia de la PROSA los tokens de botón [Etiqueta] (el chip ya lo emite el parser → evita el duplicado) y cualquier
+// [[...]] de control residual. Deja el texto sin corchetes colgando ni espacios/puntuación dobles.
+function limpiarBotonesDelTexto(texto) {
+  let t = String(texto || '').replace(/\[\[[^\]]*\]\]/g, ''); // control de doble corchete residual
+  for (const label of Object.keys(BOTONES)) {
+    const esc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    t = t.replace(new RegExp('\\[\\s*' + esc + '\\s*\\]', 'gi'), '');
+  }
+  return t.replace(/\s{2,}/g, ' ').replace(/\s+([.,;:!?])/g, '$1').trim();
+}
+
+module.exports = { SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, BOTONES };
