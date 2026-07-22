@@ -70,6 +70,21 @@ Play App Signing: Google custodia la clave de firma real; Lucas firma el AAB con
 apuntar a `~/medicar-keys/medicar-upload-keystore.jks` → alias `medicar-upload` → tipear la contraseña → build →
 sale el `.aab` para subir a Play (Internal testing).
 
+## Gradle JDK — error "Gradle 8.2.1 incompatible con JVM 21"
+Android Studio nuevo trae JBR **21** embebido; el Gradle 8.2.1 que scaffoldea Capacitor 6 soporta Java **≤19**.
+**Fix seguro (sin tocar el build): apuntar el Gradle JVM a un JDK 17** (Gradle/AGP quedan intactos → no rompe
+Capacitor). En la máquina de Lucas ya hay un JDK 17 (`jbr-17`, en `~/Library/Java/JavaVirtualMachines/jbr-17.0.14`).
+- Se setea en `android/.idea/gradle.xml`: `gradleJvm = "jbr-17"` (ya aplicado localmente).
+- ⚠️ `android/.idea/` lo regenera Android Studio al abrir un `android/` nuevo → **tras un `npx cap add android`
+  hay que rehacer este ajuste** (igual que el google-services.json). Se hace en la UI (abajo).
+
+**En Android Studio (ruta del menú):**
+`Android Studio → Settings…` (⌘,) → **Build, Execution, Deployment → Build Tools → Gradle** → campo
+**Gradle JDK** → elegir **jbr-17** (JetBrains Runtime 17) de la lista → **OK** → cuando ofrezca **Sync Now**
+(o **Sync Project with Gradle Files**, ícono del elefante 🐘 arriba), aceptar. El error desaparece.
+- Alternativa (NO recomendada acá): subir el Gradle wrapper a 8.5+ para soportar Java 21 — toca el build y se
+  pierde en cada `cap add` → más frágil para Capacitor. Preferimos el JDK 17.
+
 ## Emulador con Google Play (probar push sin teléfono)
 Lucas no tiene teléfono Android → emulador. **Requiere Android Studio (todavía no está instalado).** Push (FCM)
 solo funciona con una imagen que traiga **Google Play services** → elegir una imagen con **Play Store**.
