@@ -43,6 +43,49 @@ Lo que falta es correr la app en un teléfono y registrar el token. Pasos:
   → Preparar la política de privacidad + el Data Safety antes de salir de testing.
 
 ### Orden sugerido
-1. Run debug en un teléfono conectado → validar que el token se registra y el push llega. (Lo más rápido.)
-2. Luego AAB firmado → internal testing en Play → validar la instalación real + push en varios equipos.
+1. Run debug en el emulador → validar que el token se registra y el push llega. (Lo más rápido.)
+2. Luego AAB firmado → internal testing en Play → validar la instalación real + push.
 3. Antes de publicar: Data Safety + política de privacidad + Health declaration.
+
+## Upload key (Play App Signing) — firma del AAB
+Play App Signing: Google custodia la clave de firma real; Lucas firma el AAB con su **upload key** propia
+(no se comparte con nadie). Generar UNA vez con keytool (Lucas elige la contraseña; NO se guarda en el repo):
+
+```
+/opt/homebrew/opt/openjdk/bin/keytool -genkeypair -v \
+  -keystore ~/medicar-keys/medicar-upload-keystore.jks \
+  -alias medicar-upload \
+  -keyalg RSA -keysize 2048 -validity 10950
+```
+- Correr en **Terminal.app** (keytool pide la contraseña de forma interactiva). `~/medicar-keys/` ya existe (permisos 700).
+- validity 10950 días ≈ 30 años. Alias: `medicar-upload`.
+- **Ubicación:** `~/medicar-keys/medicar-upload-keystore.jks` — FUERA del repo, NO versionado. La contraseña NO va
+  a ningún archivo del repo; Lucas la guarda en su gestor de contraseñas.
+- ⚠️ **BACKUP CRÍTICO:** si se pierde el `.jks` o la contraseña, NO se pueden subir actualizaciones con la misma
+  identidad de upload. Con Play App Signing hay recuperación (resetear la upload key vía soporte de Google) pero
+  es engorroso. → Respaldar el `.jks` + la contraseña en el gestor de contraseñas y una copia en un lugar seguro
+  (disco externo / nube privada). Nunca en el repo.
+
+**Uso en Android Studio:** Build → *Generate Signed Bundle / APK* → **Android App Bundle** → *Choose existing…* →
+apuntar a `~/medicar-keys/medicar-upload-keystore.jks` → alias `medicar-upload` → tipear la contraseña → build →
+sale el `.aab` para subir a Play (Internal testing).
+
+## Emulador con Google Play (probar push sin teléfono)
+Lucas no tiene teléfono Android → emulador. **Requiere Android Studio (todavía no está instalado).** Push (FCM)
+solo funciona con una imagen que traiga **Google Play services** → elegir una imagen con **Play Store**.
+
+1. **Instalar Android Studio:** developer.android.com/studio → descargar el `.dmg` → arrastrar a Aplicaciones →
+   abrir → asistente *Standard* (instala SDK + emulador). (Trae su propio JDK.)
+2. **Crear el emulador (AVD) con Google Play:**
+   - En Android Studio: barra lateral derecha **Device Manager** (ícono de teléfono) → **+ Create Virtual Device**.
+   - Elegir un teléfono, p.ej. **Pixel 7** → *Next*.
+   - En la lista de imágenes del sistema, elegir una fila que tenga el **ícono de Play Store** en la columna
+     (esa = imagen con **Google Play**, la que trae FCM). Si dice *Download*, descargarla → *Next* → *Finish*.
+   - ⚠️ NO elegir una imagen "Google APIs" sin Play Store para esto: preferir la que dice **Google Play**.
+3. **Correr la app:**
+   - `npx cap open android` (abre el proyecto en Android Studio).
+   - En la barra superior, en el desplegable de dispositivos, elegir el emulador recién creado.
+   - Botón **Run ▶**. Levanta el emulador, instala y abre MEDICAR Socio.
+4. **Ver que el token FCM se registró:** loguearse como socio en la app del emulador. El token queda en
+   **Firebase console → Firestore → `push_tokens/{uid}/dispositivos/{deviceId}`** (campo `token`, `plataforma:android`).
+   Si aparece ese doc, el push está listo. Disparar una prueba: reservar/cancelar un turno (aviso A2-a).
