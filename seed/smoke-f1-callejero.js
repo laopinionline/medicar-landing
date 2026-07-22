@@ -4,11 +4,12 @@
 const vm = require('vm');
 const fs = require('fs');
 const path = require('path');
-const { lines, fns } = require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
+const { lines, fns, konst } = require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
 const L = lines('app/index.html');
 
-// Las 6 funciones de la cadena de canonización, tal cual están en producción.
-const src = fns(L, ['geoStripAccents', 'geoNormStreet', 'normalizarDireccion', 'calleSlug', 'callesIndex', 'resolverCalleId']);
+// La cadena de canonización tal cual está en producción (F2 sumó calleCanon/CALLE_ALIAS, que resolverCalleId invoca).
+const src = konst(L, 'CALLE_ALIAS') + '\n' +
+  fns(L, ['geoStripAccents', 'geoNormStreet', 'normalizarDireccion', 'calleSlug', 'callesIndex', 'calleCanon', 'resolverCalleId']);
 const CALLES = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'app', 'calles-pergamino.json'), 'utf8'));
 
 function mkSandbox(callesPergamino) {
@@ -42,8 +43,9 @@ const t = (label, cond, extra='') => { cond ? ok++ : fail++; console.log(`${cond
   const sb = mkSandbox(CALLES);
   const R = (dom) => vm.runInContext(`resolverCalleId(${JSON.stringify(dom)})`, sb);
 
+  // F2: resolverCalleId ahora PLIEGA el alias (calleCanon) → "Mitre" canoniza a bartolome-mitre.
   const mitre = R('Mitre 1234');
-  t('B1 "Mitre 1234" → calleId=mitre, altura=1234', mitre.calleId === 'mitre' && mitre.altura === 1234, JSON.stringify(mitre));
+  t('B1 "Mitre 1234" → calleId=bartolome-mitre (alias plegado), altura=1234', mitre.calleId === 'bartolome-mitre' && mitre.altura === 1234, JSON.stringify(mitre));
 
   // tolerancia: "Avenida Carlos Pellegrini" en el callejero; el despachante tipea sin "Avenida" y en minúsculas.
   const pell = R('carlos pellegrini 500');
@@ -65,7 +67,7 @@ const t = (label, cond, extra='') => { cond ? ok++ : fail++; console.log(`${cond
 
   // sin altura → identifica la calle igual (forward-compat con área "toda la calle X"); F3 igual exige altura para el match puntual
   const sinAlt = R('Mitre');
-  t('B7 "Mitre" sin altura → calleId=mitre, altura=null (calle identificada, sin nº)', sinAlt.calleId === 'mitre' && sinAlt.altura === null, JSON.stringify(sinAlt));
+  t('B7 "Mitre" sin altura → calleId=bartolome-mitre (alias), altura=null (calle identificada, sin nº)', sinAlt.calleId === 'bartolome-mitre' && sinAlt.altura === null, JSON.stringify(sinAlt));
 
   // vacío
   const vac = R('');

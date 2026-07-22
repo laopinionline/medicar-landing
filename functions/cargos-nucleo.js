@@ -18,6 +18,10 @@ function cargoDeEpisodio(ep, epId, tarifas, anioIncidente) {
   const tarifa = (tarifas || []).find((t) => t.activo !== false && t.prestacionId === prestacionId);
   if (!tarifa) return { skip: 'sinTarifa' };                                    // no hay tarifa activa → no cobra en 0
   const atrib = ep.atribucion || null; const sinAtrib = !atrib;
+  // F3b — ATRIBUCIÓN POR LUGAR (prioridad): el episodio ocurrió en una dirección de área protegida VIGENTE al
+  // momento (congelado al crear). NO se factura a la persona: lo cubre el contrato del área (el cargo AL contrato
+  // es F4). Va ANTES de la lógica persona → nunca cae en 'no_socio' (que le facturaría al cubierto).
+  if (atrib && atrib.tipo === 'lugar') return { skip: 'cubierto_area' };
   const socioId = (atrib && atrib.socioId) ? atrib.socioId : null;
   const cob = (atrib && atrib.planSnapshot && atrib.planSnapshot.coberturas) ? atrib.planSnapshot.coberturas : {};
   const enCar = (atrib && atrib.planSnapshot && Array.isArray(atrib.planSnapshot.enCarencia)) ? atrib.planSnapshot.enCarencia : [];

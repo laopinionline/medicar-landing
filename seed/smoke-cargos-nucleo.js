@@ -37,6 +37,16 @@ console.log('\nreglas');
   chk('por_km: valorPorKm + kmPendiente', r.cargo && r.cargo.tipoCalculo === 'por_km' && r.cargo.valorPorKm === 100 && r.cargo.kmPendiente === true && r.cargo.km === null);
 }
 
+console.log('\nF3b — atribución por lugar');
+{ // atribución por LUGAR → skip cubierto_area (NO factura a la persona)
+  const r = cargoDeEpisodio(ep({ atribucion: { tipo: 'lugar', empresaId: 'eA', areaNombre: 'Los Robles', dirId: 'd1', socioId: null, planSnapshot: null } }), 'eL1', TAR, 2026);
+  eq('cubierto_area (área protegida) → skip cubierto_area', r, { skip: 'cubierto_area' });
+}
+{ // el tipo:'lugar' MANDA aunque haya tarifa y socioId sea null (NO cae en no_socio → no le factura al cubierto)
+  const r = cargoDeEpisodio(ep({ codigoPresuntivo: 'traslado', atribucion: { tipo: 'lugar', socioId: null, planSnapshot: null } }), 'eL2', TAR, 2026);
+  eq('cubierto_area gana sobre siempre_extra/no_socio', r, { skip: 'cubierto_area' });
+}
+
 console.log('\nskips');
 eq('código sin mapeo → sinTarifa', cargoDeEpisodio(ep({ codigoPresuntivo: 'gris' }), 'e6', TAR, 2026), { skip: 'sinTarifa' });
 eq('sin código → sinTarifa', cargoDeEpisodio(ep({ codigoPresuntivo: '', desenlace: null }), 'e7', TAR, 2026), { skip: 'sinTarifa' });

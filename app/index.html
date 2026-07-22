@@ -2042,18 +2042,48 @@ function gatherNuevo(){
   return o;
 }
 
-/* resolverAtribucion(personaId): resuelve el socio ACTIVO de la persona y congela su plan, para
-   pegar los ganchos de atribución administrativa al episodio (Estructura 3 → futura Contable/1).
-   PRINCIPIO DURO: la atención NUNCA se bloquea por la atribución. Ante CUALQUIER fallo (paciente
-   no migrado / sin socio / socio sin plan / plan inexistente / error de query) devuelve
-   {socioId:null, planSnapshot:null} — nunca tira. Corre FUERA de la transacción (runTransaction no
-   puede querear). personaId == pacienteId solo para pacientes migrados (Opción A, Bloque 2); para
-   no migrados la query no encuentra socio → degrada a null. Aditivo, no toca el resto del alta. */
-async function resolverAtribucion(personaId){
+/* F3b — VIGENCIA del área (ESTRICTO): sin vigenciaDesde el área NO cubre (nada se cubre por omisión: alguien
+   tiene que declarar desde cuándo). Ventana [desde, hasta] en ms; hasta INCLUSIVE si está seteado. Compartido
+   por el banner del despacho (F3a) y la atribución → el despachante ve exactamente lo que se va a facturar. */
+function tsMsOf(ts){ if(ts==null) return null; if(typeof ts==='number') return ts; if(ts.toMillis) return ts.toMillis(); if(ts.seconds!=null) return ts.seconds*1000; return null; }
+function areaVigente(e, nowMs){
+  const desde=tsMsOf(e && e.vigenciaDesde); if(desde==null) return false;   // ESTRICTO: sin fecha de inicio → no cubre
+  if(nowMs<desde) return false;
+  const hasta=tsMsOf(e && e.vigenciaHasta); if(hasta!=null && nowMs>hasta) return false;
+  return true;
+}
+/* F3b — ATRIBUCIÓN POR LUGAR: ¿el domicilio (calleId,altura) cae en una dirección protegida ACTIVA de un área
+   ACTIVA y VIGENTE? Devuelve el snapshot lugar o null (→ cae al camino persona). Async, fuera de la transacción,
+   nunca tira (try/catch → null). Misma query que el banner F3a + vigencia. */
+async function resolverAtribucionLugar(domCanon){
   try{
-    if(!personaId) return { socioId:null, planSnapshot:null };
+    if(!domCanon || !domCanon.calleId || !(domCanon.altura>0)) return null;
+    const qs=await db.collection('direcciones_protegidas').where('calleId','==',domCanon.calleId).where('altura','==',domCanon.altura).where('activo','==',true).limit(5).get();
+    if(qs.empty) return null;
+    const nowMs=Date.now();
+    for(const d of qs.docs){ const empId=d.data().empresaId; if(!empId) continue;
+      const es=await db.collection('empresas').doc(empId).get(); if(!es.exists) continue;
+      const e=es.data();
+      if(e.activo===false || e.tipo!=='area_protegida') continue;
+      if(!areaVigente(e, nowMs)) continue;                    // ESTRICTO: sin vigencia vigente NO cubre → sigue / cae a persona
+      return { tipo:'lugar', empresaId:empId, areaNombre:e.razonSocial||'Área protegida', dirId:d.id, socioId:null, planSnapshot:null };
+    }
+    return null;
+  }catch(e){ console.warn('[resolverAtribucionLugar] degradado a persona (la atención sigue):', e); return null; }
+}
+
+/* resolverAtribucion(personaId, domCanon): PRIMERO intenta LUGAR (prioridad, F3b) — si el episodio cae en área
+   protegida vigente, cubre el contrato SIN IMPORTAR quién sea la persona. Si no, resuelve el socio ACTIVO de la
+   persona y congela su plan (camino persona INTACTO). PRINCIPIO DURO: la atención NUNCA se bloquea por la
+   atribución. Ante CUALQUIER fallo devuelve {tipo:'persona', socioId:null, planSnapshot:null} — nunca tira.
+   Corre FUERA de la transacción. Aditivo, no toca el resto del alta. */
+async function resolverAtribucion(personaId, domCanon){
+  try{
+    const lugar=await resolverAtribucionLugar(domCanon);
+    if(lugar) return lugar;                                   // F3b: prioridad LUGAR (aunque no haya persona/socio)
+    if(!personaId) return { tipo:'persona', socioId:null, planSnapshot:null };
     const qs=await db.collection('socios').where('personaId','==',personaId).where('activo','==',true).limit(1).get();
-    if(qs.empty) return { socioId:null, planSnapshot:null };
+    if(qs.empty) return { tipo:'persona', socioId:null, planSnapshot:null };
     const socioId=qs.docs[0].id;
     const socio=qs.docs[0].data();
     let planSnapshot=null;
@@ -2081,10 +2111,10 @@ async function resolverAtribucion(personaId){
         };
       }
     }
-    return { socioId, planSnapshot }; // socio sin plan (o plan inexistente) => socioId seteado, planSnapshot null
+    return { tipo:'persona', socioId, planSnapshot }; // socio sin plan (o plan inexistente) => socioId seteado, planSnapshot null
   }catch(e){
     console.warn('[resolverAtribucion] degradado a null (la atención sigue):', e);
-    return { socioId:null, planSnapshot:null };
+    return { tipo:'persona', socioId:null, planSnapshot:null };
   }
 }
 
@@ -2105,12 +2135,19 @@ async function dspAreaMatch(){
   try{
     const qs=await db.collection('direcciones_protegidas').where('calleId','==',calleId).where('altura','==',altura).where('activo','==',true).limit(5).get();
     if(dspAreaKey()!==key) return;                                          // stale: el domicilio cambió → gana la query nueva
-    let area=null;
+    // F3b — 3 estados (misma vigencia que la atribución): cubre (verde) · área SIN vigencia vigente (rojo, NO cubre) · nada (vacío)
+    let cubre=null, sinVig=null; const nowMs=Date.now();
     for(const dd of qs.docs){ const empId=dd.data().empresaId; if(!empId) continue;
       const es=await db.collection('empresas').doc(empId).get();
       if(dspAreaKey()!==key) return;
-      if(es.exists){ const e=es.data(); if(e.activo!==false && e.tipo==='area_protegida'){ area=e.razonSocial||'Área protegida'; break; } } }
-    dspAreaSet(area ? `<div style="background:#0a7d34;color:#fff;border-radius:10px;padding:.5rem .7rem;margin:.15rem 0 .5rem;font-size:.82rem;font-weight:600">🏠 Dirección en Área Protegida: ${esc(area)} — cubierto por contrato</div>` : '');
+      if(!es.exists) continue; const e=es.data();
+      if(e.activo===false || e.tipo!=='area_protegida') continue;
+      if(areaVigente(e, nowMs)){ cubre=e.razonSocial||'Área protegida'; break; } // cubre → gana y corta
+      else if(!sinVig) sinVig=e.razonSocial||'Área protegida'; }                 // área declarada pero NO vigente
+    dspAreaSet(
+      cubre  ? `<div style="background:#0a7d34;color:#fff;border-radius:10px;padding:.5rem .7rem;margin:.15rem 0 .5rem;font-size:.82rem;font-weight:600">🏠 Dirección en Área Protegida: ${esc(cubre)} — cubierto por contrato</div>`
+      : sinVig ? `<div style="background:#a11c1c;color:#fff;border-radius:10px;padding:.5rem .7rem;margin:.15rem 0 .5rem;font-size:.82rem;font-weight:700">⚠️ ${esc(sinVig)}: área SIN vigencia vigente → NO se cubre, se factura a la persona. Revisar el contrato.</div>`
+      : '');
   }catch(_){ dspAreaSet(''); }                                             // falla/red → sin banner, el despacho sigue igual
 }
 
@@ -2159,7 +2196,7 @@ async function dspCrear(){
     }
 
     // Ganchos de atribución administrativa: resolver ANTES de la tx (que no puede querear). Degrada a null.
-    const atrib=await resolverAtribucion(pid);
+    const atrib=await resolverAtribucion(pid, domCanon); // F3b: domCanon (F1) habilita el camino LUGAR (prioridad)
     const year=new Date().getFullYear();
     const counterRef=db.collection('contadores').doc('episodios');
     const epRef=db.collection('episodios').doc();
@@ -2182,7 +2219,9 @@ async function dspCrear(){
         antecedentesOtros:antecedentesOtros, // texto libre del "otros" (campo aparte, lista queda limpia)
         creadoEn:FV(),
         transiciones:{ despacho:FV() },    // timestamp de SERVIDOR de la transición
-        atribucion:{ socioId:atrib.socioId, planSnapshot:atrib.planSnapshot, resueltoEn:FV() } // ganchos Estructura 3→1 (aditivo; degrada a null si no hay socio/plan)
+        atribucion:(atrib.tipo==='lugar'
+          ? { tipo:'lugar', empresaId:atrib.empresaId, areaNombre:atrib.areaNombre, dirId:atrib.dirId, socioId:null, planSnapshot:null, resueltoEn:FV() } // F3b: cubierto por contrato del área (traza empresaId/dirId)
+          : { tipo:'persona', socioId:atrib.socioId, planSnapshot:atrib.planSnapshot, resueltoEn:FV() }) // ganchos Estructura 3→1 (aditivo; degrada a null si no hay socio/plan)
       });
       return next;
     });
@@ -4219,7 +4258,7 @@ async function generarCargos(){
   if(!puede('facturar')) return; // la regla es la defensa real
   facErr('');
   if(!Array.isArray(S.fac.tarifas)){ facErr('Esperá a que carguen las tarifas.'); return; }
-  const rep={ generados:0, sinTarifa:0, sinCargo:0, yaTenian:0, sinAtribucion:0, errores:0 };
+  const rep={ generados:0, sinTarifa:0, sinCargo:0, cubierto_area:0, yaTenian:0, sinAtribucion:0, errores:0 }; // F3b: cubierto_area = episodios en área protegida
   try{
     // SOLO LECTURA de episodios cerrados + cargos existentes (idempotencia por episodioId).
     const [epsSnap, cgSnap] = await Promise.all([
@@ -4238,6 +4277,7 @@ async function generarCargos(){
       if(!tarifa){ rep.sinTarifa++; continue; } // no generar cargo en 0
       const atrib=ep.atribucion||null;
       const sinAtrib=!atrib;
+      if(atrib && atrib.tipo==='lugar'){ rep.cubierto_area=(rep.cubierto_area||0)+1; continue; } // F3b (paridad núcleo): área protegida → NO factura a la persona (contrato = F4)
       const socioId=(atrib && atrib.socioId)?atrib.socioId:null;
       const cob=(atrib && atrib.planSnapshot && atrib.planSnapshot.coberturas)?atrib.planSnapshot.coberturas:{};
       const enCar=(atrib && atrib.planSnapshot && Array.isArray(atrib.planSnapshot.enCarencia))?atrib.planSnapshot.enCarencia:[];
@@ -4270,7 +4310,7 @@ async function generarCargos(){
       catch(e){ rep.errores++; console.warn('[generarCargos] fallo al crear cargo de',epId,e); }
     }
     audit('cargos_generados','cargos','',rep.generados+' generados, '+rep.sinTarifa+' sin tarifa');
-    S.fac.report=`Generados: <b>${rep.generados}</b>${rep.enCarencia?(' (en carencia: '+rep.enCarencia+')'):''} · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
+    S.fac.report=`Generados: <b>${rep.generados}</b>${rep.enCarencia?(' (en carencia: '+rep.enCarencia+')'):''} · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo}${rep.cubierto_area?(' · Cubierto por área: <b>'+rep.cubierto_area+'</b>'):''} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
 }
@@ -4290,7 +4330,7 @@ async function generarCargosCF(){
   try{
     const r=await fnsCall('generarCargosCF',{dry:false});
     audit('cargos_generados','cargos','',(r.generados||0)+' generados (CF)');
-    S.fac.report=`Generados: <b>${r.generados||0}</b>${r.enCarencia?(' (en carencia: '+r.enCarencia+')'):''} · Salteados sin tarifa: ${r.sinTarifa||0} · Sin cargo (cubierto por abono): ${r.sinCargo||0} · Ya tenían: ${r.yaTenian||0} · Sin atribución (históricos): <b>${r.sinAtribucion||0}</b>${r.errores?(' · Errores: '+r.errores):''} · <i>motor server-side</i>`;
+    S.fac.report=`Generados: <b>${r.generados||0}</b>${r.enCarencia?(' (en carencia: '+r.enCarencia+')'):''} · Salteados sin tarifa: ${r.sinTarifa||0} · Sin cargo (cubierto por abono): ${r.sinCargo||0}${r.cubierto_area?(' · Cubierto por área: <b>'+r.cubierto_area+'</b>'):''} · Ya tenían: ${r.yaTenian||0} · Sin atribución (históricos): <b>${r.sinAtribucion||0}</b>${r.errores?(' · Errores: '+r.errores):''} · <i>motor server-side</i>`;
     render();
   }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
 }
@@ -5708,7 +5748,8 @@ function empPanel(){
     const n=(S.af.socios||[]).filter(s=>s.empresaId===e.id).length;
     const tl=(e.tipo==='area_protegida')?'Área protegida':'Corporativo';
     const inact=e.activo===false;
-    return `<div class="lr"${inact?' style="opacity:.5"':''}><div class="lrb"><div class="lrn">${esc(e.razonSocial||'—')} ${convenioChip(e.convenio)}</div><div class="lrs">N° ${esc(e.numeroConvenio||'—')} · ${tl} · ${n} integrante${n===1?'':'s'}${inact?' · inactiva':''}</div></div><button class="${btn}" onclick="empEditar('${e.id}')">Editar</button></div>`;
+    const sinVigChip=empSinVigencia(e)?` <span style="font-size:.58rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#a11c1c;color:#fff">SIN VIGENCIA · NO cubre</span>`:''; // F3b: área que no cubre por falta de vigencia
+    return `<div class="lr"${inact?' style="opacity:.5"':''}><div class="lrb"><div class="lrn">${esc(e.razonSocial||'—')} ${convenioChip(e.convenio)}${sinVigChip}</div><div class="lrs">N° ${esc(e.numeroConvenio||'—')} · ${tl} · ${n} integrante${n===1?'':'s'}${inact?' · inactiva':''}</div></div><button class="${btn}" onclick="empEditar('${e.id}')">Editar</button></div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin empresas todavía.</div>`;
   return `<div class="panel-h"><b>Empresas / convenios</b><span class="live-tag">en vivo</span></div>
     <button class="btn-r" onclick="empNuevo(false)" style="margin-bottom:.7rem">+ Nueva empresa</button>
@@ -5731,6 +5772,21 @@ function empFormNew(){
     <button class="btn-r" onclick="empGuardarNuevo()">Crear empresa</button>
     <button class="btn-o" onclick="empSet({view:'list'})">Cancelar</button></div>`;
 }
+/* F3b — VIGENCIA del área (ESTRICTO). Fechas AR (-03:00 fijo). "desde" 00:00, "hasta" 23:59:59 (inclusive). */
+function arDateToTs(dateStr, endOfDay){ if(!dateStr) return null; const d=new Date(dateStr+(endOfDay?'T23:59:59-03:00':'T00:00:00-03:00')); return isNaN(d.getTime())?null:firebase.firestore.Timestamp.fromDate(d); }
+function tsToArDateInput(ts){ const ms=tsMsOf(ts); return ms==null?'':new Intl.DateTimeFormat('en-CA',{timeZone:'America/Argentina/Buenos_Aires'}).format(new Date(ms)); }
+function empSinVigencia(e){ return e.tipo==='area_protegida' && !e.vigenciaDesde; } // área que NO cubre por falta de vigencia
+function empVigenciaBlock(e){
+  const sinVig=!e.vigenciaDesde;
+  return `
+    <div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)">Vigencia del contrato</div>
+    ${sinVig?`<div style="background:#a11c1c;color:#fff;border-radius:8px;padding:.5rem .7rem;margin:.15rem 0 .55rem;font-size:.8rem;font-weight:700">⚠️ Sin vigencia cargada: esta área NO cubre ningún episodio. Cargá "Vigente desde" para que empiece a cubrir.</div>`:''}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem">
+      <div class="field"><label>Vigente desde</label><input id="emp-vig-desde" type="date" value="${tsToArDateInput(e.vigenciaDesde)}"></div>
+      <div class="field"><label>Hasta (opcional)</label><input id="emp-vig-hasta" type="date" value="${tsToArDateInput(e.vigenciaHasta)}"></div>
+    </div>
+    <div style="font-size:.64rem;color:var(--ink3);margin:-.1rem 0 .4rem">Sin "desde" el área no cubre (estricto). "Hasta" vacío = sin fin. Se guarda con "Guardar cambios".</div>`;
+}
 function empFormEdit(id){
   const e=(S.af.empresas||[]).find(x=>x.id===id)||{};
   const tl=(e.tipo==='area_protegida')?'Área protegida':'Corporativo';
@@ -5745,7 +5801,7 @@ function empFormEdit(id){
     <div class="field"><label>Plan por defecto</label><select id="emp-plan">${empPlanOpts(e.planIdDefault)}</select></div>
     <div class="field"><label>Estado</label><select id="emp-activo"><option value="si" ${e.activo!==false?'selected':''}>Activa</option><option value="no" ${e.activo===false?'selected':''}>Inactiva</option></select></div>
     <button class="btn-r" onclick="empGuardarEdit('${id}')">Guardar cambios</button>
-    ${e.tipo==='area_protegida' ? empDireccionesBlock(id) : ''}
+    ${e.tipo==='area_protegida' ? empVigenciaBlock(e)+empDireccionesBlock(id) : ''}
     ${puedeConfig() ? `
     <div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)">Convenio de cobro <span style="text-transform:none;color:var(--ink3)">(contable)</span></div>
     <div id="emp-conv-err" class="err" style="display:none;margin-bottom:.4rem"></div>
@@ -5845,7 +5901,10 @@ async function empGuardarEdit(id){
   const razonSocial=(document.getElementById('emp-razon')?.value||'').trim();
   if(!razonSocial){ empErr('La razón social es requerida.'); return; }
   try{
-    await db.collection('empresas').doc(id).set({ razonSocial, cuit:(document.getElementById('emp-cuit')?.value||'').trim(), contacto:(document.getElementById('emp-contacto')?.value||'').trim(), telefono:(document.getElementById('emp-tel')?.value||'').trim(), email:(document.getElementById('emp-email')?.value||'').trim(), planIdDefault:document.getElementById('emp-plan')?.value||null, activo:(document.getElementById('emp-activo')?.value||'si')==='si', actualizadoEn:FV() }, { merge:true });
+    const upd={ razonSocial, cuit:(document.getElementById('emp-cuit')?.value||'').trim(), contacto:(document.getElementById('emp-contacto')?.value||'').trim(), telefono:(document.getElementById('emp-tel')?.value||'').trim(), email:(document.getElementById('emp-email')?.value||'').trim(), planIdDefault:document.getElementById('emp-plan')?.value||null, activo:(document.getElementById('emp-activo')?.value||'si')==='si', actualizadoEn:FV() };
+    const vigDesdeEl=document.getElementById('emp-vig-desde'); // F3b: presente solo en el form de área protegida
+    if(vigDesdeEl){ upd.vigenciaDesde=arDateToTs(vigDesdeEl.value, false); upd.vigenciaHasta=arDateToTs(document.getElementById('emp-vig-hasta')?.value, true); }
+    await db.collection('empresas').doc(id).set(upd, { merge:true });
     audit('empresa_editada','empresa',id,razonSocial);
     empSet({view:'list'});
   }catch(e){ empErr('No se pudo guardar: '+(e.message||e)); }

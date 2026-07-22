@@ -536,7 +536,7 @@ service cloud.firestore {
       // create: empGuardarNuevo + asignarNumeroRaiz (shape completo). Si trae 'convenio' -> exige gate contable.
       allow create: if (tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema'))
                        && ( !('convenio' in request.resource.data) || tienePermiso('configurar_sistema') )
-                       && request.resource.data.keys().hasOnly(['razonSocial','cuit','contacto','telefono','email','tipo','planIdDefault','activo','creadoEn','numeroConvenio','ultimoSufijo','convenio'])
+                       && request.resource.data.keys().hasOnly(['razonSocial','cuit','contacto','telefono','email','tipo','planIdDefault','activo','creadoEn','numeroConvenio','ultimoSufijo','convenio','vigenciaDesde','vigenciaHasta'])
                        && request.resource.data.keys().hasAll(['razonSocial','tipo','numeroConvenio'])
                        && request.resource.data.tipo in ['corporativo','area_protegida']
                        && request.resource.data.razonSocial is string
@@ -545,7 +545,8 @@ service cloud.firestore {
       // Si 'convenio' esta entre los campos TOCADOS -> exige gate contable; gestionar_afiliados solo toca identidad.
       allow update: if (tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema'))
                        && ( !tocadas().hasAny(['convenio']) || tienePermiso('configurar_sistema') )
-                       && tocadas().hasOnly(['razonSocial','cuit','contacto','telefono','email','planIdDefault','activo','actualizadoEn','ultimoSufijo','convenio'])
+                       && tocadas().hasOnly(['razonSocial','cuit','contacto','telefono','email','planIdDefault','activo','actualizadoEn','ultimoSufijo','convenio','vigenciaDesde','vigenciaHasta'])
+                       && ( !tocadas().hasAny(['vigenciaDesde','vigenciaHasta']) || tienePermiso('gestionar_afiliados') || tienePermiso('configurar_sistema') ) // F3b: vigencia = término del contrato, gate padrón (no es 'convenio'/monto)
                        && convenioOk();
     }
 
