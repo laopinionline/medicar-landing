@@ -4621,7 +4621,7 @@ async function generarFacturas(){
     Object.values(empMap).forEach(emp=>{
       if(emp.activo===false || !(emp.convenio && emp.convenio.modo==='fijo') || empresasYaFacturadas.has(emp.id)) return;
       const tieneSocios=socSnap.docs.some(x=>{ const s=x.data(); return s.activo!==false && s.facturarA && s.facturarA.tipo==='empresa' && s.facturarA.empresaId===emp.id; });
-      if(!tieneSocios) return;
+      if(!tieneSocios && emp.tipo!=='area_protegida') return; // F4 (paridad núcleo): área protegida factura su fijo sin socios; corporativo exige socios
       push({key:'e:'+emp.id}, {clienteTipo:'empresa',clienteId:emp.id,nombre:emp.razonSocial||'',clienteNombre:emp.razonSocial||''},
         { tipo:'convenio', descripcion:('Convenio mensual '+(emp.razonSocial||'')+' · '+periodo), monto:Number(emp.convenio.montoMensual)||0 });
     });
@@ -4814,8 +4814,32 @@ function cobSub(id){ if(!S.cob) return; S.cob.sub=id; S.cob.fedit=null; S.cob.em
 function cobVerFactura(id){ if(!puedeCobrar()) return; S.cob.fedit=id; render(); navPush(); }
 function cobCerrarFactura(){ if(S.cob) S.cob.fedit=null; render(); }
 // Cuenta corriente por empresa (drill-down desde "Deuda por cliente")
-function cobEmpVer(empId){ if(!puedeCobrar()) return; S.cob.empVer=empId; S.cob.fedit=null; render(); navPush(); }
-function cobEmpCerrar(){ if(S.cob) S.cob.empVer=null; render(); }
+async function cobEmpVer(empId){ if(!puedeCobrar()) return; S.cob.empVer=empId; S.cob.fedit=null; S.cob.trazaArea=null; render(); navPush();
+  // F4: si la empresa es área protegida, traigo la TRAZA (episodios cubiertos) por CF (el contable no lee /episodios).
+  try{
+    const e=await db.collection('empresas').doc(empId).get();
+    if(e.exists && e.data().tipo==='area_protegida'){
+      S.cob.trazaArea={ empresaId:empId, loading:true }; render();
+      const r=await fnsCall('episodiosDeArea',{ empresaId:empId });
+      if(S.cob && S.cob.empVer===empId) S.cob.trazaArea={ empresaId:empId, count:r.count||0, items:r.items||[] };
+      render();
+    }
+  }catch(_){ if(S.cob && S.cob.empVer===empId) S.cob.trazaArea={ empresaId:empId, error:true }; render(); }
+}
+function cobEmpCerrar(){ if(S.cob){ S.cob.empVer=null; S.cob.trazaArea=null; } render(); }
+// F4 — bloque de TRAZA del contrato del área: cuántos episodios cubrió (solo nroIncidente + fecha, NADA clínico).
+function cobTrazaAreaBlock(E){
+  const t=S.cob&&S.cob.trazaArea;
+  if(!t || t.empresaId!==E) return ''; // no es área protegida (o aún sin resolver el tipo) → no se muestra
+  if(t.loading) return `<div style="font-size:.72rem;color:var(--ink3);padding:.3rem 0">Contando episodios cubiertos por el contrato…</div>`;
+  if(t.error) return '';
+  const items=(t.items||[]).slice(0,20).map(x=>`<div class="ir"><span class="il">${esc(x.nroIncidenteFmt||'—')}</span><span class="iv" style="color:var(--ink3)">${esc(x.fecha||'')}</span></div>`).join('');
+  const mas=(t.items||[]).length>20?`<div style="font-size:.66rem;color:var(--ink3);padding:.2rem 0">…y ${(t.items||[]).length-20} más</div>`:'';
+  return `<div style="background:var(--bg);border-radius:10px;padding:.5rem .7rem;margin:.4rem 0">
+    <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:.74rem;font-weight:700">🏠 Episodios cubiertos por el contrato</span><span style="font-weight:800;color:var(--r)">${t.count}</span></div>
+    ${t.count?`<div style="margin-top:.35rem">${items}${mas}</div>`:`<div style="font-size:.7rem;color:var(--ink3);margin-top:.2rem">Todavía ningún episodio se atribuyó a este contrato.</div>`}
+  </div>`;
+}
 // Recibo imprimible (empresa o persona) en el PANEL — interno, lo imprime el staff
 function cobVerReciboEmpresa(pagoId){ if(!puedeCobrar()) return; const p=(S.cob.pagos||[]).find(x=>x.id===pagoId); if(!p) return; const f=(S.cob.facturas||[]).find(x=>x.id===p.facturaId)||{}; S.cob.recibo={pago:p,factura:f}; render(); navPush(); }
 function cobReciboCerrar(){ if(S.cob) S.cob.recibo=null; render(); }
@@ -4953,6 +4977,7 @@ function cobEmpCuentaView(){
   return `<div style="margin-bottom:.5rem"><button class="btn-o" style="width:auto;padding:.4rem .8rem" onclick="cobEmpCerrar()">← Volver</button></div>
     <div class="card"><div class="ch">${esc(nombre)} <span style="font-size:.58rem;font-weight:800;color:var(--r)">EMPRESA</span></div>
       <div class="ir" style="border-bottom:2px solid var(--border2);padding-bottom:.4rem;margin-bottom:.3rem"><span class="il" style="font-weight:700">Saldo consolidado</span><span class="iv" style="font-weight:800;color:${saldoTot>0.001?'var(--r)':'var(--verde,#1D9E75)'}">${facMoney(saldoTot)}</span></div>
+      ${cobTrazaAreaBlock(E)}
       <div style="font-size:.72rem;font-weight:700;color:var(--ink2);margin:.5rem 0 .1rem">Facturas (${facs.length})</div>${facRows}
       <div style="font-size:.72rem;font-weight:700;color:var(--ink2);margin:.8rem 0 .1rem">Pagos (${pagos.length})</div>${pagoRows}
     </div>`;

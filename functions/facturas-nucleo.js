@@ -57,7 +57,7 @@ function agruparFacturas({ abonos, cargos, socMap, empMap, empresasYaFacturadas,
   Object.values(empMap).forEach((emp) => {
     if (emp.activo === false || !(emp.convenio && emp.convenio.modo === 'fijo') || yaFact.has(emp.id)) return;
     const tieneSocios = Object.values(socMap).some((s) => s.activo !== false && s.facturarA && s.facturarA.tipo === 'empresa' && s.facturarA.empresaId === emp.id);
-    if (!tieneSocios) return;
+    if (!tieneSocios && emp.tipo !== 'area_protegida') return; // F4: el área protegida cubre un LUGAR (sin socios) → su fijo factura igual; corporativo sigue exigiendo socios
     push({ key: 'e:' + emp.id }, { clienteTipo: 'empresa', clienteId: emp.id, nombre: emp.razonSocial || '', clienteNombre: emp.razonSocial || '' },
       { tipo: 'convenio', descripcion: ('Convenio mensual ' + (emp.razonSocial || '') + ' · ' + periodo), monto: Number(emp.convenio.montoMensual) || 0 });
   });
