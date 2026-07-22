@@ -11,7 +11,7 @@ const stubs=`
   function nombreDe(){return 'X';} function tipoLbl(){return '—';} function esStandalone(){return false;} function esMovil(){return false;}
   function planPrecioTotal(){return 0;} function fmtDni(){return '';} function fechaTurno(){return '';} function fromMin(){return '';}
   function toMin(){return 0;} function fstr(){return '';} function pad2(n){return String(n);}
-  function homeChequeoBlock(){return '';} function homeFeedBlock(){return '';} function homeParamsBlock(){return '';} function homeReporteBlock(){return '';}
+  function homeChequeoBlock(){return '';} function homeFeedBlock(){return '';} function homeParamsBlock(){return '';} function homeReporteBlock(){return '';} function homeIaBlock(){return '';}
   function instalar(){} function salir(){} function reservarSlot(){} function cancelarTurnoUI(){} function turnoSetPara(){} function navBack(){}
   // deps sumadas después de la calibración (turnos/crédito/recibo/vencimiento/referente) → stub a '' (conserva lo probado).
   function waLink(){return '';} function vencLineaSocio(){return '';} function recibosComprobante(){return '';}

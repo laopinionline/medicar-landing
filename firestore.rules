@@ -917,6 +917,20 @@ service cloud.firestore {
       allow write: if tienePermiso('configurar_sistema');
     }
 
+    // ===================== MEDICAR IA (F1) =====================
+    // asistente_secreto/{id}: URL del túnel + token del modelo (ollama) / apiKey (claude). SENSIBLE → SOLO Admin SDK
+    //   (la CF asistenteChat lo lee server-side). read/write:false: ni el socio ni el staff lo leen desde el cliente.
+    //   (configuracion/asistente, client-readable, solo lleva {habilitado} NO sensible.)
+    match /asistente_secreto/{id} { allow read, write: if false; }
+    // rate_asistente/{uid}: contador de rate-limit por uid. Solo la CF (Admin SDK) lo toca; el cliente no lo ve/pisa.
+    match /rate_asistente/{uid} { allow read, write: if false; }
+    // asistente_incidentes/{id}: log del GUARDRAIL (texto clínico del socio + respuesta del modelo). SOLO-STAFF lee
+    //   para auditar el comportamiento del modelo; el cliente nunca. Escribe solo la CF (Admin SDK).
+    match /asistente_incidentes/{id} {
+      allow read:  if esInterno();
+      allow write: if false;
+    }
+
     // ===================== REFERENTE R1 (auth + código + ponderación) =====================
     // codigos_referente/{codigo}: el CÓDIGO que el titular genera y comparte. docId = el código.
     //  - read/create/update: SOLO el titular dueño (titularPersonaId == su personaId). El referente NO lo lee
