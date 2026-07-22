@@ -28,4 +28,18 @@ function revisar(respuesta) {
   return { ok: true, respuesta: String(respuesta || ''), motivo: null };
 }
 
-module.exports = { revisar, MSG_SEGURO, norm };
+/* Neutraliza la mención a la LÍNEA DE EMERGENCIAS (443044) cuando el escaneo determinista dice rojo=false.
+   Hace el TEXTO consistente con el banner: si no hubo señal de alarma, el 443044 no debe ofrecerse (ni para
+   molestias leves ni como cierre genérico). Determinista, no depende del modelo. Targetea el NÚMERO (preciso:
+   NO toca "tu plan cubre emergencias", que es cobertura, no la línea). Dropea las frases que traen el número y
+   redirige a la vía correcta — mantiene "ver un médico", solo cambia el canal (turno/médico, no emergencias).
+   Riesgo acotado: si el escaneo tuviera un falso negativo, el socio igual queda derivado a un médico por la app. */
+function neutralizarEmergencia(texto, rojo) {
+  if (rojo || !texto || !/443044/.test(texto)) return { texto: String(texto || ''), cambiado: false };
+  const frases = String(texto).split(/(?<=[.!?\n])\s+/);
+  let out = frases.filter((f) => !/443044/.test(f)).join(' ').replace(/\s+/g, ' ').trim();
+  if (!/turno|m[eé]dico/i.test(out)) out = (out ? out + ' ' : '') + 'Si te preocupa, podés pedir un turno o hablar con un médico desde la app.';
+  return { texto: out.trim(), cambiado: true };
+}
+
+module.exports = { revisar, neutralizarEmergencia, MSG_SEGURO, norm };

@@ -39,6 +39,7 @@ const { cargoDeEpisodio, fmtIncidente } = require('./cargos-nucleo'); // Factura
 const { RESULTADOS, puedeMarcar, debeBarrer } = require('./asistencia'); // Turnos Fase B: transiciones atendido/ausente + barrido
 const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: escaneo determinista de banderas rojas (server-side)
 const guardrailAsistente = require('./asistente-guardrail').revisar; // MEDICAR IA: guardrail de salida
+const { neutralizarEmergencia } = require('./asistente-guardrail'); // MEDICAR IA: neutraliza 443044 si rojo=false (determinista)
 const { SYSTEM: IA_SYSTEM, buildContexto, stripEscalar, parseBotones } = require('./asistente-prompt'); // MEDICAR IA: prompt v4 + contexto + salida
 const { responder: iaResponder } = require('./asistente-adapter'); // MEDICAR IA: adaptador del modelo (ollama|claude)
 
@@ -1516,10 +1517,13 @@ exports.asistenteChat = onCall(async (request) => {
     catch (e) { logger.warn('[asistenteChat] no se pudo loguear incidente', { err: e.message }); }
   }
 
-  // 6) salida: strip de [[ESCALAR]] (control), botones estructurados, escalar = rojo || etiqueta del modelo.
+  // 6) salida: strip de [[ESCALAR]] (control) + neutralización determinista del 443044 si NO hubo bandera roja
+  //    (el texto se hace consistente con el banner: sin señal de alarma, no se ofrece la línea de emergencias).
   const { texto, tag } = stripEscalar(gr.respuesta);
+  const neu = neutralizarEmergencia(texto, scan.rojo);
+  if (neu.cambiado) logger.info('[asistenteChat] 443044 neutralizado (rojo=false)');
   const botones = gr.motivo ? [{ label: 'Hablar con un médico', accion: 'medico' }] : parseBotones(gr.respuesta);
-  return { respuesta: texto, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
+  return { respuesta: neu.texto, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================

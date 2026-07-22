@@ -28,11 +28,14 @@ t('sin plan → "sin plan asignado"', ctx2.includes('sin plan asignado'));
 t('sin factura → "sin deuda pendiente"', ctx2.includes('sin deuda pendiente'));
 
 // --- SYSTEM prompt: reglas duras presentes ---
-t('SYSTEM prohíbe medicación', /NUNCA sugieras ni menciones medicamentos/.test(SYSTEM));
-t('SYSTEM no diagnostica', /NO diagnostic/.test(SYSTEM));
+t('SYSTEM: dosis puntual NO, tipo de medicación SÍ (útil, no candado)', /DOSIS puntual/.test(SYSTEM) && /medicación en general SÍ/.test(SYSTEM));
+t('SYSTEM: explica conceptos (no se lava las manos)', /EXPLICÁS con soltura/.test(SYSTEM) && /Explicar conceptos y cuadros en general SÍ/.test(SYSTEM));
+t('SYSTEM: no afirma enfermedad a la persona (no es "no diagnostico" a secas)', /No le AFIRMÁS a ESTA persona/.test(SYSTEM));
+t('SYSTEM: orienta y CIERRA sin derivar por reflejo', /ORIENTÁS Y CERRÁS/.test(SYSTEM) && /NO mandes al médico en cada mensaje/.test(SYSTEM));
 t('SYSTEM define la etiqueta [[ESCALAR]]', SYSTEM.includes('[[ESCALAR]]'));
 t('SYSTEM: no ejecuta acciones', /NO EJECUTÁS ACCIONES/.test(SYSTEM));
-t('SYSTEM (fix 3): 443044 SOLO emergencias, no turnos', /443044 ES LA LÍNEA DE EMERGENCIAS/.test(SYSTEM) && /NUNCA lo ofrezcas para pedir turnos/.test(SYSTEM));
+t('SYSTEM (fix 3): 443044 SOLO emergencias, no turnos ni molestias leves', /443044 = EMERGENCIAS MÉDICAS/.test(SYSTEM) && /NUNCA para turnos/.test(SYSTEM) && /molestias leves/.test(SYSTEM));
+t('SYSTEM: PRIORIDAD ABSOLUTA de bandera roja intacta (firme)', /PRIORIDAD ABSOLUTA/.test(SYSTEM) && /esto no se negocia/.test(SYSTEM));
 t('SYSTEM (fix 1): regla de retractación de síntomas', /CORRIGE o DESMIENTE un síntoma/.test(SYSTEM));
 
 // --- stripEscalar ---
