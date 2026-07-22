@@ -648,6 +648,23 @@ function navRestore(desc){
 }
 window.addEventListener('popstate', e=>navRestore(e.state));
 
+/* Botón físico ATRÁS de Android (Capacitor). Sin esto, el back cierra la app de golpe. Lo enganchamos a la MISMA
+   lógica de "volver": sub-vista del socio → home; home / referente / login / boot → segundo plano (minimizeApp,
+   NUNCA pantalla en blanco ni cierre duro). Solo en la app nativa; en la web este código no corre. */
+const SUBVISTAS_SOCIO=['chequeo','reporte','parametros','comprobantes','asistente','cambiar-plan','mis-referentes','recibo','pago-sim'];
+async function minimizarApp(){ try{ const A=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.App; if(A&&A.minimizeApp) await A.minimizeApp(); }catch(_){} }
+function hardwareBack(){
+  if(S.cred && SUBVISTAS_SOCIO.includes(S.view)){ set({view:'home'}); return; } // sub-vista → home (mismo destino que el Volver de pantalla)
+  minimizarApp();                                                               // home / referente / login / boot → segundo plano
+}
+let _backEnganchado=false;
+function engancharBackNativo(){ // idempotente; se llama en el arranque (onAuthStateChanged)
+  if(_backEnganchado || !esAppNativa()) return;
+  const A=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.App;
+  if(!A||!A.addListener) return;
+  try{ A.addListener('backButton', hardwareBack); _backEnganchado=true; }catch(_){}
+}
+
 /* ---------- Utilidades de credencial ---------- */
 function nombreDe(per, u){
   const ap=(per&&per.apellido||'').trim(), no=(per&&per.nombre||'').trim();
@@ -1051,6 +1068,7 @@ function destinoTrasAuth(esRef, credEstado){
   return 'sin-vinculo';
 }
 auth.onAuthStateChanged(async user => {
+  engancharBackNativo(); // engancha el botón atrás de Android una sola vez (idempotente; no-op en web)
   if(!user){ set({ view:'login', cred:null, busy:false, refMode:false }); navReplace(); return; }
   set({ view:'boot' });
   try{
@@ -2360,7 +2378,7 @@ async function recargarMisCodigos(){
 // Texto del consentimiento de síntomas (copia del CONSENT_SINTOMAS v1 del backend; el registro legal lo guarda la CF).
 const CONSENT_SINTOMAS_TEXTO='Autorizo a la persona que designé como mi referente en MEDICAR a ver los síntomas que reporto, incluyendo la descripción que yo escriba. Entiendo que es información de mi salud, que la comparto por mi propia decisión, que se comparte solo mi reporte más reciente, y que puedo revocar esta autorización en cualquier momento desde la aplicación.';
 function misReferentesView(){
-  const top=`<div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Mis referentes</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Volver</button></div>`;
+  const top=`<div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Mis referentes</div><div class="tb-sp"></div><button class="mini" onclick="set({view:'home'})">Volver</button></div>`; // vista-hoja: vuelve directo al home (no navBack: no está en APILADAS)
   // Flujo de consentimiento de síntomas (in-app, sin dialog).
   if(S.consentModal){
     const m=S.consentModal;
@@ -2441,7 +2459,7 @@ function cambiarPlanView(){
   const c=S.cred||{}; const socio=c.socio||{}; const actualId=socio.planId; const actualCob=(c.plan&&c.plan.coberturas)||{};
   const activos=((c.dependientes||[]).filter(d=>d.titularSocioId===socio.id && d.activo!==false)).length;
   const list=S.planes;
-  const top=`<div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Cambiar mi plan</div><div class="tb-sp"></div><button class="mini" onclick="navBack()">Volver</button></div>`;
+  const top=`<div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">Cambiar mi plan</div><div class="tb-sp"></div><button class="mini" onclick="set({view:'home'})">Volver</button></div>`; // vista-hoja: vuelve directo al home (no navBack: no está en APILADAS → navRestore la ignoraría)
   if(list===undefined) return `<div class="home">${top}<div class="card" style="padding:1.2rem;text-align:center;color:var(--gris)">Cargando planes…</div></div>`;
   const err=S.planErr?`<div class="card" style="border:1.5px solid var(--rojo);color:var(--rojo);padding:.6rem 1rem;margin-bottom:.5rem">${esc(S.planErr)}</div>`:'';
   // Confirmación in-app (sin dialog): al elegir, se fija S.planSel.
