@@ -37,6 +37,10 @@ const { crearPreferencia, verificarWebhook } = require('./pasarela-adapter'); //
 const { reciboPublico } = require('./recibo'); // Recibo del socio: proyección pública de un pago (campos limpios)
 const { cargoDeEpisodio } = require('./cargos-nucleo'); // Facturación: núcleo puro de cargos (paridad con el motor cliente)
 const { RESULTADOS, puedeMarcar, debeBarrer } = require('./asistencia'); // Turnos Fase B: transiciones atendido/ausente + barrido
+const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: escaneo determinista de banderas rojas (server-side)
+const guardrailAsistente = require('./asistente-guardrail').revisar; // MEDICAR IA: guardrail de salida
+const { SYSTEM: IA_SYSTEM, buildContexto, stripEscalar, parseBotones } = require('./asistente-prompt'); // MEDICAR IA: prompt v4 + contexto + salida
+const { responder: iaResponder } = require('./asistente-adapter'); // MEDICAR IA: adaptador del modelo (ollama|claude)
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -1396,6 +1400,90 @@ exports.generarCargosCF = onCall(async (request) => {
   }
   logger.info('[generarCargosCF]', { dry, ...rep });
   return dry ? { dry: true, ...rep, cargos: nuevos } : { dry: false, ...rep };
+});
+
+/* ===================== MEDICAR IA — asistenteChat (proxy del modelo) =====================
+   Auth -> miPersonaId -> rate-limit -> ESCANEO de banderas rojas (server-side, determinista) -> CONTEXTO mínimo
+   (Admin SDK) -> adaptador (ollama|claude) -> guardrail de salida -> { respuesta, rojo, escalar, botones }.
+   La SEGURIDAD no depende del modelo: 'rojo' (escaneo) manda la urgencia; [[ESCALAR]] es secundario. Degrada limpio:
+   si el modelo no responde, devuelve un mensaje claro con 'rojo' igual computado (la UI sigue, el botón médico sigue). */
+const IA_RL_MAX = 30, IA_RL_VENTANA_MS = 10 * 60 * 1000; // rate limit por uid (autenticado)
+exports.asistenteChat = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const mensaje = String((request.data || {}).mensaje || '').slice(0, 1000).trim();
+  if (!mensaje) throw new HttpsError('invalid-argument', 'Mensaje vacío.');
+  const historia = Array.isArray((request.data || {}).historia)
+    ? (request.data.historia).slice(-6).filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .map((m) => ({ role: m.role, content: String(m.content).slice(0, 1000) }))
+    : [];
+
+  // 1) rate-limit por uid (calco de buscarTitular). Admin SDK -> saltea reglas; el doc vive lockeado.
+  const rlRef = db.collection('rate_asistente').doc(uid);
+  await db.runTransaction(async (tx) => {
+    const s = await tx.get(rlRef); const now = Date.now();
+    const d = s.exists ? s.data() : null;
+    const dentro = d && d.ventanaMs && (now - d.ventanaMs) < IA_RL_VENTANA_MS;
+    const count = dentro ? (d.count || 0) + 1 : 1;
+    if (count > IA_RL_MAX) throw new HttpsError('resource-exhausted', 'Estás yendo muy rápido. Esperá un momento y seguimos.');
+    tx.set(rlRef, { count, ventanaMs: dentro ? d.ventanaMs : now }, { merge: true });
+  });
+
+  // 2) ESCANEO de banderas rojas SOBRE EL TEXTO DEL SOCIO (esto —y solo esto— decide la urgencia 443044).
+  const scan = escanearBanderas(mensaje);
+
+  // 3) miPersonaId + CONTEXTO mínimo server-side (NUNCA DNI/clínico/terceros).
+  let contexto;
+  try {
+    const personaId = await assertAfiliado(request);
+    const socioSnap = await db.collection('socios').where('personaId', '==', personaId).where('activo', '==', true).limit(1).get();
+    const socio = socioSnap.empty ? null : socioSnap.docs[0].data();
+    let plan = null, cubre = [];
+    if (socio && socio.planId) {
+      const ps = await db.collection('planes').doc(socio.planId).get();
+      if (ps.exists) { const p = ps.data(); plan = { nombre: p.nombre || 'tu plan', precio: p.precio != null ? p.precio : 0 };
+        cubre = Object.keys(p.coberturas || {}).filter((k) => p.coberturas[k] === true); }
+    }
+    let factura = null;
+    const fq = await db.collection('facturas').where('personaId', '==', personaId).where('estado', '==', 'emitida').get();
+    const vMs = (x) => (x && x.toMillis) ? x.toMillis() : 0;
+    if (!fq.empty) { const f = fq.docs.map((d) => d.data()).sort((a, b) => vMs(a.venceEl) - vMs(b.venceEl))[0];
+      factura = { monto: Number(f.total) || 0, vence: f.venceEl && f.venceEl.toDate ? new Intl.DateTimeFormat('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }).format(f.venceEl.toDate()) : null }; }
+    const plSnap = await db.collection('planes').where('activo', '==', true).get();
+    const planes = plSnap.docs.map((d) => d.data()).map((p) => ({ nombre: p.nombre || '', precio: p.precio != null ? p.precio : 0 })).filter((p) => p.nombre).slice(0, 8);
+    const nombre = (socio && socio.nombreVista) ? String(socio.nombreVista).split(',').pop().trim().split(' ')[0] : 'socio';
+    contexto = buildContexto({ nombre, plan, cubre, factura, planes, tel: '443044' });
+  } catch (e) {
+    logger.warn('[asistenteChat] contexto degradado', { err: e.message }); // sin contexto sigue: el modelo orienta genérico
+    contexto = buildContexto({ nombre: 'socio', planes: [], tel: '443044' });
+  }
+
+  // 4) adaptador del modelo (DEGRADA LIMPIO si no responde: túnel caído / compu apagada / timeout).
+  const cfgSnap = await db.collection('asistente_secreto').doc('config').get();
+  const cfg = cfgSnap.exists ? cfgSnap.data() : { proveedor: 'ollama' };
+  let raw;
+  try {
+    const r = await iaResponder(cfg, { system: IA_SYSTEM, contexto, historia, mensaje });
+    raw = r.texto;
+  } catch (e) {
+    logger.warn('[asistenteChat] modelo no disponible, degradación limpia', { err: e.message });
+    return {
+      respuesta: 'Ahora mismo no puedo responderte por acá. Si es una urgencia, llamá al 443044. También podés hablar con un médico o pedir un turno desde la app.',
+      rojo: scan.rojo, escalar: true, botones: [{ label: 'Hablar con un médico', accion: 'medico' }], degradado: true,
+    };
+  }
+
+  // 5) guardrail de salida (fármaco+dosis / diagnóstico afirmativo -> mensaje seguro + log de incidente).
+  const gr = guardrailAsistente(raw);
+  if (!gr.motivo) { /* ok */ } else {
+    try { await db.collection('asistente_incidentes').add({ uid, mensaje, respuestaModelo: raw, motivo: gr.motivo, creadoEn: FV() }); }
+    catch (e) { logger.warn('[asistenteChat] no se pudo loguear incidente', { err: e.message }); }
+  }
+
+  // 6) salida: strip de [[ESCALAR]] (control), botones estructurados, escalar = rojo || etiqueta del modelo.
+  const { texto, tag } = stripEscalar(gr.respuesta);
+  const botones = gr.motivo ? [{ label: 'Hablar con un médico', accion: 'medico' }] : parseBotones(gr.respuesta);
+  return { respuesta: texto, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================

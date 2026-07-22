@@ -568,7 +568,7 @@ const TEL_EMERG = '443044';
 const ICON = 'icon.svg';
 
 // Estado mínimo de la vista.
-const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null, chk:null, rpt:null, par:null };
+const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null, chk:null, rpt:null, par:null, ia:null };
 const el = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -618,7 +618,7 @@ function set(patch){ Object.assign(S, patch); render(); }
    mínimo; navPush al ABRIR una vista apilada; los "Volver/Cancelar" internos llaman
    navBack()=history.back; popstate -> navRestore aplica SOLO por las funciones existentes
    (abrir/cerrar). Flag navRestoring para no re-pushear. Solo navegación; cero lógica clínica. */
-const APILADAS=['chequeo','reporte','parametros','comprobantes'];
+const APILADAS=['chequeo','reporte','parametros','comprobantes','asistente'];
 let navRestoring=false;
 function navDesc(){ return { v:1, view: (APILADAS.includes(S.view) ? S.view : 'home') }; }
 function navPush(){ if(navRestoring) return; try{ history.pushState(navDesc(),''); }catch(_){} }      // al ABRIR (deeper)
@@ -988,6 +988,7 @@ async function cargarCredencial(uid){
   let agenda = [], misTurnos = [], waAtencion = '';
   // WhatsApp institucional de atención (videollamada de turnos) — UN doc de config; si no hay número, no se muestra botón.
   try{ const cfg = await db.collection('configuracion').doc('club').get(); if(cfg.exists) waAtencion = String(cfg.data().whatsapp||'').trim(); }catch(_){}
+  try{ const cfgIA = await db.collection('configuracion').doc('asistente').get(); S.iaHabilitado = !!(cfgIA.exists && cfgIA.data().habilitado); }catch(_){ S.iaHabilitado=false; } // MEDICAR IA: la sección aparece solo si está habilitada (rollout controlado)
   if(personaId){
     try{ const ag = await db.collection('agenda_turnos').where('activa','==',true).get(); agenda = ag.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
     // Fase A: turnos del GRUPO. Dos queries (los propios por personaId + los del grupo por titularPersonaId==yo, que
@@ -1416,6 +1417,8 @@ function homeView(){
     ${comprobantesSec}
     ${turnosSec}
 
+    ${homeIaBlock(c)}
+
     ${homeReporteBlock(c)}
 
     ${homeParamsBlock(c)}
@@ -1652,6 +1655,92 @@ async function enviarChequeo(){
 }
 
 /* ---------- Auto-reporte de síntomas (Monitoreo N2) ---------- */
+/* ===================== MEDICAR IA — sección del socio (F1) =====================
+   Híbrido por elección: IA instantánea vs turno con médico. La SEGURIDAD no depende del modelo: botón "Hablar con un
+   médico" SIEMPRE visible + banner 443044 cuando el server marca `rojo` (escaneo determinista). Si el modelo no
+   responde, la CF degrada limpio (mensaje claro + el botón médico sigue). La conversación NO se persiste (solo sesión). */
+function homeIaBlock(c){
+  if(!S.iaHabilitado) return ''; // oculta hasta que la config la encienda (túnel/proveedor listo)
+  return `<div class="sec">
+    <div class="sec-h">MEDICAR IA</div>
+    <button class="tile" onclick="abrirAsistente()">
+      <span class="tile-ic">💬</span>
+      <span class="tile-tx"><span class="tile-t">Consultar con MEDICAR IA</span><span class="tile-s">Respuesta al instante sobre tu plan, tus facturas o cómo te sentís.</span></span>
+      <span class="tile-go">${chv(15)}</span>
+    </button>
+    <div style="font-size:.68rem;color:var(--gris);margin:.45rem .2rem 0;line-height:1.4">¿Preferís un profesional? La videollamada con un médico puede demorar, pero te atiende una persona. <button onclick="cerrarAsistente()" style="background:none;border:none;color:var(--rojo);font-weight:700;cursor:pointer;padding:0">Pedir turno ↓</button></div>
+  </div>`;
+}
+function abrirAsistente(){ if(!S.cred) return; if(!S.ia) S.ia={ msgs:[], busy:false, err:'', escalando:false }; S.view='asistente'; render(); navPush(); }
+function cerrarAsistente(){ if(S.ia) S.ia.escalando=false; S.view='home'; render(); }
+function iaBurbuja(m){
+  if(m.role==='user') return `<div style="align-self:flex-end;max-width:85%;background:var(--rojo);color:#fff;border-radius:14px 14px 4px 14px;padding:.55rem .8rem;font-size:.9rem;line-height:1.4">${esc(m.texto)}</div>`;
+  const banner = m.rojo ? `<a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:.55rem;background:var(--rojo);color:#fff;font-weight:800;padding:.6rem;border-radius:10px;text-decoration:none">🚑 Emergencias ${TEL_EMERG}</a>` : '';
+  const botones = (m.botones||[]).map(b=>`<button onclick="iaAccion('${b.accion}')" style="display:block;width:100%;margin-top:.4rem;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:700;padding:.5rem;border-radius:10px;cursor:pointer">${esc(b.label)}</button>`).join('');
+  return `<div style="align-self:flex-start;max-width:90%;background:var(--nieve);border:1px solid var(--linea);border-radius:14px 14px 14px 4px;padding:.55rem .8rem;font-size:.9rem;line-height:1.45">${esc(m.texto).replace(/\n/g,'<br>')}${banner}${botones}</div>`;
+}
+function asistenteView(){
+  const ia=S.ia||{msgs:[],busy:false,err:'',escalando:false};
+  const msgs = ia.msgs.map(iaBurbuja).join('');
+  const empty = ia.msgs.length ? '' : `<div style="color:var(--gris);font-size:.85rem;text-align:center;margin:.6rem 0">Preguntame lo que quieras. Elegí un tema o escribí:</div>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;justify-content:center">
+      ${['Sobre mi plan','Mis facturas','No me siento bien','Cómo pedir un turno'].map(x=>`<button onclick="iaChip('${x}')" style="background:var(--nieve);border:1px solid var(--linea);border-radius:16px;padding:.45rem .8rem;font-size:.82rem;cursor:pointer">${x}</button>`).join('')}
+    </div>`;
+  const sheet = ia.escalando ? `<div style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;z-index:50" onclick="iaCerrarEscalar(event)">
+      <div style="background:#fff;width:100%;border-radius:18px 18px 0 0;padding:1rem 1.1rem 1.4rem" onclick="event.stopPropagation()">
+        <div style="font-weight:800;font-size:1rem;margin-bottom:.2rem">Hablar con un médico</div>
+        <div style="font-size:.78rem;color:var(--gris);margin-bottom:.8rem">Elegí cómo seguir. Ante una urgencia, la vía más rápida es el teléfono.</div>
+        <a href="tel:${TEL_EMERG}" class="call" style="margin-top:0">${IC.phone}<span>Emergencias — llamar al ${TEL_EMERG}</span></a>
+        <button class="btn-o" style="margin-top:.6rem;width:100%" onclick="iaEscalarReporte()">Contarle mis síntomas a un médico</button>
+        <button class="btn-o" style="margin-top:.5rem;width:100%" onclick="cerrarAsistente()">Pedir un turno por videollamada</button>
+        <button class="btn-o" style="margin-top:.5rem;width:100%;border:none;color:var(--gris)" onclick="iaCerrarEscalar()">Cancelar</button>
+      </div></div>` : '';
+  return `<div class="home" style="display:flex;flex-direction:column;min-height:100dvh">
+    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">MEDICAR IA</div><div class="tb-sp"></div><button class="mini" onclick="cerrarAsistente()">Volver</button></div>
+    <div style="background:#fff3f3;border:1px solid #f3c9c9;border-radius:10px;padding:.5rem .7rem;font-size:.72rem;color:#7a1f1f;margin:.1rem 0 .6rem;line-height:1.4">DrIA te orienta, no reemplaza a un médico. Ante una urgencia, llamá al <b>${TEL_EMERG}</b>.</div>
+    <div id="ia-msgs" style="flex:1;display:flex;flex-direction:column;gap:.5rem;padding-bottom:.5rem;overflow-y:auto">${msgs}${empty}</div>
+    ${ia.busy?`<div style="color:var(--gris);font-size:.82rem;padding:.3rem .2rem">DrIA está pensando…</div>`:''}
+    ${ia.err?`<div class="err on" style="margin:.3rem 0">${esc(ia.err)}</div>`:''}
+    <div style="position:sticky;bottom:0;background:var(--fondo,#fff);padding:.5rem 0 .3rem">
+      <button onclick="iaEscalar()" style="width:100%;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:800;padding:.6rem;border-radius:12px;cursor:pointer;margin-bottom:.5rem">🩺 Hablar con un médico</button>
+      <div style="display:flex;gap:.4rem">
+        <input id="ia-input" placeholder="Escribí tu consulta…" autocomplete="off" ${ia.busy?'disabled':''} style="flex:1;border:1.5px solid var(--linea);border-radius:12px;padding:.6rem .8rem;font-size:.9rem;background:var(--nieve)">
+        <button onclick="iaEnviar()" ${ia.busy?'disabled':''} style="background:var(--rojo);color:#fff;border:none;border-radius:12px;padding:0 1.1rem;font-weight:800;cursor:pointer">Enviar</button>
+      </div>
+    </div>${sheet}</div>`;
+}
+function iaEscalar(){ if(!S.ia) S.ia={msgs:[],busy:false,err:''}; S.ia.escalando=true; render(); }
+function iaCerrarEscalar(ev){ if(ev&&ev.target&&ev.currentTarget&&ev.target!==ev.currentTarget) return; if(S.ia) S.ia.escalando=false; render(); }
+function iaEscalarReporte(){ // reporte PRE-LLENADO con el RELATO del socio (sus propias palabras, NO una clasificación — N3). Confirma y envía.
+  if(!S.cred||!S.cred.personaId) return;
+  const relato = ((S.ia&&S.ia.msgs)||[]).filter(m=>m.role==='user').map(m=>m.texto).join('. ').slice(0,300);
+  if(S.ia) S.ia.escalando=false;
+  S.rpt={ sel:{}, texto:relato, err:'', busy:false, done:null };
+  S.view='reporte'; render(); navPush();
+}
+function iaChip(txt){ iaMandar(txt); }
+function iaEnviar(){ const inp=el('ia-input'); const m=(inp?inp.value:'').trim(); if(m) iaMandar(m); }
+async function iaMandar(mensaje){
+  if(!S.ia) S.ia={msgs:[],busy:false,err:''};
+  if(S.ia.busy) return;
+  S.ia.msgs.push({role:'user', texto:mensaje}); S.ia.busy=true; S.ia.err=''; render();
+  try{
+    const historia = S.ia.msgs.slice(0,-1).map(m=>({ role:(m.role==='user'?'user':'assistant'), content:m.texto })).slice(-6);
+    const r = await fnsCall('asistenteChat', { mensaje, historia });
+    S.ia.msgs.push({ role:'ia', texto:(r&&r.respuesta)||'', rojo:!!(r&&r.rojo), botones:(r&&r.botones)||[] });
+  }catch(e){
+    S.ia.err = errCF(e, 'No pude responderte ahora. Si es una urgencia, llamá al '+TEL_EMERG+'.', { 'resource-exhausted':'Vas muy rápido. Esperá un momento y seguimos.' });
+  }
+  S.ia.busy=false; render();
+  const cont=el('ia-msgs'); if(cont) cont.scrollTop=cont.scrollHeight;
+}
+function iaAccion(accion){
+  if(accion==='emergencia'){ location.href='tel:'+TEL_EMERG; return; }
+  if(accion==='medico'){ iaEscalar(); return; }
+  if(accion==='plan'){ abrirCambiarPlan(); return; }
+  if(accion==='comprobantes'||accion==='pagar'){ abrirComprobantes(); return; }
+  if(accion==='turno'){ cerrarAsistente(); return; } // los turnos viven en el home
+}
 function homeReporteBlock(c){
   return `<div class="sec">
     <div class="sec-h">¿No te sentís bien?</div>
@@ -2408,6 +2497,7 @@ function render(){
     case 'cambiar-plan': html=cambiarPlanView(); break;
     case 'chequeo': html=chequeoFormView(); break;
     case 'reporte': html=reporteFormView(); break;
+    case 'asistente': html=asistenteView(); break;
     case 'parametros': html=paramsFormView(); break;
     case 'comprobantes': html=comprobantesFullView(); break;
     case 'pago-sim': html=pagoSimView(); break;

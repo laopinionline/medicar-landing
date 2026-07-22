@@ -23,7 +23,7 @@ const stubs = `
   function toMin(){return 0;} function fstr(){return '';} function pad2(n){return String(n);}
   function abonoEstado(){return 'emitido';} function nombre(){return '';}
   function homeChequeoBlock(){return '';} function homeFeedBlock(){return '';}
-  function homeParamsBlock(){return '';} function homeReporteBlock(){return '';}
+  function homeParamsBlock(){return '';} function homeReporteBlock(){return '';} function homeIaBlock(){return '';}
   function instalar(){} function salir(){} function reservarSlot(){} function cancelarTurnoUI(){}
   function turnoSetPara(){}
   // deps sumadas después de la calibración (turnos/crédito/recibo/vencimiento) → stub a '' para conservar lo que el smoke probaba.
