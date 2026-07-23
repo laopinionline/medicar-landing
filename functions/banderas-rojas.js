@@ -21,6 +21,17 @@ function prox(a, b, W) { W = W || 30; return '(?:' + a + ').{0,' + W + '}(?:' + 
 const TORAX = 'pecho|torax|toracic|esternon';                                        // ancla torácica
 const MOLESTIA = 'dol|duel|doli|presion|opresion|aprie|apret|arde|ardor|punzad|puntad|quema|quemazon|fuego|opres'; // dolor/molestia (raíces)
 
+// URGENCIA DECLARADA POR TIEMPO (sin síntoma): el socio pide atención médica CON inmediatez → declara una urgencia.
+// INMEDIATEZ ("ya/ahora/hoy mismo/urge/no puede esperar") cerca de ATENCIÓN médica ("médico/que lo vea/atiendan/guardia"), ventana 40.
+const INMEDIATEZ = 'hoy mismo|\\bhoy\\b|ahora mismo|\\bahora\\b|ya mismo|\\bya\\b|en este momento|urge|no (?:puede|puedo|podemos|aguanta|aguanto) esperar|no da para esperar|de inmediato|inmediat|cuanto antes|lo antes posible|enseguida';
+// ATENCIÓN médica a una PERSONA: "médico/médica", "que lo/me vea/n", "(lo/la/me/te/nos) atiend(a/an)". Anclas ESTRECHAS:
+// "guardia"/"atiende" SUELTOS (sin pronombre) o "medicamento/medicación" NO cuentan (evita "¿la guardia atiende hoy?").
+const ATENCION = 'medic[oa]s?\\b|que (?:lo|la|me|te|nos) vea[n]?|(?:lo|la|me|te|nos) atiend';
+// EXCLUSIÓN: consulta de AGENDA / DISPONIBILIDAD / ADMINISTRATIVA → NO es urgencia declarada ("¿pido turno para hoy?",
+// "¿hay guardia médica disponible para hoy?", "que me atienda administración").
+const EXCL_AGENDA = /\bturno|\bcita|\bagend|\breprogram|\bhorario|\bsobreturno|\bdisponible|\badministr/;
+const URGENCIA_DECLARADA = new RegExp(prox(INMEDIATEZ, ATENCION, 40));
+
 const PATRONES = [
   // Dolor/molestia TORÁCICA por proximidad (captura doliendo/presión/arde/apretado + brazo). El ancla evita "presion arterial".
   { k: 'dolor_pecho',   re: new RegExp(prox(TORAX, MOLESTIA)) },
@@ -54,6 +65,9 @@ function escanear(texto) {
   const t = norm(texto);
   const hits = [];
   for (const p of PATRONES) { const m = p.re.exec(t); if (m) hits.push({ k: p.k, idx: m.index }); }
+  // Urgencia declarada por TIEMPO (sin síntoma): inmediatez + atención médica, SALVO consulta de agenda (turno/cita).
+  const mu = URGENCIA_DECLARADA.exec(t);
+  if (mu && !EXCL_AGENDA.test(t)) hits.push({ k: 'urgencia_declarada', idx: mu.index });
   if (!hits.length) return { rojo: false, matched: [] };
   if (AMBIGUO.test(t)) return { rojo: true, matched: hits.map((h) => h.k) };
   const negadoLimpio = (idx) => NEG_ADYACENTE.test(t.slice(Math.max(0, idx - 16), idx));

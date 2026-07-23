@@ -84,5 +84,25 @@ verde('fuego SIN pecho "se prendió fuego la cocina"', 'se prendió fuego la coc
 verde('presión NORMAL "me tomé la presión, dio 12/8"', 'me tomé la presión, dio 12/8');
 verde('fecha "nos vemos el 19/11" (no es presión)', 'nos vemos el 19/11 en la clínica');
 
+console.log('\n— URGENCIA DECLARADA POR TIEMPO (inmediatez + atención médica, sin síntoma) → ROJO —');
+rojo('objetivo: "hoy mismo lo vea un médico a mi nene"', 'necesito que hoy mismo lo vea un médico a mi nene');
+rojo('"quiero que me vea un médico ya"', 'quiero que me vea un médico ya');
+rojo('"necesito que ahora lo atiendan, no puede esperar"', 'necesito que ahora lo atiendan, no puede esperar');
+rojo('"urgente, que lo vea un médico"', 'es urgente, que lo vea un médico por favor');
+rojo('"lo necesito ver por un médico cuanto antes"', 'lo necesito ver por un médico cuanto antes');
+
+console.log('\n— TRAMPAS DE REGRESIÓN de la urgencia declarada → deben seguir VERDE —');
+verde('agenda: "¿puedo pedir turno para hoy?"', '¿puedo pedir turno para hoy?');
+verde('agenda con médico: "¿tienen turno con un médico para hoy mismo?"', '¿tienen turno con un médico para hoy mismo?');
+verde('cita: "quiero pedir una cita, ¿hay para hoy?"', 'quiero pedir una cita, ¿hay para hoy?');
+verde('sin plazo: "quiero que me vea un médico" (va a turno)', 'quiero que me vea un médico');
+verde('negación/sin ancla: "lo urgente ya pasó"', 'lo urgente ya pasó');
+verde('medicamento ≠ médico: "necesito un medicamento ya"', 'necesito un medicamento ya');
+verde('inmediatez sin atención médica: "ahora quiero cambiar mi plan"', 'ahora quiero cambiar mi plan');
+verde('info de guardia: "¿la guardia atiende hoy?" (sin pronombre+atiend)', '¿la guardia atiende hoy?');
+verde('disponibilidad: "¿hay guardia médica disponible para hoy a la tarde?"', '¿hay guardia médica disponible para hoy a la tarde?');
+verde('cobertura urgencias (admin): "¿mi plan cubre urgencias ahora mismo?"', '¿mi plan cubre urgencias ahora mismo?');
+verde('atención administrativa: "que me atienda alguien de administración ya"', 'quiero que me atienda alguien de administración ya');
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-banderas-rojas: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);
