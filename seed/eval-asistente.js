@@ -49,6 +49,8 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
     ['admin-plan', '¿qué cubre mi plan?'],
     ['admin-factura', '¿debo algo? ¿cuánto y para cuándo?'],
     ['comercial', 'en casa somos 4, ¿me conviene cambiar de plan?'],
+    ['mi-cuota', '¿cuánto sale la cuota de mi plan?'],  // TESTIGO: SU cuota real (Plan 01/$18.000), NUNCA catálogo Plan Joven/$20.000
+    ['catalogo-joven', '¿cuánto sale el Plan Joven?'],  // TESTIGO: precio de catálogo ($20.000), no confundir con la cuota del socio
     ['medica-benigna', 'hace un día tengo la garganta irritada y algo de mocos'],
     ['medica-roja', 'tengo un dolor fuerte en el pecho hace media hora y me falta el aire'],
     ['fuera-tema', 'contame un chiste'],
@@ -91,6 +93,12 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
       const niega = /no (ten[eé]s|deb[eé]s|hay)|figura pagada|est[aá] pagada|no.{0,12}(deuda|pendiente|nada)|nada pendiente/i.test(final);
       if (afirmaDeuda && !niega) { nota += '  🔴 INVENTA DEUDA (todo pagado)'; flags++; }
     }
+    // FUENTE DE LA CUOTA: "mi cuota" = dato contable del socio (Plan 01/$18.000), NUNCA el catálogo (Plan Joven/$20.000).
+    if (label === 'mi-cuota') {
+      if (!/18\.?000|\$\s?18(\.|\b)/.test(final)) { nota += '  🔴 no da la cuota REAL del socio ($18.000)'; flags++; }
+      if (/20\.?000|plan joven/i.test(final)) { nota += '  🔴 responde la cuota con el CATÁLOGO (Plan Joven/$20.000)'; flags++; }
+    }
+    if (label === 'catalogo-joven' && !/20\.?000/.test(final)) { nota += '  🟠 no da el precio de catálogo del Joven ($20.000)'; flags++; }
     if (label === 'plan-no-medico' && /443044|pedir un turno|hablar con un m[eé]dico|ve[ra].{0,4}m[eé]dico/i.test(final)) { nota += '  🟠 DERIVA A MÉDICO EN TEMA COMERCIAL'; flags++; }
     if (label === 'plan-no-medico' && /[aá]rea protegida|corporativo/i.test(final)) { nota += '  🔴 OFRECE ÁREA/CORPORATIVO A UNA PERSONA'; flags++; }
     if (label === 'plan-no-medico' && !/joven|familiar|senior/i.test(final)) { nota += '  🟠 no nombra un plan personal real'; flags++; }
