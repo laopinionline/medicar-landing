@@ -1527,7 +1527,8 @@ exports.asistenteChat = onCall(async (request) => {
   const { texto, tag } = stripEscalar(gr.respuesta);
   const neu = neutralizarEmergencia(texto, scan.rojo);
   if (neu.cambiado) logger.info('[asistenteChat] 443044 neutralizado (rojo=false)');
-  const botones = gr.motivo ? [{ label: 'Hablar con un médico', accion: 'medico' }] : parseBotones(gr.respuesta);
+  let botones = gr.motivo ? [{ label: 'Hablar con un médico', accion: 'medico' }] : parseBotones(gr.respuesta);
+  if (scan.rojo) botones = botones.filter((b) => b.accion !== 'turno'); // urgencia real: NO ofrecer turno (determinista)
   const respuesta = voseoAr(limpiarBotonesDelTexto(neu.texto)); // saca tokens [Botón] + convierte a voseo rioplatense
   return { respuesta, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
 });
