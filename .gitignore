@@ -18,3 +18,8 @@ yarn-error.log*
 # recoloca a mano si android/ se rehace. Fuente canónica = Firebase console → medicar-sistema → app Android.
 # Ver docs/android-native.md.
 /android/
+
+# Secrets locales (API keys) — NUNCA se versionan
+.env
+*.env
+seed/.env
