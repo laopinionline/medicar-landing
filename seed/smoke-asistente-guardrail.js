@@ -32,8 +32,10 @@ neu('rojo=false: NO toca "cubre emergencias" (cobertura)', 'Tu plan cubre emerge
 neu('rojo=false: sin 443044 → no cambia', 'Podés pedir un turno desde la app. [Pedir turno]', false, r => !r.cambiado);
 // rojo=false + respuesta SOLO emergencia → queda el redirect
 neu('rojo=false: respuesta solo-emergencia → redirect', 'Llamá al 443044 ahora.', false, r => r.cambiado && !/443044/.test(r.texto) && /turno|médico/i.test(r.texto));
-// rojo=false + ya menciona turno → no duplica el redirect
-neu('rojo=false: ya tiene turno → no duplica cierre', 'Pedí un turno desde la app. Igual, ante dudas, 443044.', false, r => r.cambiado && !/443044/.test(r.texto) && (r.texto.match(/turno/gi) || []).length === 1);
+// rojo=false + 443044 INCONDICIONAL + ya menciona turno → strip sin duplicar el cierre
+neu('rojo=false: 443044 incondicional + ya tiene turno → strip sin duplicar', 'Pedí un turno desde la app. Igual, llamá al 443044.', false, r => r.cambiado && !/443044/.test(r.texto) && (r.texto.match(/turno/gi) || []).length === 1);
+// rojo=false + 443044 CONDICIONAL (umbral del modo consultorio) → se CONSERVA (red de seguridad), no se toca
+neu('rojo=false: 443044 condicional (umbral) → intacto', 'Dale paracetamol y reposo. Si le cuesta respirar o no le baja la fiebre, llamá al 443044.', false, r => !r.cambiado && /443044/.test(r.texto));
 
 console.log(`\n${fail ? '✗' : '✓'} smoke-asistente-guardrail: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);
