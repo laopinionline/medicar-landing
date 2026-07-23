@@ -37,7 +37,16 @@ function revisar(respuesta) {
 function neutralizarEmergencia(texto, rojo) {
   if (rojo || !texto || !/443044/.test(texto)) return { texto: String(texto || ''), cambiado: false };
   const frases = String(texto).split(/(?<=[.!?\n])\s+/);
-  let out = frases.filter((f) => !/443044/.test(f)).join(' ').replace(/\s+/g, ' ').trim();
+  // CONSERVA el 443044 CONDICIONAL (red de seguridad del MODO CONSULTORIO: "si aparece X, llamá al 443044").
+  // Saca solo el INCONDICIONAL (falsa alarma en un cuadro benigno: "llamá al 443044" a secas).
+  const condicional = (f) => /\b(si|cuando|ante|en caso|apenas|de aparecer|si llegara)\b/i.test(f);
+  let cambiado = false;
+  const out0 = frases.filter((f) => {
+    if (/443044/.test(f) && !condicional(f)) { cambiado = true; return false; }
+    return true;
+  }).join(' ').replace(/\s+/g, ' ').trim();
+  if (!cambiado) return { texto: String(texto || ''), cambiado: false }; // solo había 443044 condicional → intacto
+  let out = out0;
   if (!/turno|m[eé]dico/i.test(out)) out = (out ? out + ' ' : '') + 'Si te preocupa, pedí un turno para que te vea un médico desde la app.';
   return { texto: out.trim(), cambiado: true };
 }

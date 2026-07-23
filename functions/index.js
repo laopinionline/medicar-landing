@@ -41,7 +41,8 @@ const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: es
 const guardrailAsistente = require('./asistente-guardrail').revisar; // MEDICAR IA: guardrail de salida
 const { neutralizarEmergencia } = require('./asistente-guardrail'); // MEDICAR IA: neutraliza 443044 si rojo=false (determinista)
 const { SYSTEM: IA_SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr } = require('./asistente-prompt'); // MEDICAR IA: prompt + contexto + salida
-const { responder: iaResponder } = require('./asistente-adapter'); // MEDICAR IA: adaptador del modelo (ollama|claude)
+const { responder: iaResponder } = require('./asistente-adapter'); // MEDICAR IA: adaptador del modelo (ollama|claude|ruteo)
+const { clasificar: iaClasificar, ramas: iaRamas } = require('./asistente-ruteo'); // MEDICAR IA: semáforo determinista de ruteo
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -1503,12 +1504,16 @@ exports.asistenteChat = onCall(async (request) => {
   // 4) adaptador del modelo (DEGRADA LIMPIO si no responde: túnel caído / compu apagada / timeout).
   const cfgSnap = await db.collection('asistente_secreto').doc('config').get();
   const cfg = cfgSnap.exists ? cfgSnap.data() : { proveedor: 'ollama' };
+  const { categoria } = iaClasificar(mensaje, scan);            // semáforo determinista (rojo/urgencia/salud/resto)
+  const orden = iaRamas(categoria, cfg.ruteo);                  // orden de ramas a intentar (solo se usa en modo 'ruteo')
   let raw;
   try {
-    const r = await iaResponder(cfg, { system: IA_SYSTEM, contexto, historia, mensaje });
+    const r = await iaResponder(cfg, { system: IA_SYSTEM, contexto, historia, mensaje, orden });
     raw = r.texto;
+    // Observabilidad: qué rama respondió y por qué (SIN contenido del mensaje).
+    logger.info('[asistenteChat] ruteo', { proveedor: cfg.proveedor || 'ollama', categoria, orden, rama: r.rama, fallback: !!r.fallback });
   } catch (e) {
-    logger.warn('[asistenteChat] modelo no disponible, degradación limpia', { err: e.message });
+    logger.warn('[asistenteChat] modelo no disponible, degradación limpia', { proveedor: cfg.proveedor || 'ollama', categoria, orden, err: e.message });
     return {
       respuesta: 'Ahora mismo no puedo responderte por acá. Si es una urgencia, llamá al 443044. También podés pedir un turno para que te vea un médico desde la app.',
       rojo: scan.rojo, escalar: true, botones: [{ label: 'Que te vea un médico', accion: 'medico' }], degradado: true,
