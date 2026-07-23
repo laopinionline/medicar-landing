@@ -1,28 +1,43 @@
 'use strict';
 /*
- * MEDICAR IA — ESCANEO DETERMINISTA DE BANDERAS ROJAS (F1 + fix negación). NO usa el modelo.
+ * MEDICAR IA — ESCANEO DETERMINISTA DE BANDERAS ROJAS. NO usa el modelo.
  * Corre sobre el TEXTO DEL SOCIO y decide —y solo esto decide— si la PWA muestra "Emergencias 443044".
- * PRINCIPIO: error hacia ESCALAR. La supresión por negación es CONSERVADORA: solo cuando la negación es
- * INEQUÍVOCA y ADYACENTE ("no me falta el aire", "ya no me duele el pecho"). Ante CUALQUIER ambigüedad
- * (pero / tanto / no sé / antes sí / un poco…) o si hay otra bandera viva en el mismo mensaje → DISPARA IGUAL.
+ * COBERTURA por PROXIMIDAD + SINÓNIMOS por categoría: raíces morfológicas (dol/duel/doli/apret…) cerca del
+ * ANCLA de la categoría (pecho/torax…), en cualquier orden, ventana ~30 chars. El ancla protege las trampas:
+ * "presion"/"arde" solo disparan CERCA de "pecho" (no "presion arterial" ni "arde la garganta").
+ * CRITERIO: el falso positivo (banner de más) es barato; el falso negativo es carísimo → ante la duda, dispara.
+ * La supresión por NEGACIÓN es conservadora: solo negación limpia y adyacente ("no me falta el aire"); ante
+ * ambigüedad/contraste dispara igual.
  */
 
+// Normalización EXPLÍCITA antes del match: minúsculas + sin tildes + espacios colapsados (maree=mareé, torax=tórax).
 function norm(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
 }
 
-// Patrones. Ampliados (dolor_pecho/falta_aire) para capturar el síntoma aunque venga hedgeado; la capa de
-// negación/ambigüedad decide después. OJO: los que llevan "no" INTRÍNSECO (no puedo respirar) tienen el "no"
-// DENTRO del match → nunca se suprimen (el "no" no queda ANTES del match).
+// Proximidad bidireccional: (a cerca de b) | (b cerca de a), ventana W chars (default 30).
+function prox(a, b, W) { W = W || 30; return '(?:' + a + ').{0,' + W + '}(?:' + b + ')|(?:' + b + ').{0,' + W + '}(?:' + a + ')'; }
+
+const TORAX = 'pecho|torax|toracic|esternon';                                        // ancla torácica
+const MOLESTIA = 'dol|duel|doli|presion|opresion|aprie|apret|arde|ardor|punzad|puntad|quema|opres'; // dolor/molestia (raíces)
+
 const PATRONES = [
-  { k: 'desmayo',       re: /desmay|me desvaneci|perd(i|io|ido) (el|del) (conocimiento|sentido)|perdida de(l)? conocimiento|me descompuse y cai/ },
-  { k: 'dolor_pecho',   re: /dolor (de|en el|en mi|fuerte en el) ?pecho|due?le.{0,10}pecho|pecho.{0,10}due?le|pecho (apretad|oprimid)|opresion en el pecho|me aprieta el pecho|puntada en el pecho/ },
-  { k: 'falta_aire',    re: /no (puedo|podia) respirar|me falta.{0,14}aire|falta de aire|me ahog|dificultad para respirar|me cuesta respirar|no me entra el aire/ },
-  { k: 'sangrado',      re: /sangr|hemorragia|perdida de sangre|vomito con sangre|sangre en (la|el|las|los)|escupo sangre/ },
-  { k: 'convulsion',    re: /convuls|ataque de epilep|le agarro un ataque/ },
-  { k: 'neuro',         re: /no (siento|muevo|puedo mover) (el|la|mi|un) (brazo|pierna|cara|mano|lado)|se me traba la lengua|no puedo hablar|boca torcida|media cara|se me durmio (media|la) cara|paralis/ },
-  { k: 'dolor_subito',  re: /dolor (muy fuerte|intenso|insoportable|terrible)( y)? (subito|de golpe|de repente|repentino)|el peor dolor de cabeza|dolor de cabeza (brutal|terrible|insoportable)/ },
-  { k: 'inconsciente',  re: /no reacciona|esta inconsciente|no responde|no se despierta|no me responde/ },
+  // Dolor/molestia TORÁCICA por proximidad (captura doliendo/presión/arde/apretado + brazo). El ancla evita "presion arterial".
+  { k: 'dolor_pecho',   re: new RegExp(prox(TORAX, MOLESTIA)) },
+  // Falta de aire / dificultad respiratoria (sinónimos + gerundios).
+  { k: 'falta_aire',    re: /no (puedo|podia) respirar|respir.{0,20}(dificultad|cuesta|costando|mal|entrecortad|agitad)|(cuesta|costando|dificultad|trabajo).{0,20}respir|me falta.{0,16}aire|falta de aire|me ahog|me agito|me quedo sin (aire|resuello)|sin aire|no me entra.{0,6}aire|me asfixi/ },
+  // Desmayo / pérdida de conocimiento / mareo con caída.
+  { k: 'desmayo',       re: /desmay|me desvaneci|perd(i|io|ido) (el|del) (conocimiento|sentido)|perdida de(l)? conocimiento|me descompuse y cai|se me fue la cabeza|casi me caigo|me maree.{0,20}(cai|caig|caer|desmay|piern|piso)|(cai|caig|desplom).{0,20}mare/ },
+  // Sangrado / hemorragia.
+  { k: 'sangrado',      re: /sangr|hemorragia|perdida de sangre|vomito con sangre|sangre en (la|el|las|los)|escupo sangre|con sangre/ },
+  // Convulsión.
+  { k: 'convulsion',    re: /convuls|ataque de epilep|le agarro un ataque|se convulsion/ },
+  // Neurológico (ACV): fuerza/habla/cara.
+  { k: 'neuro',         re: /no (siento|muevo|puedo mover) (el|la|mi|un) (brazo|pierna|cara|mano|lado)|se me traba la lengua|no puedo hablar|boca torcida|media cara|se me (durmio|doblo|torcio|desvio|cayo) (media |la |el )?(cara|lado|boca)|cara (torcid|caid|dormid)|paralis/ },
+  // Dolor súbito / cefalea en trueno.
+  { k: 'dolor_subito',  re: /(dolor|puntada|punzada) (muy fuerte|intenso|insoportable|terrible)?.{0,25}(subito|de golpe|de repente|repentino)|el peor dolor de cabeza|dolor de cabeza (brutal|terrible|insoportable)|(de golpe|subito).{0,20}(cabeza|dolor|pecho)/ },
+  // Inconsciencia (de un tercero, típico).
+  { k: 'inconsciente',  re: /no reacciona|esta inconsciente|no responde|no se despierta|no me responde|no reacciona a nada/ },
   { k: 'autolesion',    re: /me quiero morir|quitarme la vida|suicid|hacerme dano|no quiero vivir/ },
   { k: 'obstetrico',    re: /perdi liquido|rompi bolsa|sangrado en el embarazo|no siento al bebe|contracciones/ },
 ];
@@ -32,18 +47,15 @@ const AMBIGUO = /\b(pero|sino|igual|tanto|no se|capaz|creo|medio|mas o menos|ant
 // Negador LIMPIO y adyacente inmediatamente antes del síntoma ("no me ...", "ya no me ...", "tampoco ...").
 const NEG_ADYACENTE = /\b(no|ya no|tampoco|nunca)\s(me\s|te\s|le\s|se\s)?$/;
 
-// Escanea. Devuelve { rojo, matched:[keys] }. Nunca lanza.
 function escanear(texto) {
   const t = norm(texto);
   const hits = [];
   for (const p of PATRONES) { const m = p.re.exec(t); if (m) hits.push({ k: p.k, idx: m.index }); }
   if (!hits.length) return { rojo: false, matched: [] };
-  // Ambigüedad en cualquier parte del mensaje → NO suprimir nada (error hacia escalar).
   if (AMBIGUO.test(t)) return { rojo: true, matched: hits.map((h) => h.k) };
-  // Sin ambigüedad: se suprime SOLO el hit cuya negación es limpia y adyacente. Si algún hit queda vivo → rojo.
   const negadoLimpio = (idx) => NEG_ADYACENTE.test(t.slice(Math.max(0, idx - 16), idx));
   const vivos = hits.filter((h) => !negadoLimpio(h.idx));
   return { rojo: vivos.length > 0, matched: hits.map((h) => h.k) };
 }
 
-module.exports = { escanear, norm, PATRONES };
+module.exports = { escanear, norm, PATRONES, prox };

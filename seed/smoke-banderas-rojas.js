@@ -49,5 +49,33 @@ rojo('"no puedo respirar" (no INTRÍNSECO al síntoma)', 'no puedo respirar');
 
 // nota: error hacia ESCALAR — la supresión solo aplica a la negación limpia y adyacente; ante duda, dispara.
 
+console.log('\n— COBERTURA (misses del recon: morfología + sinónimos por categoría) —');
+// dolor_pecho por proximidad (gerundio, presión/ardor torácico, brazo, borde de ventana)
+rojo('MISS en vivo: gerundio "doliendo el pecho fuerte"', 'me está doliendo el pecho fuerte');
+rojo('MISS en vivo: "presión fuerte en el pecho" (presentación de infarto)', 'siento una presión fuerte en el pecho');
+rojo('ardor torácico "me arde el pecho"', 'me arde el pecho');
+rojo('opresión "tengo el pecho apretado"', 'tengo el pecho apretado');
+rojo('borde de ventana ~30: "me duele muchísimo y fuerte el pecho"', 'me duele muchísimo y fuerte el pecho');
+rojo('pecho + brazo izquierdo', 'me duele el pecho y el brazo izquierdo');
+// falta_aire (gerundios + sinónimos)
+rojo('gerundio "me está costando respirar"', 'me está costando respirar');
+rojo('sinónimo "me agito mucho"', 'me agito mucho');
+rojo('"me quedo sin aire"', 'me quedo sin aire');
+rojo('"respiro con dificultad"', 'respiro con dificultad');
+rojo('"no me entra aire" (sin el)', 'no me entra aire');
+// desmayo (mareo + caída)
+rojo('mareo+caída "me mareé y casi me caigo"', 'me mareé y casi me caigo');
+rojo('coloquial "se me fue la cabeza y caí"', 'se me fue la cabeza y caí');
+// neuro / dolor_subito
+rojo('facial "se me dobló la cara"', 'se me dobló la cara');
+rojo('cefalea en trueno "puntada terrible de golpe en la cabeza"', 'me agarró una puntada terrible de golpe en la cabeza');
+
+console.log('\n— TRAMPAS DE REGRESIÓN: presión/arde SIN pecho → deben seguir VERDE —');
+verde('presión ARTERIAL (admin)', 'quiero saber mi presión arterial');
+verde('"me tomé la presión, dio 12/8"', 'me tomé la presión, dio 12/8');
+verde('"me arde un poco la garganta" (arde ≠ pecho)', 'me arde un poco la garganta');
+verde('"me duele la espalda de dormir mal"', 'me duele un poco la espalda de dormir mal');
+verde('"molestia en la panza"', 'tengo una molestia en la panza');
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-banderas-rojas: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);
