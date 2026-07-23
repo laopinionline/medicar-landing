@@ -18,7 +18,7 @@ t('contexto trae qué cubre', ctx.includes('emergencias'));
 t('contexto trae factura + vencimiento', ctx.includes('18000') && ctx.includes('05/08'));
 t('contexto trae catálogo REAL (Joven/Familiar/Senior personales)', /Plan Joven \$20\.000/.test(ctx) && /Plan Familiar desde \$40\.000/.test(ctx) && /Plan Senior \$60\.000/.test(ctx));
 t('catálogo: Área Protegida y Corporativo NO personales (derivar comercial)', /Área Protegida.*por LOCAL/.test(ctx) && /NO son planes personales/.test(ctx) && /Corporativo/.test(ctx));
-t('catálogo: Familiar con +$10.000 por integrante', /\+\$10\.000 por cada integrante/.test(ctx));
+t('catálogo: Familiar suma $10.000 por integrante adicional', /por cada integrante adicional se suman \$10\.000/.test(ctx));
 t('contexto trae 443044', ctx.includes('443044'));
 
 // --- AJUSTE: facturación EXPLÍCITA (afirma ausencia + última factura; el precio del plan NO es deuda) ---
@@ -44,6 +44,18 @@ t('voseo: "Puedes ver" → "Podés ver" (preserva mayúscula)', voseoAr('Puedes 
 t('voseo: "para ti" → "para vos"', voseoAr('es bueno para ti') === 'es bueno para vos');
 t('voseo: NO toca compuestos ("mantienes")', voseoAr('mantienes tu plan') === 'mantienes tu plan');
 t('voseo: no rompe voseo ya correcto', voseoAr('tenés y podés') === 'tenés y podés');
+
+// --- MICRO-LOTE ---
+t('catálogo SIN especialidades (no promete pediátrica/geriátrica)', !/pedi[aá]trica|geri[aá]trica especializada/i.test(ctx));
+t('Familiar: atiende todas las edades incl. chicos', /todas las edades, incluidos los chicos/.test(ctx));
+t('Familiar: fórmula de cálculo explícita (ej. 4 = $60.000)', /2 de base \+ 2 adicionales = \$60\.000/.test(ctx));
+t('SYSTEM: generalista, nunca afirmar especialistas', /medicina GENERALISTA/.test(SYSTEM) && /NUNCA afirmes que hay especialistas/.test(SYSTEM));
+t('strip: "ir a [X] y…" no deja frase colgada', limpiarBotonesDelTexto('Podés ir a [Ver comprobantes] y revisar.') === 'Podés revisar.');
+t('voseo imperativo: "llama al" → "llamá al"', voseoAr('Si es urgente, llama al 443044.') === 'Si es urgente, llamá al 443044.');
+t('voseo imperativo: "toma agua" → "tomá agua"', voseoAr('Descansá y toma agua.') === 'Descansá y tomá agua.');
+t('voseo imperativo: "espera un" → "esperá un"', voseoAr('Espera un momento.') === 'Esperá un momento.');
+t('voseo guarda: "la llama" (animal) NO se toca', voseoAr('La llama es un animal.') === 'La llama es un animal.');
+t('voseo guarda: "la toma de presión" NO se toca', voseoAr('La toma de presión fue normal.') === 'La toma de presión fue normal.');
 t('limpia [[control]] residual', limpiarBotonesDelTexto('Ok [[ESCALAR]] listo') === 'Ok listo');
 t('limpia varios tokens y no deja espacios dobles', /\[/.test(limpiarBotonesDelTexto('Mirá [Ver comprobantes] o [Pagar] .')) === false);
 t('no toca texto sin tokens', limpiarBotonesDelTexto('Tu plan cubre emergencias.') === 'Tu plan cubre emergencias.');
