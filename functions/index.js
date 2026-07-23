@@ -40,7 +40,7 @@ const { RESULTADOS, puedeMarcar, debeBarrer } = require('./asistencia'); // Turn
 const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: escaneo determinista de banderas rojas (server-side)
 const guardrailAsistente = require('./asistente-guardrail').revisar; // MEDICAR IA: guardrail de salida
 const { neutralizarEmergencia } = require('./asistente-guardrail'); // MEDICAR IA: neutraliza 443044 si rojo=false (determinista)
-const { SYSTEM: IA_SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto } = require('./asistente-prompt'); // MEDICAR IA: prompt + contexto + salida
+const { SYSTEM: IA_SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr } = require('./asistente-prompt'); // MEDICAR IA: prompt + contexto + salida
 const { responder: iaResponder } = require('./asistente-adapter'); // MEDICAR IA: adaptador del modelo (ollama|claude)
 
 const REGION = 'southamerica-east1';
@@ -1492,10 +1492,9 @@ exports.asistenteChat = onCall(async (request) => {
       const ult = facs.slice().sort((a, b) => String(b.periodo || '').localeCompare(String(a.periodo || '')) || vMs(b.emitidaEn) - vMs(a.emitidaEn))[0];
       if (ult) ultimaFactura = { nro: ult.nroComprobante || '—', estado: ult.estado || '—' };
     }
-    const plSnap = await db.collection('planes').where('activo', '==', true).get();
-    const planes = plSnap.docs.map((d) => d.data()).map((p) => ({ nombre: p.nombre || '', precio: p.precio != null ? p.precio : 0 })).filter((p) => p.nombre).slice(0, 8);
+    // catálogo de planes = curado en buildContexto (landing); NO se lee de Firestore (los docs no traen elegibilidad).
     const nombre = (socio && socio.nombreVista) ? String(socio.nombreVista).split(',').pop().trim().split(' ')[0] : 'socio';
-    contexto = buildContexto({ nombre, plan, cubre, factura, ultimaFactura, planes, tel: '443044' });
+    contexto = buildContexto({ nombre, plan, cubre, factura, ultimaFactura, tel: '443044' });
   } catch (e) {
     logger.warn('[asistenteChat] contexto degradado', { err: e.message }); // sin contexto sigue: el modelo orienta genérico
     contexto = buildContexto({ nombre: 'socio', planes: [], tel: '443044' });
@@ -1529,7 +1528,7 @@ exports.asistenteChat = onCall(async (request) => {
   const neu = neutralizarEmergencia(texto, scan.rojo);
   if (neu.cambiado) logger.info('[asistenteChat] 443044 neutralizado (rojo=false)');
   const botones = gr.motivo ? [{ label: 'Hablar con un médico', accion: 'medico' }] : parseBotones(gr.respuesta);
-  const respuesta = limpiarBotonesDelTexto(neu.texto); // saca los tokens [Botón] de la prosa (el chip ya lo emite el parser)
+  const respuesta = voseoAr(limpiarBotonesDelTexto(neu.texto)); // saca tokens [Botón] + convierte a voseo rioplatense
   return { respuesta, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
 });
 
