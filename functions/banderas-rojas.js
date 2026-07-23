@@ -19,11 +19,14 @@ function norm(s) {
 function prox(a, b, W) { W = W || 30; return '(?:' + a + ').{0,' + W + '}(?:' + b + ')|(?:' + b + ').{0,' + W + '}(?:' + a + ')'; }
 
 const TORAX = 'pecho|torax|toracic|esternon';                                        // ancla torácica
-const MOLESTIA = 'dol|duel|doli|presion|opresion|aprie|apret|arde|ardor|punzad|puntad|quema|opres'; // dolor/molestia (raíces)
+const MOLESTIA = 'dol|duel|doli|presion|opresion|aprie|apret|arde|ardor|punzad|puntad|quema|quemazon|fuego|opres'; // dolor/molestia (raíces)
 
 const PATRONES = [
   // Dolor/molestia TORÁCICA por proximidad (captura doliendo/presión/arde/apretado + brazo). El ancla evita "presion arterial".
   { k: 'dolor_pecho',   re: new RegExp(prox(TORAX, MOLESTIA)) },
+  // Crisis HIPERTENSIVA: presion/tension + lectura de crisis (sistólica ≥18 o diastólica ≥11) o colloquial (por las nubes).
+  // NO dispara con lecturas normales (12/8, 14/9) ni con una fecha "19/11" sin la palabra presion cerca.
+  { k: 'hipertension',  re: /(presion|tension)[^.]{0,20}((1[89]|[2-3]\d) ?([\/x.-]| sobre ) ?\d{1,3}|\d{1,3} ?([\/x.-]| sobre ) ?(1[1-9]|[2-9]\d))|(presion|tension)[^.]{0,15}(por las nubes|disparad|altisim)/ },
   // Falta de aire / dificultad respiratoria (sinónimos + gerundios).
   { k: 'falta_aire',    re: /no (puedo|podia) respirar|respir.{0,20}(dificultad|cuesta|costando|mal|entrecortad|agitad)|(cuesta|costando|dificultad|trabajo).{0,20}respir|me falta.{0,16}aire|falta de aire|me ahog|me agito|me quedo sin (aire|resuello)|sin aire|no me entra.{0,6}aire|me asfixi/ },
   // Desmayo / pérdida de conocimiento / mareo con caída.

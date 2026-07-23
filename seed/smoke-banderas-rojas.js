@@ -54,6 +54,8 @@ console.log('\n— COBERTURA (misses del recon: morfología + sinónimos por cat
 rojo('MISS en vivo: gerundio "doliendo el pecho fuerte"', 'me está doliendo el pecho fuerte');
 rojo('MISS en vivo: "presión fuerte en el pecho" (presentación de infarto)', 'siento una presión fuerte en el pecho');
 rojo('ardor torácico "me arde el pecho"', 'me arde el pecho');
+rojo('MISS verif indep: "un fuego acá en el pecho"', 'tengo como un fuego acá en el pecho');
+rojo('"quemazón en el pecho"', 'siento una quemazón en el pecho');
 rojo('opresión "tengo el pecho apretado"', 'tengo el pecho apretado');
 rojo('borde de ventana ~30: "me duele muchísimo y fuerte el pecho"', 'me duele muchísimo y fuerte el pecho');
 rojo('pecho + brazo izquierdo', 'me duele el pecho y el brazo izquierdo');
@@ -68,6 +70,8 @@ rojo('mareo+caída "me mareé y casi me caigo"', 'me mareé y casi me caigo');
 rojo('coloquial "se me fue la cabeza y caí"', 'se me fue la cabeza y caí');
 // neuro / dolor_subito
 rojo('facial "se me dobló la cara"', 'se me dobló la cara');
+rojo('crisis hipertensiva "mi presión es 19/11 y me duele la cabeza"', 'mi presión es 19/11 y me duele la cabeza');
+rojo('crisis "la presión por las nubes"', 'tengo la presión por las nubes');
 rojo('cefalea en trueno "puntada terrible de golpe en la cabeza"', 'me agarró una puntada terrible de golpe en la cabeza');
 
 console.log('\n— TRAMPAS DE REGRESIÓN: presión/arde SIN pecho → deben seguir VERDE —');
@@ -76,6 +80,9 @@ verde('"me tomé la presión, dio 12/8"', 'me tomé la presión, dio 12/8');
 verde('"me arde un poco la garganta" (arde ≠ pecho)', 'me arde un poco la garganta');
 verde('"me duele la espalda de dormir mal"', 'me duele un poco la espalda de dormir mal');
 verde('"molestia en la panza"', 'tengo una molestia en la panza');
+verde('fuego SIN pecho "se prendió fuego la cocina"', 'se prendió fuego la cocina');
+verde('presión NORMAL "me tomé la presión, dio 12/8"', 'me tomé la presión, dio 12/8');
+verde('fecha "nos vemos el 19/11" (no es presión)', 'nos vemos el 19/11 en la clínica');
 
 console.log(`\n${fail ? '✗' : '✓'} smoke-banderas-rojas: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);

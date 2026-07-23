@@ -1,6 +1,6 @@
 'use strict';
 // Smoke — asistente-prompt.js: buildContexto (MÍNIMO, nunca PII/clínico), stripEscalar, parseBotones.
-const { SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto } = require('../functions/asistente-prompt');
+const { SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr } = require('../functions/asistente-prompt');
 let ok = 0, fail = 0;
 const t = (l, c) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}`); c ? ok++ : fail++; };
 
@@ -16,7 +16,9 @@ t('contexto trae el nombre', ctx.includes('Juan'));
 t('contexto trae plan + precio', ctx.includes('Individual') && ctx.includes('18000'));
 t('contexto trae qué cubre', ctx.includes('emergencias'));
 t('contexto trae factura + vencimiento', ctx.includes('18000') && ctx.includes('05/08'));
-t('contexto trae catálogo (Familiar)', ctx.includes('Familiar') && ctx.includes('28000'));
+t('contexto trae catálogo REAL (Joven/Familiar/Senior personales)', /Plan Joven \$20\.000/.test(ctx) && /Plan Familiar desde \$40\.000/.test(ctx) && /Plan Senior \$60\.000/.test(ctx));
+t('catálogo: Área Protegida y Corporativo NO personales (derivar comercial)', /Área Protegida.*por LOCAL/.test(ctx) && /NO son planes personales/.test(ctx) && /Corporativo/.test(ctx));
+t('catálogo: Familiar con +$10.000 por integrante', /\+\$10\.000 por cada integrante/.test(ctx));
 t('contexto trae 443044', ctx.includes('443044'));
 
 // --- AJUSTE: facturación EXPLÍCITA (afirma ausencia + última factura; el precio del plan NO es deuda) ---
@@ -30,6 +32,18 @@ t('sin facturas: "No hay facturas registradas todavía"', /No hay facturas regis
 
 // --- AJUSTE: strip robusto de tokens de botón en la prosa ---
 t('limpia [Cambiar mi plan] de la prosa', limpiarBotonesDelTexto('Te conviene el Familiar. [Cambiar mi plan]') === 'Te conviene el Familiar.');
+t('NO deja frase colgada: "hacé clic en [X]"', limpiarBotonesDelTexto('Podés cambiar tu plan haciendo clic en [Cambiar mi plan].') === 'Podés cambiar tu plan.');
+t('NO deja conector colgado: "con [X]."', limpiarBotonesDelTexto('Reservá con [Pedir turno].') === 'Reservá.');
+t('NO duplica puntuación tras limpiar', !/\.\./.test(limpiarBotonesDelTexto('Mirá [Ver comprobantes]..')));
+t('catch-all: token inventado por el modelo "[Facturas]"', limpiarBotonesDelTexto('Mirá tus datos en [Facturas].') === 'Mirá tus datos.');
+t('saca el relleno "Según el contexto," y recapitaliza', limpiarBotonesDelTexto('Según el contexto, tenés una factura de $18000.') === 'Tenés una factura de $18000.');
+t('saca "según el sistema" mid-frase', !/seg[uú]n el sistema/i.test(limpiarBotonesDelTexto('Bueno, según el sistema no debés nada.')));
+
+// --- AJUSTE: voseo rioplatense determinista ---
+t('voseo: "Puedes ver" → "Podés ver" (preserva mayúscula)', voseoAr('Puedes ver la app. Si tienes dudas, quieres saber.') === 'Podés ver la app. Si tenés dudas, querés saber.');
+t('voseo: "para ti" → "para vos"', voseoAr('es bueno para ti') === 'es bueno para vos');
+t('voseo: NO toca compuestos ("mantienes")', voseoAr('mantienes tu plan') === 'mantienes tu plan');
+t('voseo: no rompe voseo ya correcto', voseoAr('tenés y podés') === 'tenés y podés');
 t('limpia [[control]] residual', limpiarBotonesDelTexto('Ok [[ESCALAR]] listo') === 'Ok listo');
 t('limpia varios tokens y no deja espacios dobles', /\[/.test(limpiarBotonesDelTexto('Mirá [Ver comprobantes] o [Pagar] .')) === false);
 t('no toca texto sin tokens', limpiarBotonesDelTexto('Tu plan cubre emergencias.') === 'Tu plan cubre emergencias.');
@@ -37,6 +51,10 @@ t('no toca texto sin tokens', limpiarBotonesDelTexto('Tu plan cubre emergencias.
 // --- AJUSTE: reglas nuevas en el SYSTEM ---
 t('SYSTEM: nunca afirma deudas que el contexto no trae', /NUNCA afirmes deudas ni importes que el contexto no traiga/.test(SYSTEM));
 t('SYSTEM: plan es COMERCIAL, no deriva a médico', /Cambiar o elegir un plan es un tema COMERCIAL/.test(SYSTEM) && /NUNCA lo derives a un médico/.test(SYSTEM));
+t('SYSTEM: a persona SOLO Joven/Familiar/Senior', /ofrecé SOLO Plan Joven \/ Familiar \/ Senior/.test(SYSTEM));
+t('SYSTEM: Área Protegida/Corporativo NO personales → comercial', /Área Protegida.*Corporativo.*NO son planes personales/.test(SYSTEM) && /derivá a contacto comercial/.test(SYSTEM));
+t('SYSTEM: no decir "según el contexto/sistema"', /NUNCA digas "según el contexto"/.test(SYSTEM));
+t('SYSTEM: botón al final / frase que se entienda sin él', /ponelo AL FINAL o en una frase que se entienda SIN él/.test(SYSTEM));
 
 // --- CONTEXTO: NUNCA filtra PII / clínico (aunque se lo pasen de más, buildContexto solo usa campos conocidos) ---
 const ctx2 = buildContexto({ nombre: 'Ana', dni: '30111222', historiaClinica: 'diabetes, hipertensión', personaId: 'p1', plan: null, factura: null, planes: [], tel: '443044' });
