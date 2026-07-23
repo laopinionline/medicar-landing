@@ -100,5 +100,10 @@ t('parseBotones: detecta Cambiar mi plan', b.some((x) => x.accion === 'plan'));
 t('parseBotones: detecta Ver comprobantes', b.some((x) => x.accion === 'comprobantes'));
 t('parseBotones: ignora texto fuera de whitelist', !b.some((x) => x.label === '[Hackear]'));
 
+// --- taxonomía (punto 2): "hablar con un médico" = pedir turno. El token viejo YA NO es botón; el chip = [Pedir turno]. ---
+t('parseBotones: [Hablar con un médico] YA NO genera botón (fuera de whitelist)', parseBotones('Te recomiendo [Hablar con un médico].').length === 0);
+t('parseBotones: [Pedir turno] → accion turno (chip = botón sticky)', parseBotones('Para eso [Pedir turno].').some((x) => x.accion === 'turno'));
+t('limpia el token [Hablar con un médico]: no sobrevive corchete en la prosa', !/\[/.test(limpiarBotonesDelTexto('Podés hablar con [Hablar con un médico].')) && limpiarBotonesDelTexto('Podés hablar con [Hablar con un médico].') === 'Podés hablar.');
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-asistente-contexto: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);

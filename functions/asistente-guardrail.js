@@ -38,7 +38,7 @@ function neutralizarEmergencia(texto, rojo) {
   if (rojo || !texto || !/443044/.test(texto)) return { texto: String(texto || ''), cambiado: false };
   const frases = String(texto).split(/(?<=[.!?\n])\s+/);
   let out = frases.filter((f) => !/443044/.test(f)).join(' ').replace(/\s+/g, ' ').trim();
-  if (!/turno|m[eé]dico/i.test(out)) out = (out ? out + ' ' : '') + 'Si te preocupa, podés pedir un turno o hablar con un médico desde la app.';
+  if (!/turno|m[eé]dico/i.test(out)) out = (out ? out + ' ' : '') + 'Si te preocupa, pedí un turno para que te vea un médico desde la app.';
   return { texto: out.trim(), cambiado: true };
 }
 
