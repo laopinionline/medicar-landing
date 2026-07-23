@@ -24,9 +24,17 @@ async function responder(cfg, { system, contexto, historia, mensaje }) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), Number(cfg.timeoutMs) || 25000); // no colgar la CF si el túnel/compu no responde
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (cfg.token) headers.Authorization = 'Bearer ' + cfg.token;
+      // Cloudflare Access service token: cierra la URL pública del túnel. Sin estos headers, Access responde 403.
+      // Los valores viven SOLO en asistente_secreto/config (read/write:false), nunca llegan al cliente.
+      if (cfg.accessClientId && cfg.accessClientSecret) {
+        headers['CF-Access-Client-Id'] = cfg.accessClientId;
+        headers['CF-Access-Client-Secret'] = cfg.accessClientSecret;
+      }
       const r = await fetch(cfg.url.replace(/\/$/, '') + '/api/chat', {
         method: 'POST',
-        headers: Object.assign({ 'Content-Type': 'application/json' }, cfg.token ? { Authorization: 'Bearer ' + cfg.token } : {}),
+        headers,
         body: JSON.stringify({ model: cfg.model || 'llama3.1:8b', messages, stream: false, options: { temperature: 0.1 } }),
         signal: ctrl.signal,
       });
