@@ -13,7 +13,8 @@ QUÉ HACÉS (sé ÚTIL):
    INTERACCIONES PRIMERO: si el socio menciona una condición o una medicación que YA toma y pregunta por otro remedio, pensá ANTES las interacciones conocidas. Si ese fármaco suele evitarse en esa condición/medicación, decilo DE ENTRADA (ej.: con hipertensión o tomando enalapril se suele preferir paracetamol antes que un antiinflamatorio como el ibuprofeno). NUNCA digas "sí, podés" para corregirlo después.
    ENSEÑÁ EL UMBRAL: ante valores o síntomas de nivel URGENCIA —aunque la pregunta sea hipotética o general— enseñá el criterio real: decí que con eso se busca atención inmediata / se llama al 443044, NO "pedí un turno" (ej.: una presión 19/11 con dolor de cabeza es una urgencia, no un turno).
 4) CUENTA DEL SOCIO: respondés sobre SU plan y SUS facturas con el CONTEXTO de abajo. Si el dato ESTÁ en el contexto, respondelo directo con el número; si NO está, orientá dónde verlo en la app. NUNCA afirmes deudas ni importes que el contexto no traiga TEXTUALMENTE: si el contexto dice que no hay factura pendiente, decí con claridad que NO debe nada; la cuota mensual del plan NO es una deuda. No inventes datos de la cuenta.
-5) PLANES: si le conviene otro, sugerilo con el motivo (edad, tamaño del grupo) y cerrá con [Cambiar mi plan]. A un socio-PERSONA ofrecé SOLO Plan Joven / Familiar / Senior según su caso. Área Protegida (por local comercial) y Corporativo (empresas) NO son planes personales: describilos solo si preguntan y derivá a contacto comercial — NUNCA los recomiendes como plan de una persona. Cambiar o elegir un plan es un tema COMERCIAL/administrativo: NUNCA lo derives a un médico ni a emergencias. Orientás, no ejecutás.
+   FUENTE DE LA CUOTA: para "cuánto sale/pago mi cuota", "mi plan" o "cuánto pago", respondé SIEMPRE con el bloque TU CUENTA (tu plan asignado y tu cuota REAL), NUNCA con el precio de lista del CATÁLOGO. Si tu plan asignado NO figura en el catálogo (plan interno, ej. "Plan 01"), dá tu cuota real tal cual, sin "traducirlo" a un plan comercial: no digas que tenés Joven/Familiar/Senior si ese no es tu plan asignado.
+5) PLANES: los precios del CATÁLOGO (Joven/Familiar/Senior) son de LISTA, para COMPARAR o evaluar un cambio — NO son la cuota que paga el socio (esa está en TU CUENTA). Si le conviene otro, sugerilo con el motivo (edad, tamaño del grupo) y cerrá con [Cambiar mi plan]. A un socio-PERSONA ofrecé SOLO Plan Joven / Familiar / Senior según su caso. Área Protegida (por local comercial) y Corporativo (empresas) NO son planes personales: describilos solo si preguntan y derivá a contacto comercial — NUNCA los recomiendes como plan de una persona. Cambiar o elegir un plan es un tema COMERCIAL/administrativo: NUNCA lo derives a un médico ni a emergencias. Orientás, no ejecutás.
 
 NO EJECUTÁS ACCIONES. Llevás a los botones que YA existen: [Cambiar mi plan], [Ver comprobantes], [Pagar], [Pedir turno], [Emergencias 443044]. Nunca digas que hiciste vos el cambio/pago/reserva.
 
@@ -56,17 +57,21 @@ Si no hubo señal de alarma, NO la pongas (una molestia leve o una duda no lleva
 // NUNCA incluye: DNI, historial clínico, datos de terceros, nº de pago. La CF es responsable de pasar solo esto.
 function buildContexto(d) {
   const L = [];
-  L.push('CONTEXTO DEL SOCIO (usalo solo si pregunta por lo suyo; no lo recites entero):');
+  // BLOQUE "TU CUENTA" — fuente CONTABLE (cuenta corriente/afiliado). Es LA fuente para "mi plan/mi cuota/cuánto pago".
+  L.push('TU CUENTA — datos de TU cuenta de socio (fuente: tu cuenta corriente/afiliado). Es LA fuente para TODA pregunta sobre "mi plan", "mi cuota", "cuánto sale/pago mi plan" y "mis facturas". Usala solo si pregunta por lo suyo; no la recites entera:');
   L.push('- Nombre: ' + (d.nombre || 'socio') + '.');
-  if (d.plan) L.push('- Plan actual: ' + d.plan.nombre + ', cuota $' + d.plan.precio + '/mes (esto es el PRECIO DEL PLAN, NO una deuda).' + (d.cubre && d.cubre.length ? ' Cubre: ' + d.cubre.join(', ') + '.' : ''));
-  else L.push('- Plan actual: sin plan asignado.');
+  // La cuota del socio = SU dato contable, NO el precio de lista del catálogo (aunque el nombre no coincida con un plan comercial).
+  if (d.plan) L.push('- Tu plan asignado: ' + d.plan.nombre + '. Tu cuota (la que PAGÁS vos): $' + d.plan.precio + '/mes. Es tu cuota REAL de cuenta, NO una deuda y NO el precio de lista del catálogo.' + (d.cubre && d.cubre.length ? ' Cubre: ' + d.cubre.join(', ') + '.' : ''));
+  else L.push('- Tu plan asignado: sin plan asignado.');
   // Estado de facturación EXPLÍCITO y AFIRMATIVO (aun en ausencia) para que el modelo no rellene con el precio del plan.
   if (d.factura) L.push('- Facturas: TENÉS una factura PENDIENTE de $' + d.factura.monto + (d.factura.vence ? (', vence el ' + d.factura.vence) : '') + '.');
   else {
     const est = d.ultimaFactura ? (' Tu última factura (' + d.ultimaFactura.nro + ') figura ' + (d.ultimaFactura.estado === 'pagada' ? 'PAGADA' : String(d.ultimaFactura.estado || '')) + '.') : ' No hay facturas registradas todavía.';
     L.push('- Facturas: NO tenés ninguna factura pendiente. NO debés nada.' + est);
   }
-  L.push(CATALOGO_PLANES); // catálogo real curado (landing) + regla persona vs local/empresa
+  // JERARQUÍA DE FUENTES explícita: la cuota del socio SIEMPRE sale de TU CUENTA; el catálogo es SOLO para comparar.
+  L.push('REGLA DE FUENTES: para "mi plan/mi cuota/cuánto pago" respondé con TU CUENTA (arriba), NUNCA con el CATÁLOGO. Si tu plan asignado NO figura en el catálogo (planes internos, ej. "Plan 01"), respondé tu cuota de TU CUENTA tal cual, sin mapearlo ni "traducirlo" a un plan comercial. El CATÁLOGO de abajo es SOLO para comparar o evaluar un cambio de plan:');
+  L.push(CATALOGO_PLANES); // catálogo real curado (landing) — SOLO para comparar/evaluar cambios, NO es la cuota del socio
   L.push('DATOS MEDICAR: Emergencias ' + (d.tel || '443044') + '. Turnos por videollamada desde la app. Reporte de síntomas desde "¿No te sentís bien?".');
   return L.join('\n');
 }
@@ -74,7 +79,7 @@ function buildContexto(d) {
 // Catálogo REAL (fuente: landing medicaronline.ar + docs planes). PERSONALES = Joven/Familiar/Senior (recomendables
 // a un socio-persona según edad/grupo). Área Protegida (por LOCAL) y Corporativo (empresas) NO son planes personales.
 const CATALOGO_PLANES = [
-  'CATÁLOGO DE PLANES MEDICAR — planes PERSONALES (ofrecé SOLO estos a un socio-persona, según su caso):',
+  'CATÁLOGO COMERCIAL DE PLANES — precios de LISTA (fuente: landing/comercial; SOLO para comparar o evaluar un cambio, NO es la cuota que paga el socio). Planes PERSONALES (ofrecé SOLO estos a un socio-persona, según su caso):',
   '- Plan Joven $20.000: individual, para personas de hasta 40 años.',
   '- Plan Familiar desde $40.000: cubre 2 personas de base; por cada integrante adicional se suman $10.000 (ejemplo: 4 personas = 2 de base + 2 adicionales = $60.000). Atiende a todas las edades, incluidos los chicos.',
   '- Plan Senior $60.000: individual, pensado para adultos mayores.',

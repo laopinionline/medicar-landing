@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v34'; // Fix Volver cambiar-plan/mis-referentes (set home) + botón atrás Android (@capacitor/app)
+const CACHE = 'medicar-socio-v35'; // Fix cache PWA: HTML network-first (carga fresca = última versión) + purga de caches viejas
 const SHELL = [
   './',
   './index.html',
@@ -30,13 +30,29 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Fetch: solo GET same-origin (el shell). Cache-first con fallback a red y, si
-// todo falla, al index cacheado. Lo cross-origin (Firebase/gstatic) no se intercepta.
+// Fetch: solo GET same-origin. El HTML (navegación / index.html) va NETWORK-FIRST:
+// una carga fresca SIEMPRE trae la última versión desplegada; si no hay red, cae al
+// index cacheado (arranque offline). Los assets estáticos (íconos/manifest) siguen
+// cache-first. Lo cross-origin (Firebase/gstatic) no se intercepta.
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // Firebase/gstatic → red directa
+  const esHTML = req.mode === 'navigate' || req.destination === 'document' ||
+                 url.pathname.endsWith('/') || url.pathname.endsWith('index.html');
+  if (esHTML) {
+    // NETWORK-FIRST: red primero (y refresca la copia cacheada); offline → cache.
+    e.respondWith(
+      fetch(req).then(res => {
+        const copy = res.clone();
+        caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
+        return res;
+      }).catch(() => caches.match(req).then(hit => hit || caches.match('./index.html')))
+    );
+    return;
+  }
+  // CACHE-FIRST para el resto del shell (assets estáticos).
   e.respondWith(
     caches.match(req).then(hit => hit || fetch(req).then(res => {
       const copy = res.clone();

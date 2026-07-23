@@ -27,8 +27,8 @@ t('render tiene case staff-nativo', /case 'staff-nativo': html=staffNativoView\(
 t('staffNativoView muestra la URL del panel web', /medicaronline\.ar\/app\//.test(socio));
 
 // 5) la PWA web sigue intacta (no se rompió el flujo afiliado normal)
-t('flujo afiliado intacto: sigue el home tras cred ok', /set\(\{ view:'home', cred \}\); navReplace\(\)/.test(socio));
-t('SW bumpeado a v11', /medicar-socio-v11/.test(fs.readFileSync(path.join(root,'socio','sw.js'),'utf8')));
+t('flujo afiliado intacto: sigue el home tras cred ok', /set\(\{ view:'home', cred[,)].*navReplace\(\)/.test(socio));
+t('SW bumpeado a v35', /medicar-socio-v35/.test(fs.readFileSync(path.join(root,'socio','sw.js'),'utf8')));
 
 console.log(`\n${ok}/${ok+fail} checks OK`);
 process.exit(fail?1:0);

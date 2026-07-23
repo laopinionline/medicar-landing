@@ -26,9 +26,21 @@ const ctxPagada = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', pre
 t('sin pendiente: afirma "NO debés nada"', /NO tenés ninguna factura pendiente\. NO debés nada/.test(ctxPagada));
 t('sin pendiente: nombra la última PAGADA con su nº', /FC-2026-000010/.test(ctxPagada) && /PAGADA/.test(ctxPagada));
 t('sin pendiente: NO dice "pendiente de $"', !/pendiente de \$/.test(ctxPagada));
-t('plan: aclara que la cuota NO es deuda', /PRECIO DEL PLAN, NO una deuda/.test(ctxPagada));
+t('plan: aclara que la cuota NO es deuda', /cuota REAL de cuenta, NO una deuda/.test(ctxPagada));
 const ctxSinFac = buildContexto({ nombre: 'Ana', plan: null, factura: null, ultimaFactura: null, planes: [], tel: '443044' });
 t('sin facturas: "No hay facturas registradas todavía"', /No hay facturas registradas todavía/.test(ctxSinFac));
+
+// --- FIX (testigos): CUOTA = dato de TU CUENTA (contable), NUNCA el precio de lista del catálogo. ---
+const ctxPlan01 = buildContexto({ nombre: 'Lucas', plan: { nombre: 'Plan 01', precio: 18000 }, cubre: ['emergencias'], factura: null, ultimaFactura: null, planes: [], tel: '443044' });
+t('cuota: bloque TU CUENTA presente como fuente', /TU CUENTA/.test(ctxPlan01) && /LA fuente para TODA pregunta sobre "mi plan"/.test(ctxPlan01));
+t('cuota: da la cuota REAL del socio (Plan 01 / $18000) en TU CUENTA', /Tu plan asignado: Plan 01\./.test(ctxPlan01) && /Tu cuota \(la que PAGÁS vos\): \$18000/.test(ctxPlan01));
+t('cuota: aclara que es su cuota real, NO el precio de lista del catálogo', /NO el precio de lista del catálogo/.test(ctxPlan01));
+t('cuota: REGLA DE FUENTES — mi cuota se responde con TU CUENTA, nunca con el catálogo', /para "mi plan\/mi cuota\/cuánto pago" respondé con TU CUENTA .*NUNCA con el CATÁLOGO/.test(ctxPlan01));
+t('cuota: plan interno (Plan 01) → sin mapearlo a un plan comercial', /planes internos, ej\. "Plan 01"\).*sin mapearlo/.test(ctxPlan01));
+t('catálogo rotulado SOLO-comparar (NO es la cuota del socio)', /precios de LISTA .*SOLO para comparar.*NO es la cuota que paga el socio/.test(ctxPlan01));
+t('SYSTEM (fix cuota): mi cuota con TU CUENTA, nunca con el precio de lista del catálogo', /respondé SIEMPRE con el bloque TU CUENTA .*NUNCA con el precio de lista del CATÁLOGO/.test(SYSTEM));
+t('SYSTEM (fix cuota): plan interno "Plan 01" no se traduce a comercial', /plan interno, ej\. "Plan 01"\).*sin "traducirlo"/.test(SYSTEM));
+t('SYSTEM (fix cuota): precios del catálogo son de LISTA para comparar, no la cuota', /precios del CATÁLOGO .*son de LISTA, para COMPARAR .*NO son la cuota que paga el socio/.test(SYSTEM));
 
 // --- AJUSTE: strip robusto de tokens de botón en la prosa ---
 t('limpia [Cambiar mi plan] de la prosa', limpiarBotonesDelTexto('Te conviene el Familiar. [Cambiar mi plan]') === 'Te conviene el Familiar.');
