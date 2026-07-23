@@ -924,6 +924,10 @@ service cloud.firestore {
     match /asistente_secreto/{id} { allow read, write: if false; }
     // rate_asistente/{uid}: contador de rate-limit por uid. Solo la CF (Admin SDK) lo toca; el cliente no lo ve/pisa.
     match /rate_asistente/{uid} { allow read, write: if false; }
+    // asistente_memoria/{personaId}: memoria por socio (temas/seguimientos/pendientes/preferencias). La escribe SOLO
+    //   la CF asistenteResumir y la lee SOLO asistenteChat (Admin SDK). Calcado de asistente_secreto: el cliente NUNCA
+    //   la lee ni la pisa (contiene lo que el socio dijo/consultó — se sirve inyectada en el contexto, jamás directo).
+    match /asistente_memoria/{personaId} { allow read, write: if false; }
     // asistente_incidentes/{id}: log del GUARDRAIL (texto clínico del socio + respuesta del modelo). SOLO-STAFF lee
     //   para auditar el comportamiento del modelo; el cliente nunca. Escribe solo la CF (Admin SDK).
     match /asistente_incidentes/{id} {

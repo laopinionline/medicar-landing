@@ -41,8 +41,9 @@ const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: es
 const guardrailAsistente = require('./asistente-guardrail').revisar; // MEDICAR IA: guardrail de salida
 const { neutralizarEmergencia } = require('./asistente-guardrail'); // MEDICAR IA: neutraliza 443044 si rojo=false (determinista)
 const { SYSTEM: IA_SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr } = require('./asistente-prompt'); // MEDICAR IA: prompt + contexto + salida
-const { responder: iaResponder } = require('./asistente-adapter'); // MEDICAR IA: adaptador del modelo (ollama|claude|ruteo)
+const { responder: iaResponder, viaClaude: iaViaClaude } = require('./asistente-adapter'); // MEDICAR IA: adaptador (ollama|claude|ruteo) + rama claude directa (resumidor)
 const { clasificar: iaClasificar, ramas: iaRamas } = require('./asistente-ruteo'); // MEDICAR IA: semáforo determinista de ruteo
+const { validarMemoria, tieneContenido, escanearOlvido, SYSTEM_RESUMIDOR, promptResumen, parseResumen } = require('./memoria-nucleo'); // MEDICAR IA: memoria por socio
 
 const REGION = 'southamerica-east1';
 // CRÍTICO: la región debe conservarse EXACTA. El cliente llama con
@@ -1470,10 +1471,25 @@ exports.asistenteChat = onCall(async (request) => {
   // 2) ESCANEO de banderas rojas SOBRE EL TEXTO DEL SOCIO (esto —y solo esto— decide la urgencia 443044).
   const scan = escanearBanderas(mensaje);
 
-  // 3) miPersonaId + CONTEXTO mínimo server-side (NUNCA DNI/clínico/terceros).
+  // 2.5) OLVIDO: pedido determinista de borrado ("olvidate de esto / borrá lo que hablamos") → la CF borra el doc
+  //   ENTERO de memoria (over-delete seguro). La urgencia MANDA: si hay bandera roja, NO se corta acá (se atiende).
+  if (!scan.rojo && escanearOlvido(mensaje)) {
+    try {
+      const personaId = await assertAfiliado(request);
+      await db.collection('asistente_memoria').doc(personaId).delete();
+      logger.info('[asistenteChat] memoria borrada por pedido del socio');
+    } catch (e) { logger.warn('[asistenteChat] olvido: no se pudo borrar', { err: e.message }); }
+    return { respuesta: 'Listo, borré lo que veníamos hablando. Arrancamos de cero cuando quieras.', rojo: false, escalar: false, botones: [], olvidado: true };
+  }
+
+  // 3) miPersonaId + CONTEXTO mínimo server-side (NUNCA DNI/clínico/terceros) + MEMORIA de charlas anteriores.
   let contexto;
   try {
     const personaId = await assertAfiliado(request);
+    // Memoria del socio (subordinada a TU CUENTA; la lee SOLO la CF vía Admin SDK).
+    let memoria = null;
+    try { const mSnap = await db.collection('asistente_memoria').doc(personaId).get(); if (mSnap.exists) { const m = mSnap.data(); if (tieneContenido(m)) memoria = { temas: m.temas || [], seguimientos: m.seguimientos || [], pendientes: m.pendientes || [], preferencias: m.preferencias || [] }; } }
+    catch (e) { logger.warn('[asistenteChat] no se pudo leer memoria', { err: e.message }); }
     const socioSnap = await db.collection('socios').where('personaId', '==', personaId).where('activo', '==', true).limit(1).get();
     const socio = socioSnap.empty ? null : socioSnap.docs[0].data();
     let plan = null, cubre = [];
@@ -1495,7 +1511,7 @@ exports.asistenteChat = onCall(async (request) => {
     }
     // catálogo de planes = curado en buildContexto (landing); NO se lee de Firestore (los docs no traen elegibilidad).
     const nombre = (socio && socio.nombreVista) ? String(socio.nombreVista).split(',').pop().trim().split(' ')[0] : 'socio';
-    contexto = buildContexto({ nombre, plan, cubre, factura, ultimaFactura, tel: '443044' });
+    contexto = buildContexto({ nombre, plan, cubre, factura, ultimaFactura, memoria, tel: '443044' });
   } catch (e) {
     logger.warn('[asistenteChat] contexto degradado', { err: e.message }); // sin contexto sigue: el modelo orienta genérico
     contexto = buildContexto({ nombre: 'socio', planes: [], tel: '443044' });
@@ -1536,6 +1552,52 @@ exports.asistenteChat = onCall(async (request) => {
   if (scan.rojo) botones = botones.filter((b) => b.accion !== 'turno'); // urgencia real: NO ofrecer turno (determinista)
   const respuesta = voseoAr(limpiarBotonesDelTexto(neu.texto)); // saca tokens [Botón] + convierte a voseo rioplatense
   return { respuesta, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
+});
+
+/* ===================== MEDICAR IA — RESUMIDOR (memoria por socio) =====================
+   Cierre EXPLÍCITO (B1): el cliente manda el transcript al cerrar el chat (+ backstop visibilitychange). El resumidor
+   es SIEMPRE claude (aunque la charla haya ido por ollama): destila el transcript contra la memoria previa y ESCRIBE
+   asistente_memoria/{personaId} (Admin SDK, doc calcado de asistente_secreto: read/write:false para el cliente).
+   La estructura la fija validarMemoria() (determinista) → nada de scores/clasificaciones (N3). Degrada limpio: si
+   claude no está, el JSON no parsea, o no hay nada que recordar, NO escribe y no rompe el cierre. "Olvidate" NO pasa
+   por acá (lo borra asistenteChat en el acto); el cliente además suprime el resumen si hubo olvido en la sesión. */
+exports.asistenteResumir = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const historia = Array.isArray((request.data || {}).historia)
+    ? request.data.historia.slice(-40).filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+        .map((m) => ({ role: m.role, content: String(m.content).slice(0, 1000) }))
+    : [];
+  // Solo resumimos una charla con intercambio real (al menos un turno del socio y uno del asistente).
+  if (!(historia.some((m) => m.role === 'user') && historia.some((m) => m.role === 'assistant'))) return { ok: false, razon: 'sin-intercambio' };
+
+  const personaId = await assertAfiliado(request);
+  const memRef = db.collection('asistente_memoria').doc(personaId);
+  const prevSnap = await memRef.get();
+  const prev = prevSnap.exists ? (prevSnap.data() || {}) : {};
+  // Debounce: el doble disparo (cerrarAsistente + visibilitychange) no reprocesa lo mismo en segundos.
+  const actMs = prev.actualizadoEn && prev.actualizadoEn.toMillis ? prev.actualizadoEn.toMillis() : 0;
+  if (actMs && (Date.now() - actMs) < 15000) return { ok: false, razon: 'debounce' };
+
+  const memPrevia = { temas: prev.temas || [], seguimientos: prev.seguimientos || [], pendientes: prev.pendientes || [], preferencias: prev.preferencias || [] };
+  const hoy = hoyAR();
+
+  // Resumidor SIEMPRE claude (rama directa del adapter). apiKey/token viven en asistente_secreto/config (Admin SDK).
+  const cfgSnap = await db.collection('asistente_secreto').doc('config').get();
+  const cfg = cfgSnap.exists ? (cfgSnap.data() || {}) : {};
+  let memoria;
+  try {
+    const texto = await iaViaClaude({ ...cfg, maxTokens: 700 }, { system: SYSTEM_RESUMIDOR, contexto: '', historia: [], mensaje: promptResumen(memPrevia, historia, hoy) });
+    memoria = parseResumen(texto, hoy);
+  } catch (e) {
+    logger.warn('[asistenteResumir] claude no disponible / falla — no se escribe memoria', { err: e.message });
+    return { ok: false, razon: 'modelo' };
+  }
+  // Guard anti-wipe: si el resumidor no devuelve nada útil, NO pisamos la memoria previa (el borrado real es "olvidate").
+  if (!memoria || !tieneContenido(memoria)) return { ok: false, razon: 'sin-contenido' };
+
+  await memRef.set({ personaId, ...memoria, actualizadoEn: FV(), version: 1 }, { merge: false });
+  logger.info('[asistenteResumir] memoria actualizada', { temas: memoria.temas.length, seguimientos: memoria.seguimientos.length, pendientes: memoria.pendientes.length, preferencias: memoria.preferencias.length });
+  return { ok: true };
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================

@@ -1701,7 +1701,18 @@ function homeIaBlock(c){
   </div>`;
 }
 function abrirAsistente(){ if(!S.cred) return; if(!S.ia) S.ia={ msgs:[], busy:false, err:'', escalando:false }; S.view='asistente'; render(); navPush(); }
-function cerrarAsistente(){ if(S.ia) S.ia.escalando=false; S.view='home'; render(); }
+function cerrarAsistente(){ iaResumirSesion(); if(S.ia) S.ia.escalando=false; S.view='home'; render(); }
+// Cierre explícito (B1): al salir del chat resume la sesión en segundo plano (fire-and-forget). El resumidor (CF,
+// SIEMPRE claude) destila el transcript y escribe la memoria por socio. No bloquea la UI; UNA vez por sesión;
+// suprimido si el socio pidió "olvidate" (ya borró en server). El backstop de visibilitychange usa la misma función.
+function iaResumirSesion(){
+  const ia=S.ia; if(!ia||ia.resumido||ia.olvidado) return;
+  const msgs=ia.msgs||[];
+  if(!msgs.some(m=>m.role==='user')||!msgs.some(m=>m.role==='ia')) return; // sin intercambio real → nada que resumir
+  ia.resumido=true;
+  const historia=msgs.map(m=>({ role:(m.role==='user'?'user':'assistant'), content:m.texto }));
+  try{ fnsCall('asistenteResumir',{ historia }).catch(()=>{}); }catch(_){}
+}
 function iaBurbuja(m){
   if(m.role==='user') return `<div style="align-self:flex-end;max-width:85%;background:var(--rojo);color:#fff;border-radius:14px 14px 4px 14px;padding:.55rem .8rem;font-size:.9rem;line-height:1.4">${esc(m.texto)}</div>`;
   const banner = m.rojo ? `<a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:.55rem;background:var(--rojo);color:#fff;font-weight:800;padding:.6rem;border-radius:10px;text-decoration:none">🚑 Emergencias ${TEL_EMERG}</a>` : '';
@@ -1759,6 +1770,7 @@ async function iaMandar(mensaje){
     const historia = S.ia.msgs.slice(0,-1).map(m=>({ role:(m.role==='user'?'user':'assistant'), content:m.texto })).slice(-6);
     const r = await fnsCall('asistenteChat', { mensaje, historia });
     S.ia.msgs.push({ role:'ia', texto:(r&&r.respuesta)||'', rojo:!!(r&&r.rojo), botones:(r&&r.botones)||[] });
+    if(r&&r.olvidado){ S.ia.olvidado=true; S.ia.resumido=true; } // la CF borró la memoria: no resumir esta sesión
   }catch(e){
     S.ia.err = errCF(e, 'No pude responderte ahora. Si es una urgencia, llamá al '+TEL_EMERG+'.', { 'resource-exhausted':'Vas muy rápido. Esperá un momento y seguimos.' });
   }
@@ -2549,6 +2561,11 @@ function render(){
 }
 
 render();
+
+/* ---------- Backstop del resumen (B1): si el chat está abierto y la app pasa a segundo plano
+   (cambio de app / bloqueo / cierre), resume antes de perder el transcript. iaResumirSesion es idempotente
+   por sesión (flag resumido) y el server debouncea el doble disparo. ---------- */
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden && S && S.view==='asistente') { try{ iaResumirSesion(); }catch(_){} } });
 
 /* ---------- Service worker ---------- */
 if('serviceWorker' in navigator){

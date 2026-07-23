@@ -69,6 +69,10 @@ function buildContexto(d) {
     const est = d.ultimaFactura ? (' Tu última factura (' + d.ultimaFactura.nro + ') figura ' + (d.ultimaFactura.estado === 'pagada' ? 'PAGADA' : String(d.ultimaFactura.estado || '')) + '.') : ' No hay facturas registradas todavía.';
     L.push('- Facturas: NO tenés ninguna factura pendiente. NO debés nada.' + est);
   }
+  // MEMORIA de charlas anteriores (subordinada a TU CUENTA). Se retoma con naturalidad; si contradice el dato de
+  // cuenta de arriba, MANDA TU CUENTA. Solo lo que el socio dijo/consultó — nunca scores ni clasificaciones (N3).
+  const memBloque = bloqueMemoria(d.memoria);
+  if (memBloque) L.push(memBloque);
   // JERARQUÍA DE FUENTES explícita: la cuota del socio SIEMPRE sale de TU CUENTA; el catálogo es SOLO para comparar.
   L.push('REGLA DE FUENTES: para "mi plan/mi cuota/cuánto pago" respondé con TU CUENTA (arriba), NUNCA con el CATÁLOGO. Si tu plan asignado NO figura en el catálogo (planes internos, ej. "Plan 01"), respondé tu cuota de TU CUENTA tal cual, sin mapearlo ni "traducirlo" a un plan comercial. El CATÁLOGO de abajo es SOLO para comparar o evaluar un cambio de plan:');
   L.push(CATALOGO_PLANES); // catálogo real curado (landing) — SOLO para comparar/evaluar cambios, NO es la cuota del socio
@@ -87,6 +91,19 @@ const CATALOGO_PLANES = [
   '- Área Protegida (desde $70.000): cobertura por LOCAL / domicilio comercial (no por personas), incluye un responsable.',
   '- Corporativo: convenio a medida para empresas.',
 ].join('\n');
+
+// Bloque "DE CHARLAS ANTERIORES" — SUBORDINADO a TU CUENTA (dato de cuenta gana sobre memoria). Formatea la
+// memoria estructurada (asistente_memoria/{personaId}) que arma el resumidor. Devuelve '' si no hay contenido.
+function bloqueMemoria(mem) {
+  if (!mem || typeof mem !== 'object') return '';
+  const L = [];
+  (mem.temas || []).forEach((x) => x && x.t && L.push('- Consultó: ' + x.t + (x.fecha ? ' (' + x.fecha + ')' : '') + '.'));
+  (mem.seguimientos || []).forEach((x) => x && x.t && L.push('- Seguimiento abierto: ' + x.t + (x.desde ? ' (desde ' + x.desde + ')' : '') + '.'));
+  (mem.pendientes || []).forEach((x) => x && x.t && L.push('- Pendiente/pedido: ' + x.t + (x.desde ? ' (desde ' + x.desde + ')' : '') + '.'));
+  (mem.preferencias || []).forEach((x) => x && x.t && L.push('- Preferencia: ' + x.t + '.'));
+  if (!L.length) return '';
+  return ['DE CHARLAS ANTERIORES (memoria de conversaciones pasadas — es SECUNDARIO: si algo acá contradice TU CUENTA de arriba, MANDA TU CUENTA. Usalo solo para retomar con naturalidad, no lo recites entero):', ...L].join('\n');
+}
 
 // Quita la etiqueta de control [[ESCALAR]] del texto visible y reporta si estaba.
 function stripEscalar(texto) {
@@ -150,4 +167,4 @@ function voseoAr(texto) {
   return t;
 }
 
-module.exports = { SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr, BOTONES };
+module.exports = { SYSTEM, buildContexto, bloqueMemoria, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr, BOTONES };
