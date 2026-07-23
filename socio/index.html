@@ -77,6 +77,13 @@ input{font-family:inherit}
 .topbar .tb-t em{color:var(--rojo);font-style:normal}
 .topbar .tb-sp{margin-left:auto}
 .mini{background:none;color:var(--gris);font-size:.78rem;font-weight:700;padding:.4rem .2rem}
+/* Wordmark MEDICAR: la I y la A en naranja revelan "IA" dentro de la marca. Animación de construcción SOLO 1ª apertura de sesión (.anim), luego estático. */
+.ia-wm{font-weight:800;font-size:1.05rem;letter-spacing:-.02em;color:var(--tinta)}
+.ia-wm .l{color:var(--naranja);display:inline-block}
+.ia-wm.anim .lI{animation:ia-wmL .6s ease-out both}
+.ia-wm.anim .lA{animation:ia-wmR .6s .08s ease-out both}
+@keyframes ia-wmL{0%{transform:translateX(-16px);opacity:0}70%{opacity:1;text-shadow:0 0 8px rgba(247,148,30,.7)}100%{transform:translateX(0);opacity:1;text-shadow:none}}
+@keyframes ia-wmR{0%{transform:translateX(16px);opacity:0}70%{opacity:1;text-shadow:0 0 8px rgba(247,148,30,.7)}100%{transform:translateX(0);opacity:1;text-shadow:none}}
 
 /* ---------- CREDENCIAL (mockup sistema visual) ---------- */
 .cred{border-radius:20px;padding:1.3rem 1.3rem 1.4rem;color:#fff;position:relative;overflow:hidden;background:linear-gradient(135deg,#2a2d31,#1a1a1a);box-shadow:var(--sombra-alta)}
@@ -1268,9 +1275,10 @@ function homeView(){
     || `<div class="row"><span class="rl">Sin datos de contacto cargados</span><span class="rv"></span></div>`;
 
   // hint de instalación — el PROMPT de instalar la PWA solo en desktop (en móvil va la app nativa).
+  // Si YA corre instalada (standalone / iOS navigator.standalone), NO se muestra nada: la invitación no tiene sentido.
   let instalBlock='';
   if(esStandalone()){
-    instalBlock = `<div class="installed">✓ App instalada</div>`;
+    instalBlock = ''; // app instalada → sin invitación ni chip
   }else if(!esMovil()){
     if(S.deferredPrompt){
       instalBlock = `<button class="btn-o" style="margin-top:1.2rem" onclick="instalar()">＋ Agregar MEDICAR a mi pantalla de inicio</button>`;
@@ -1430,10 +1438,8 @@ function homeView(){
 
     ${sinAfilNota}
 
-    ${cuotaSec}
-    ${grupoSec}
-    ${comprobantesSec}
-    ${turnosSec}
+    ${/* ORDEN de la home (addendum): c.Chequeo · d.MEDICAR IA · e.No me siento bien · f.Registrar signos · g+h.Turnos+Mis turnos · i.Mi cuenta · j.Cuota · (perfil/social) · k.Feed. Solo reordenado; el contenido interno de cada sección no se toca. */''}
+    ${homeChequeoBlock(c)}
 
     ${homeIaBlock(c)}
 
@@ -1441,7 +1447,12 @@ function homeView(){
 
     ${homeParamsBlock(c)}
 
-    ${homeChequeoBlock(c)}
+    ${turnosSec}
+
+    ${comprobantesSec}
+
+    ${cuotaSec}
+    ${grupoSec}
 
     <div class="sec">
       <div class="sec-h">Mis datos de contacto</div>
@@ -1674,16 +1685,16 @@ async function enviarChequeo(){
 
 /* ---------- Auto-reporte de síntomas (Monitoreo N2) ---------- */
 /* ===================== MEDICAR IA — sección del socio (F1) =====================
-   Híbrido por elección: IA instantánea vs turno con médico. La SEGURIDAD no depende del modelo: botón "Hablar con un
-   médico" SIEMPRE visible + banner 443044 cuando el server marca `rojo` (escaneo determinista). Si el modelo no
+   Híbrido por elección: IA instantánea vs turno con médico. La SEGURIDAD no depende del modelo: botón "Pedir un turno
+   con un médico" SIEMPRE visible + banner 443044 cuando el server marca `rojo` (escaneo determinista). Si el modelo no
    responde, la CF degrada limpio (mensaje claro + el botón médico sigue). La conversación NO se persiste (solo sesión). */
 function homeIaBlock(c){
   if(!S.iaHabilitado) return ''; // oculta hasta que la config la encienda (túnel/proveedor listo)
   return `<div class="sec">
-    <div class="sec-h">MEDICAR IA</div>
+    <div class="sec-h">MED<span style="color:var(--naranja)">I</span>C<span style="color:var(--naranja)">A</span>R</div>
     <button class="tile" onclick="abrirAsistente()">
       <span class="tile-ic">💬</span>
-      <span class="tile-tx"><span class="tile-t">Consultar con MEDICAR IA</span><span class="tile-s">Respuesta al instante sobre tu plan, tus facturas o cómo te sentís.</span></span>
+      <span class="tile-tx"><span class="tile-t">Consultar con MED<span style="color:var(--naranja)">I</span>C<span style="color:var(--naranja)">A</span>R</span><span class="tile-s">Respuesta al instante sobre tu plan, tus facturas o cómo te sentís.</span></span>
       <span class="tile-go">${chv(15)}</span>
     </button>
     <div style="font-size:.68rem;color:var(--gris);margin:.45rem .2rem 0;line-height:1.4">¿Preferís un profesional? La videollamada con un médico puede demorar, pero te atiende una persona. <button onclick="cerrarAsistente()" style="background:none;border:none;color:var(--rojo);font-weight:700;cursor:pointer;padding:0">Pedir turno ↓</button></div>
@@ -1697,8 +1708,10 @@ function iaBurbuja(m){
   const botones = (m.botones||[]).map(b=>`<button onclick="iaAccion('${b.accion}')" style="display:block;width:100%;margin-top:.4rem;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:700;padding:.5rem;border-radius:10px;cursor:pointer">${esc(b.label)}</button>`).join('');
   return `<div style="align-self:flex-start;max-width:90%;background:var(--nieve);border:1px solid var(--linea);border-radius:14px 14px 14px 4px;padding:.55rem .8rem;font-size:.9rem;line-height:1.45">${esc(m.texto).replace(/\n/g,'<br>')}${banner}${botones}</div>`;
 }
+let iaWmAnim=true; // la animación de construcción del wordmark corre solo en la 1ª apertura del chat en esta sesión
 function asistenteView(){
   const ia=S.ia||{msgs:[],busy:false,err:'',escalando:false};
+  const anim = iaWmAnim ? ' anim' : ''; iaWmAnim=false;
   const msgs = ia.msgs.map(iaBurbuja).join('');
   const empty = ia.msgs.length ? '' : `<div style="color:var(--gris);font-size:.85rem;text-align:center;margin:.6rem 0">Preguntame lo que quieras. Elegí un tema o escribí:</div>
     <div style="display:flex;flex-wrap:wrap;gap:.4rem;justify-content:center">
@@ -1706,7 +1719,7 @@ function asistenteView(){
     </div>`;
   const sheet = ia.escalando ? `<div style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;z-index:50" onclick="iaCerrarEscalar(event)">
       <div style="background:#fff;width:100%;border-radius:18px 18px 0 0;padding:1rem 1.1rem 1.4rem" onclick="event.stopPropagation()">
-        <div style="font-weight:800;font-size:1rem;margin-bottom:.2rem">Hablar con un médico</div>
+        <div style="font-weight:800;font-size:1rem;margin-bottom:.2rem">Que te vea un médico</div>
         <div style="font-size:.78rem;color:var(--gris);margin-bottom:.8rem">Elegí cómo seguir. Ante una urgencia, la vía más rápida es el teléfono.</div>
         <a href="tel:${TEL_EMERG}" class="call" style="margin-top:0">${IC.phone}<span>Emergencias — llamar al ${TEL_EMERG}</span></a>
         <button class="btn-o" style="margin-top:.6rem;width:100%" onclick="iaEscalarReporte()">Contarle mis síntomas a un médico</button>
@@ -1714,13 +1727,13 @@ function asistenteView(){
         <button class="btn-o" style="margin-top:.5rem;width:100%;border:none;color:var(--gris)" onclick="iaCerrarEscalar()">Cancelar</button>
       </div></div>` : '';
   return `<div class="home" style="display:flex;flex-direction:column;min-height:100dvh">
-    <div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">MEDICAR IA</div><div class="tb-sp"></div><button class="mini" onclick="cerrarAsistente()">Volver</button></div>
-    <div style="background:#fff3f3;border:1px solid #f3c9c9;border-radius:10px;padding:.5rem .7rem;font-size:.72rem;color:#7a1f1f;margin:.1rem 0 .6rem;line-height:1.4">DrIA te orienta, no reemplaza a un médico. Ante una urgencia, llamá al <b>${TEL_EMERG}</b>.</div>
+    <div class="topbar">${chv(16)}<div class="ia-wm${anim}" style="margin-left:.4rem">MED<span class="l lI">I</span>C<span class="l lA">A</span>R</div><div class="tb-sp"></div><button class="mini" onclick="cerrarAsistente()">Volver</button></div>
+    <div style="background:#fff3f3;border:1px solid #f3c9c9;border-radius:10px;padding:.5rem .7rem;font-size:.72rem;color:#7a1f1f;margin:.1rem 0 .6rem;line-height:1.4">Este chat funciona con inteligencia artificial. Orienta, pero no reemplaza a un médico. Ante una urgencia, llamá al <b>${TEL_EMERG}</b>.</div>
     <div id="ia-msgs" style="flex:1;display:flex;flex-direction:column;gap:.5rem;padding-bottom:.5rem;overflow-y:auto">${msgs}${empty}</div>
-    ${ia.busy?`<div style="color:var(--gris);font-size:.82rem;padding:.3rem .2rem">DrIA está pensando…</div>`:''}
+    ${ia.busy?`<div style="color:var(--gris);font-size:.82rem;padding:.3rem .2rem">Escribiendo…</div>`:''}
     ${ia.err?`<div class="err on" style="margin:.3rem 0">${esc(ia.err)}</div>`:''}
     <div style="position:sticky;bottom:0;background:var(--fondo,#fff);padding:.5rem 0 .3rem">
-      <button onclick="iaEscalar()" style="width:100%;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:800;padding:.6rem;border-radius:12px;cursor:pointer;margin-bottom:.5rem">🩺 Hablar con un médico</button>
+      <button onclick="iaAccion('turno')" style="width:100%;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:800;padding:.6rem;border-radius:12px;cursor:pointer;margin-bottom:.5rem">🩺 Pedir un turno con un médico</button>
       <div style="display:flex;gap:.4rem">
         <input id="ia-input" placeholder="Escribí tu consulta…" autocomplete="off" ${ia.busy?'disabled':''} style="flex:1;border:1.5px solid var(--linea);border-radius:12px;padding:.6rem .8rem;font-size:.9rem;background:var(--nieve)">
         <button onclick="iaEnviar()" ${ia.busy?'disabled':''} style="background:var(--rojo);color:#fff;border:none;border-radius:12px;padding:0 1.1rem;font-weight:800;cursor:pointer">Enviar</button>

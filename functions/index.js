@@ -1510,8 +1510,8 @@ exports.asistenteChat = onCall(async (request) => {
   } catch (e) {
     logger.warn('[asistenteChat] modelo no disponible, degradación limpia', { err: e.message });
     return {
-      respuesta: 'Ahora mismo no puedo responderte por acá. Si es una urgencia, llamá al 443044. También podés hablar con un médico o pedir un turno desde la app.',
-      rojo: scan.rojo, escalar: true, botones: [{ label: 'Hablar con un médico', accion: 'medico' }], degradado: true,
+      respuesta: 'Ahora mismo no puedo responderte por acá. Si es una urgencia, llamá al 443044. También podés pedir un turno para que te vea un médico desde la app.',
+      rojo: scan.rojo, escalar: true, botones: [{ label: 'Que te vea un médico', accion: 'medico' }], degradado: true,
     };
   }
 
@@ -1527,7 +1527,7 @@ exports.asistenteChat = onCall(async (request) => {
   const { texto, tag } = stripEscalar(gr.respuesta);
   const neu = neutralizarEmergencia(texto, scan.rojo);
   if (neu.cambiado) logger.info('[asistenteChat] 443044 neutralizado (rojo=false)');
-  let botones = gr.motivo ? [{ label: 'Hablar con un médico', accion: 'medico' }] : parseBotones(gr.respuesta);
+  let botones = gr.motivo ? [{ label: 'Que te vea un médico', accion: 'medico' }] : parseBotones(gr.respuesta);
   if (scan.rojo) botones = botones.filter((b) => b.accion !== 'turno'); // urgencia real: NO ofrecer turno (determinista)
   const respuesta = voseoAr(limpiarBotonesDelTexto(neu.texto)); // saca tokens [Botón] + convierte a voseo rioplatense
   return { respuesta, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
