@@ -80,5 +80,28 @@ t('SERVER: PLANES_CHECKOUT joven maxEdad:30', /joven: \{ nombre: 'Plan Joven', b
 t('SERVER: enforcement edad > p.maxEdad (30) para Joven', /d\.planKey === 'joven' && edad != null && edad > p\.maxEdad/.test(fn) && /El Plan Joven es hasta 30 años/.test(fn));
 t('SERVER: domCanon persiste pisoDepto (cap 60) + exige calleId+altura>0', /pisoDepto = String\(o\.pisoDepto \|\| ''\)\.trim\(\)\.slice\(0, 60\)/.test(fn) && /texto && calleId && altura > 0/.test(fn));
 
+// --- FIX 1: plausibilidad de fecha de nacimiento (cliente + server) ---
+const yy = new Date().getFullYear();
+const fechaNacOk = grab('fechaNacOk'); // CLIENTE (extraído de socio/index.html)
+t('CLIENTE fechaNacOk: año 5200 → false', fechaNacOk('5200-06-14') === false);
+t('CLIENTE fechaNacOk: fecha futura → false', fechaNacOk((yy + 1) + '-01-01') === false);
+t('CLIENTE fechaNacOk: 1985 → true', fechaNacOk('1985-03-10') === true);
+t('CLIENTE fechaNacOk: <1900 → false', fechaNacOk('1899-12-31') === false);
+t('CLIENTE fechaNacOk: vacío/roto → false', fechaNacOk('') === false && fechaNacOk('xx') === false);
+t('CLIENTE: la validación usa fechaNacOk (titular + integrante)', /if\(!fechaNacOk\(g\.fechaNac\)\)/.test(html) && /if\(!fechaNacOk\(m\.fechaNac\)\)/.test(html));
+// SERVER: extrae ISO_FECHA + PARTICULAS + los dos helpers y los evalúa.
+const line = (re) => { const m = re.exec(fn); if (!m) throw new Error('no encontré ' + re); return m[0]; };
+const srvS = new Function(line(/const ISO_FECHA = .*/) + '\n' + line(/const PARTICULAS = .*/) + '\n' + line(/function fechaNacPlausible\(iso\) \{.*\}/) + '\n' + line(/function capitalizarNombre\(s\) \{.*\}/) + '\nreturn {fp:fechaNacPlausible, cn:capitalizarNombre};')();
+t('SERVER fechaNacPlausible: 5200 → false', srvS.fp('5200-06-14') === false);
+t('SERVER fechaNacPlausible: futura → false', srvS.fp((yy + 1) + '-01-01') === false);
+t('SERVER fechaNacPlausible: 1985 → true', srvS.fp('1985-03-10') === true);
+t('SERVER: usa fechaNacPlausible (titular + integrante), no solo ISO', /if \(!fechaNacPlausible\(fechaNacimiento\)\)/.test(fn) && /if \(!fechaNacPlausible\(fnac\)\)/.test(fn));
+
+// --- FIX 2: capitalización de nombres al persistir (server) ---
+t('SERVER capitalizarNombre: "carlin calvo" → "Carlin Calvo"', srvS.cn('carlin calvo') === 'Carlin Calvo');
+t('SERVER capitalizarNombre: partículas en minúscula ("juan de la cruz" → "Juan de la Cruz")', srvS.cn('juan de la cruz') === 'Juan de la Cruz');
+t('SERVER capitalizarNombre: colapsa espacios ("  ana   maria " → "Ana Maria")', srvS.cn('  ana   maria ') === 'Ana Maria');
+t('SERVER: integrante y titular se persisten capitalizados', /const nombre = capitalizarNombre\(m\.nombre\)/.test(fn) && /titNombre = capitalizarNombre\(\(snap\.data\(\) \|\| \{\}\)\.nombre\)/.test(fn));
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-puente: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);

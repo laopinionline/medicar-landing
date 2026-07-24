@@ -1706,6 +1706,12 @@ const ISO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 // Domicilio de despacho: exige calleId (canónico del callejero) + altura>0 + texto. NO re-resuelve el callejero server-side
 // (vive en el cliente); valida PRESENCIA — sin domicilio válido NO hay pago. (Con pasarela REAL habrá que endurecer.)
 const domCanon = (o) => { o = o || {}; const texto = String(o.texto || '').trim().slice(0, 200); const calleId = String(o.calleId || '').trim().slice(0, 120); const altura = Number(o.altura) || 0; const pisoDepto = String(o.pisoDepto || '').trim().slice(0, 60); return (texto && calleId && altura > 0) ? { texto, calleId, altura, pisoDepto } : null; };
+// Fecha de nacimiento PLAUSIBLE: ISO + año ≥1900 + no futura (a la fecha del checkout). Un año absurdo (5200) da edades
+// absurdas y rompe el enforcement Joven ≤30, que se calcula de esta fecha → se rechaza limpio.
+function fechaNacPlausible(iso) { if (!ISO_FECHA.test(String(iso || ''))) return false; const y = parseInt(String(iso).slice(0, 4), 10); return y >= 1900 && String(iso) <= new Date().toISOString().slice(0, 10); }
+// Capitalización por palabra (con partículas comunes en minúscula salvo al inicio): "carlin calvo" → "Carlin Calvo".
+const PARTICULAS = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'da', 'do']);
+function capitalizarNombre(s) { return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase().split(' ').filter(Boolean).map((w, i) => (i > 0 && PARTICULAS.has(w)) ? w : (w.charAt(0).toUpperCase() + w.slice(1))).join(' ').slice(0, 80); }
 exports.checkoutAfiliacion = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
   const ref = db.collection('prospectos').doc(request.auth.uid);
@@ -1717,7 +1723,7 @@ exports.checkoutAfiliacion = onCall(async (request) => {
   const integrantes = (d.planKey === 'familiar') ? Math.max(2, Math.min(12, Number(d.integrantes) || 2)) : 1;
   const total = (d.planKey === 'familiar') ? (p.base + Math.max(0, integrantes - 2) * p.adicional) : p.base; // recomputado server-side (no se confía en el cliente)
   const fechaNacimiento = String(d.fechaNacimiento || '').slice(0, 10);
-  if (!ISO_FECHA.test(fechaNacimiento)) throw new HttpsError('invalid-argument', 'Falta la fecha de nacimiento.');
+  if (!fechaNacPlausible(fechaNacimiento)) throw new HttpsError('invalid-argument', 'Revisá la fecha de nacimiento del titular (año 1900 o posterior, y no futura).');
   const edad = edadDeISO(fechaNacimiento);
   if (d.planKey === 'joven' && edad != null && edad > p.maxEdad) throw new HttpsError('failed-precondition', 'El Plan Joven es hasta 30 años.');
   // Domicilio del TITULAR (dato de despacho) — obligatorio y con calleId del callejero.
@@ -1732,7 +1738,7 @@ exports.checkoutAfiliacion = onCall(async (request) => {
     const dnis = new Set(titDni ? [titDni] : []);
     for (let i = 0; i < grupoIn.length; i++) {
       const m = grupoIn[i] || {}; const et = 'Integrante ' + (i + 2);
-      const nombre = String(m.nombre || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      const nombre = capitalizarNombre(m.nombre); // FIX 2: capitalización por palabra al persistir
       const dni = String(m.dni || '').replace(/\D/g, '');
       const fnac = String(m.fechaNacimiento || '').slice(0, 10);
       const vinculo = String(m.vinculo || '').trim().slice(0, 30);
@@ -1741,15 +1747,17 @@ exports.checkoutAfiliacion = onCall(async (request) => {
       if (dni.length < 7 || dni.length > 8) throw new HttpsError('invalid-argument', et + ': DNI inválido.');
       if (dnis.has(dni)) throw new HttpsError('invalid-argument', et + ': DNI repetido.');
       dnis.add(dni);
-      if (!ISO_FECHA.test(fnac)) throw new HttpsError('invalid-argument', et + ': falta la fecha de nacimiento.');
+      if (!fechaNacPlausible(fnac)) throw new HttpsError('invalid-argument', et + ': revisá la fecha de nacimiento (año 1900 o posterior, y no futura).');
       if (!vinculo) throw new HttpsError('invalid-argument', et + ': falta el vínculo.');
       const item = { nombre, dni, fechaNacimiento: fnac, vinculo, comparteDomicilio };
       if (!comparteDomicilio) { const dm = domCanon(m.domicilio); if (!dm) throw new HttpsError('invalid-argument', et + ': el domicilio debe estar en el callejero de Pergamino.'); item.domicilio = dm; }
       integrantesOut.push(item);
     }
   }
+  const titNombre = capitalizarNombre((snap.data() || {}).nombre); // FIX 2: normaliza también el nombre del titular
   await ref.set({
     estado: 'afiliacion_en_proceso',
+    ...(titNombre ? { nombre: titNombre } : {}),
     planElegido: { key: d.planKey, nombre: p.nombre, integrantes, total },
     datosAlta: { fechaNacimiento, edad: edad != null ? edad : null, domicilio: domTitular },
     integrantes: integrantesOut, // grupo del titular (vacío en Joven/Senior); cada uno con comparteDomicilio o su dirección {texto,calleId,altura}
