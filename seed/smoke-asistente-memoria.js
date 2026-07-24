@@ -1,6 +1,6 @@
 'use strict';
 // Smoke — MEMORIA POR SOCIO: memoria-nucleo (validarMemoria/escanearOlvido/parseResumen) + inyección en buildContexto.
-const { validarMemoria, tieneContenido, escanearOlvido, parseResumen, LIMITES } = require('../functions/memoria-nucleo');
+const { validarMemoria, tieneContenido, escanearOlvido, parseResumen, LIMITES, SYSTEM_RESUMIDOR } = require('../functions/memoria-nucleo');
 const { buildContexto, bloqueMemoria } = require('../functions/asistente-prompt');
 let ok = 0, fail = 0;
 const t = (l, c) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}`); c ? ok++ : fail++; };
@@ -62,6 +62,10 @@ t('parseResumen: extrae el JSON embebido y valida', pr && pr.temas.length === 1 
 t('parseResumen: aplica N3 al JSON del modelo (sin score)', pr && pr.temas[0].score === undefined);
 t('parseResumen: sin JSON → null', parseResumen('no hay json acá', HOY) === null);
 t('parseResumen: JSON roto → null', parseResumen('{ roto: ', HOY) === null);
+
+// ===== B1: preferencias = SOLO trato/comunicación; deseos/trámites → pendientes (no duplicar) =====
+t('resumidor: "preferencias" acotado a TRATO/COMUNICACIÓN', /"preferencias" es SOLO para preferencias de TRATO\/COMUNICACIÓN/.test(SYSTEM_RESUMIDOR));
+t('resumidor: deseo/trámite va a "pendientes", no a preferencias', /DESEO o TRÁMITE.*va en "pendientes", NUNCA en "preferencias"/.test(SYSTEM_RESUMIDOR));
 
 // ===== Inyección en buildContexto: SUBORDINADA a TU CUENTA =====
 const ctx = buildContexto({

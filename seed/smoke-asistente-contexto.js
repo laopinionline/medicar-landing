@@ -42,6 +42,32 @@ t('SYSTEM (fix cuota): mi cuota con TU CUENTA, nunca con el precio de lista del 
 t('SYSTEM (fix cuota): plan interno "Plan 01" no se traduce a comercial', /plan interno, ej\. "Plan 01"\).*sin "traducirlo"/.test(SYSTEM));
 t('SYSTEM (fix cuota): precios del catálogo son de LISTA para comparar, no la cuota', /precios del CATÁLOGO .*son de LISTA, para COMPARAR .*NO son la cuota que paga el socio/.test(SYSTEM));
 
+// --- CONTEXTO COMPLETO: turnos + chequeo semanal + signos (responde con el DATO, no con el mapa) ---
+const ctxFull = buildContexto({
+  nombre: 'Lucas', plan: { nombre: 'Plan 01', precio: 18000 }, cubre: ['emergencias'], factura: null, ultimaFactura: null,
+  turnos: [{ fecha: '2026-07-24', hora: '15:30', medico: 'Dra. Gómez' }, { fecha: '2026-08-01', hora: '09:00', medico: '' }],
+  chequeo: { respondioSemana: false, diaRecordatorio: 'lunes' },
+  signos: { fecha: '2026-07-23', fc: 72, sis: 120, temp: 36.5, spo2: 98, news2Score: 9, news2Nivel: 'ROJO' },
+  tel: '443044',
+});
+t('turno: próximo con fecha DD/MM + hora + médico', /Próximo turno: 24\/07 a las 15:30 con Dra\. Gómez/.test(ctxFull));
+t('turno: aclara videollamada por WhatsApp', /videollamada es por WhatsApp/.test(ctxFull));
+t('turno: lista los siguientes', /Siguientes turnos: 01\/08 a las 09:00/.test(ctxFull));
+t('turno: formatea DD/MM (no ISO crudo)', !/2026-07-24/.test(ctxFull));
+t('chequeo: estado real (no respondió) + día de recordatorio', /Chequeo semanal: todavía no lo respondiste esta semana\. Tu recordatorio está configurado los lunes/.test(ctxFull));
+t('signos: valores crudos con unidades', /pulso 72 lpm/.test(ctxFull) && /presión \(sistólica\) 120 mmHg/.test(ctxFull) && /temperatura 36\.5 °C/.test(ctxFull) && /oxígeno 98%/.test(ctxFull));
+t('signos: fecha DD/MM + leyenda "sin interpretación"', /Últimos signos que registraste \(23\/07\)/.test(ctxFull) && /sin interpretación/.test(ctxFull));
+t('signos N3: NUNCA filtra news2/nivel/ROJO al contexto', !/news2|NEWS2|ROJO/i.test(ctxFull));
+// Ausencias AFIRMADAS (lección facturas): sin turnos → se afirma; chequeo respondido sin día → sin recordatorio.
+const ctxSinTurno = buildContexto({ nombre: 'Ana', plan: null, factura: null, ultimaFactura: null, turnos: [], chequeo: { respondioSemana: true, diaRecordatorio: null }, tel: '443044' });
+t('sin turnos: afirma "no tenés ningún turno reservado"', /Turnos: no tenés ningún turno reservado/.test(ctxSinTurno));
+t('chequeo respondido: "ya lo respondiste esta semana"', /Chequeo semanal: ya lo respondiste esta semana/.test(ctxSinTurno));
+t('chequeo sin día: no inventa recordatorio', !/recordatorio está configurado/.test(ctxSinTurno));
+t('sin signos: no aparece la línea de signos', !/Últimos signos/.test(ctxSinTurno));
+// SYSTEM: registro profesional (B2) + caso sin-memoria (B3).
+t('SYSTEM (B2): registro profesional, sin muletillas playeras ("qué onda")', /REGISTRO PROFESIONAL/.test(SYSTEM) && /qué onda/.test(SYSTEM));
+t('SYSTEM (B3): sin memoria → "no tengo registro de charlas anteriores"', /no tengo registro de charlas anteriores, contame de nuevo/.test(SYSTEM) && /NUNCA digas que sos "un asistente nuevo"/.test(SYSTEM));
+
 // --- AJUSTE: strip robusto de tokens de botón en la prosa ---
 t('limpia [Cambiar mi plan] de la prosa', limpiarBotonesDelTexto('Te conviene el Familiar. [Cambiar mi plan]') === 'Te conviene el Familiar.');
 t('NO deja frase colgada: "hacé clic en [X]"', limpiarBotonesDelTexto('Podés cambiar tu plan haciendo clic en [Cambiar mi plan].') === 'Podés cambiar tu plan.');
