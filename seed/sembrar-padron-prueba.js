@@ -52,9 +52,9 @@ function genCandidato() {
   return { apellido, nombre, sexo: fem ? 'F' : 'M', dni, calle, altura, direccion, telefono, fechaNacimiento: `${anio}-${mes}-${dia}`, planId: pick(PLANES) };
 }
 const CANDS = Array.from({ length: 4 }, genCandidato);
-// Coherencia edad↔plan: plan-joven es "hasta 40 años". Si un joven quedó >40, se ajusta SOLO el año
+// Coherencia edad↔plan: plan-joven es "hasta 30 años". Si un joven quedó >30, se ajusta SOLO el año
 // (menor toque, determinista) para que cierre; el resto de los datos queda idéntico.
-CANDS.forEach(c => { if (c.planId === 'plan-joven' && (2026 - parseInt(c.fechaNacimiento.slice(0, 4), 10)) > 40) c.fechaNacimiento = '1992' + c.fechaNacimiento.slice(4); });
+CANDS.forEach(c => { if (c.planId === 'plan-joven' && (2026 - parseInt(c.fechaNacimiento.slice(0, 4), 10)) > 30) c.fechaNacimiento = '2000' + c.fechaNacimiento.slice(4); });
 
 // ---- Réplica EXACTA del motor geo del cliente (igual que backfill-geo-personas.js) ----
 const geoStripAccents = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');

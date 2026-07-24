@@ -1919,7 +1919,7 @@ function iaAccion(accion){
    enriquecido (estado 'afiliacion_en_proceso'); la activación real la hace el admin (A5). Catálogo curado client-side
    (espeja el server; los docs de planes no traen elegibilidad). Área Protegida/Corporativo NO son de persona → fuera. */
 const PLANES_COMERCIALES = [
-  { key:'joven',    nombre:'Plan Joven',    para:'Individual, hasta 40 años', precio:20000, maxEdad:40, incluye:['Emergencias 24hs','Consultas por videollamada'] },
+  { key:'joven',    nombre:'Plan Joven',    para:'Individual, hasta 30 años', precio:20000, maxEdad:30, incluye:['Emergencias 24hs','Consultas por videollamada'] },
   { key:'familiar', nombre:'Plan Familiar', para:'Toda la familia, todas las edades', base:40000, adicional:10000, baseIntegrantes:2, incluye:['Emergencias 24hs','Consultas por videollamada','Chequeo semanal'] },
   { key:'senior',   nombre:'Plan Senior',   para:'Adultos mayores', precio:60000, incluye:['Emergencias 24hs','Consultas por videollamada'] },
 ];
@@ -1935,7 +1935,7 @@ function abrirPuente(planKey){
   // prospecto PUEDE autocomprar igual — el checkout es el camino principal; completarlo pisa el estado de asesor.
   if(est==='afiliacion_en_proceso'){ set({ view:'prospecto' }); return; }
   try{ if(window.Callejero) Callejero.cargar(); }catch(_){} // lazy: precarga el callejero de Pergamino para el datalist
-  S.puente={ step:'selector', planKey:planKey||'', integrantes:2, datos:{ fechaNac:'', domicilio:'' }, grupo:[], err:'', busy:false };
+  S.puente={ step:'selector', planKey:planKey||'', integrantes:2, datos:{ fechaNac:'', calle:'', altura:'', pisoDepto:'' }, grupo:[], err:'', busy:false };
   ajustarGrupo();
   S.view='puente'; render(); navPush();
 }
@@ -1943,9 +1943,17 @@ function abrirPuente(planKey){
 function ajustarGrupo(){
   const P=S.puente; const n=(P.planKey==='familiar')?Math.max(0,P.integrantes-1):0;
   if(!Array.isArray(P.grupo)) P.grupo=[];
-  while(P.grupo.length<n) P.grupo.push({ nombre:'', dni:'', fechaNac:'', vinculo:'', comparte:true, domicilio:'' });
+  while(P.grupo.length<n) P.grupo.push({ nombre:'', dni:'', fechaNac:'', vinculo:'', comparte:true, calle:'', altura:'', pisoDepto:'' });
   if(P.grupo.length>n) P.grupo=P.grupo.slice(0,n);
 }
+// Domicilio de despacho a partir de CALLE + ALTURA (+ piso/depto opcional). Reusa el MISMO núcleo del callejero
+// armando "calle altura" (sin cambiar la normalización). altura = numérica; calleId del callejero; pisoDepto texto libre.
+function puenteDomObj(calle, alturaRaw, pisoDepto){
+  const c=String(calle||'').trim(); const a=parseInt(String(alturaRaw||'').replace(/\D/g,''),10)||0;
+  const r=(window.Callejero&&c&&a>0)?Callejero.resolver(c+' '+a):{calleId:null,altura:null};
+  return { texto:(c+(a>0?(' '+a):'')).trim(), calleId:r.calleId, altura:a>0?a:null, pisoDepto:String(pisoDepto||'').trim().slice(0,60) };
+}
+const domValido=(o)=> !!(o && o.calleId && o.altura>0);
 function puenteCerrar(){ S.puente=null; S.view='prospecto'; render(); }
 function puenteSel(k){ S.puente.planKey=k; S.puente.err=''; ajustarGrupo(); render(); }
 function puenteInteg(delta){ S.puente.integrantes=Math.max(2,Math.min(12,(S.puente.integrantes||2)+delta)); ajustarGrupo(); render(); }
@@ -1955,13 +1963,13 @@ function puenteIntegDato(i,k,v){ if(S.puente.grupo[i]) S.puente.grupo[i][k]=v; }
 function puenteIntegComparte(i,checked){ if(S.puente.grupo[i]){ S.puente.grupo[i].comparte=checked; render(); } } // muestra/oculta su domicilio propio
 async function puentePagar(){
   const P=S.puente; if(P.busy) return; P.busy=true; P.err=''; render();
-  // Integrantes: solo los campos que el server necesita; domicilio propio {texto,calleId,altura} si NO comparte.
+  // Integrantes: solo los campos que el server necesita; domicilio propio {texto,calleId,altura,pisoDepto} si NO comparte.
   const grupo=(P.grupo||[]).map(m=>{ const o={ nombre:m.nombre, dni:m.dni, fechaNacimiento:m.fechaNac, vinculo:m.vinculo, comparteDomicilio:!!m.comparte };
-    if(!m.comparte){ const r=(window.Callejero?Callejero.resolver(m.domicilio):{calleId:null,altura:null}); o.domicilio={ texto:m.domicilio, calleId:r.calleId, altura:r.altura }; } return o; });
-  const rt=(window.Callejero?Callejero.resolver(P.datos.domicilio):{calleId:null,altura:null});
+    if(!m.comparte){ o.domicilio=puenteDomObj(m.calle,m.altura,m.pisoDepto); } return o; });
+  const g=P.datos;
   try{
-    await fnsCall('checkoutAfiliacion', { planKey:P.planKey, integrantes:P.integrantes, fechaNacimiento:P.datos.fechaNac,
-      domicilio:{ texto:P.datos.domicilio, calleId:rt.calleId, altura:rt.altura }, grupo });
+    await fnsCall('checkoutAfiliacion', { planKey:P.planKey, integrantes:P.integrantes, fechaNacimiento:g.fechaNac,
+      domicilio:puenteDomObj(g.calle,g.altura,g.pisoDepto), grupo });
     if(S.prospecto) S.prospecto.estado='afiliacion_en_proceso'; // la home ya muestra "Afiliación en proceso ✓"
     P.step='ok'; P.busy=false; render();
   }catch(e){ P.busy=false; P.err=errCF(e,'No se pudo completar. Probá de nuevo.'); render(); }
@@ -2031,6 +2039,12 @@ function puenteView(){
     const opts=(window.Callejero?Callejero.opciones():[]).map(c=>`<option value="${esc(c)}"></option>`).join('');
     const pre=[['Nombre',pr.nombre],['DNI',pr.dni],['Teléfono',pr.telefono],['Email',pr.email]].filter(r=>r[1]).map(r=>`<div class="row"><span class="rl">${r[0]}</span><span class="rv">${esc(r[1])}</span></div>`).join('');
     const domHint=`<div style="font-size:.7rem;color:var(--gris);margin-top:.2rem">Es adonde iría la ambulancia — debe ser una dirección de Pergamino.</div>`;
+    // Domicilio en 3 campos: CALLE (datalist del callejero) + ALTURA (numérica) + PISO/DEPTO (opcional). `oi(k)` = expresión oninput.
+    const domFields=(m,oi)=>`<div class="field"><label>Calle</label><input type="text" list="calles-pgm" placeholder="Nombre de la calle" value="${esc(m.calle)}" oninput="${oi('calle')}"></div>
+      <div style="display:flex;gap:.5rem">
+        <div class="field" style="flex:1"><label>Altura</label><input type="text" inputmode="numeric" placeholder="N°" value="${esc(m.altura)}" oninput="${oi('altura')}"></div>
+        <div class="field" style="flex:1.4"><label>Piso/Depto <span style="color:var(--gris);font-weight:400">(opcional)</span></label><input type="text" placeholder="Ej. 2°B / timbre" value="${esc(m.pisoDepto)}" oninput="${oi('pisoDepto')}"></div>
+      </div>${domHint}`;
     const fichas=(P.planKey==='familiar')?(P.grupo||[]).map((m,i)=>`
       <div class="card" style="padding:.8rem 1rem;margin-bottom:.7rem">
         <div style="font-weight:800;margin-bottom:.45rem">Integrante ${i+2}</div>
@@ -2039,13 +2053,14 @@ function puenteView(){
         <div class="field"><label>Fecha de nacimiento</label><input type="date" value="${esc(m.fechaNac)}" oninput="puenteIntegDato(${i},'fechaNac',this.value)"></div>
         <div class="field"><label>Vínculo</label><select onchange="puenteIntegDato(${i},'vinculo',this.value)"><option value="">Elegí…</option>${VINCULOS.map(v=>`<option ${m.vinculo===v?'selected':''}>${v}</option>`).join('')}</select></div>
         <label style="display:flex;align-items:flex-start;gap:.5rem;font-size:.82rem;margin:.2rem 0 ${m.comparte?'0':'.5rem'};cursor:pointer"><input type="checkbox" ${m.comparte?'checked':''} onchange="puenteIntegComparte(${i},this.checked)" style="margin-top:.15rem">Comparte los datos del titular (domicilio y contacto)</label>
-        ${m.comparte?'':`<div class="field"><label>Domicilio de este integrante</label><input type="text" list="calles-pgm" placeholder="Calle y número (Pergamino)" value="${esc(m.domicilio)}" oninput="puenteIntegDato(${i},'domicilio',this.value)">${domHint}</div>`}
+        ${m.comparte?'':`<div style="font-weight:700;font-size:.82rem;margin:.2rem 0 .3rem">Domicilio de este integrante</div>${domFields(m,(k)=>`puenteIntegDato(${i},'${k}',this.value)`)}`}
       </div>`).join(''):'';
     return `<div class="home" style="padding:1rem">${top('Tus datos')}
       ${errBox}
       <div class="card" style="padding:.8rem 1rem;margin-bottom:.8rem">${pre}<div class="row" style="border-top:1px solid var(--linea);margin-top:.3rem;padding-top:.4rem"><span class="rl" style="font-size:.72rem;color:var(--gris)">Ya tenemos estos datos de tu registro</span><span class="rv"></span></div></div>
       <div class="field"><label>Fecha de nacimiento</label><input id="pt-fn" type="date" value="${esc(g.fechaNac)}" oninput="puenteDato('fechaNac',this.value)"></div>
-      <div class="field"><label>Domicilio</label><input id="pt-dom" type="text" list="calles-pgm" placeholder="Calle y número (Pergamino)" value="${esc(g.domicilio)}" oninput="puenteDato('domicilio',this.value)">${domHint}</div>
+      <div style="font-weight:700;font-size:.82rem;margin:.3rem 0 .3rem" id="pt-dom">Domicilio</div>
+      ${domFields(g,(k)=>`puenteDato('${k}',this.value)`)}
       ${P.planKey==='familiar'?`<div style="font-weight:800;margin:1rem 0 .5rem">Integrantes del grupo (${(P.grupo||[]).length})</div>${fichas}`:''}
       <datalist id="calles-pgm">${opts}</datalist>
       <button class="btn-r" onclick="puenteDatosContinuar()" style="width:100%;margin-top:.4rem">Continuar al pago</button>
@@ -2069,15 +2084,14 @@ function puenteView(){
 function puenteDatosContinuar(){
   const P=S.puente, g=P.datos;
   const err=(m)=>{ P.err=m; render(); }; // NO cambia de paso → conserva todo lo tipeado (form no borra)
-  const dom=(d)=> (window.Callejero?Callejero.resolver(d||''):{calleId:null,altura:null}); // {calleId,altura}
-  const domOk=(r)=> !!(r.calleId && r.altura>0);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(g.fechaNac||'')){ return err('Ingresá tu fecha de nacimiento.'); }
-  const rt=dom(g.domicilio);
-  if(!(g.domicilio||'').trim()){ return err('Ingresá tu domicilio (es adonde iría la ambulancia).'); }
-  if(!domOk(rt)){ return err('Esa dirección no está en el callejero de Pergamino. Revisá la calle y el número — MEDICAR cubre Pergamino.'); }
-  // Elegibilidad Joven ≤40 del titular: no solo bloquea — ofrece la alternativa (Familiar / asesor).
+  // Domicilio del titular: calle + altura → callejero de Pergamino. pisoDepto es opcional (no se valida).
+  if(!String(g.calle||'').trim()){ return err('Ingresá la calle de tu domicilio.'); }
+  if(!(parseInt(String(g.altura||'').replace(/\D/g,''),10)>0)){ return err('Ingresá la altura (número) de tu domicilio.'); }
+  if(!domValido(puenteDomObj(g.calle,g.altura,g.pisoDepto))){ return err('Esa dirección no está en el callejero de Pergamino. Revisá la calle y la altura — MEDICAR cubre Pergamino.'); }
+  // Elegibilidad Joven ≤30 del titular: no solo bloquea — ofrece la alternativa (Familiar / asesor).
   const ed=edadDe(g.fechaNac);
-  if(P.planKey==='joven' && ed!=null && ed>40){ P.err='El Plan Joven es hasta 40 años. Podés elegir el Plan Familiar, o pedir que te contacte un asesor.'; P.step='selector'; render(); return; }
+  if(P.planKey==='joven' && ed!=null && ed>30){ P.err='El Plan Joven es hasta 30 años. Podés elegir el Plan Familiar, o pedir que te contacte un asesor.'; P.step='selector'; render(); return; }
   // INTEGRANTES (Familiar): datos completos + DNIs válidos, únicos y ≠ titular; domicilio propio válido si no comparte.
   const titDni=String((S.prospecto&&S.prospecto.dni)||'').replace(/\D/g,'');
   const dnis=[titDni];
@@ -2090,7 +2104,7 @@ function puenteDatosContinuar(){
       dnis.push(d);
       if(!/^\d{4}-\d{2}-\d{2}$/.test(m.fechaNac||'')) return err(n+': falta la fecha de nacimiento.');
       if(!(m.vinculo||'').trim()) return err(n+': elegí el vínculo.');
-      if(!m.comparte && !domOk(dom(m.domicilio))) return err(n+': el domicilio no está en el callejero de Pergamino.');
+      if(!m.comparte && !domValido(puenteDomObj(m.calle,m.altura,m.pisoDepto))) return err(n+': el domicilio no está en el callejero de Pergamino (revisá calle y altura).');
     }
   }
   puentePaso('pago');

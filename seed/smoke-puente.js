@@ -20,11 +20,15 @@ t('Familiar clamp mínimo 2 (integrantes<2 no baja de $40.000)', totalPlan('fami
 t('Joven = $20.000 fijo (1 persona)', totalPlan('joven', 5).total === 20000 && totalPlan('joven', 5).n === 1);
 t('Senior = $60.000 fijo', totalPlan('senior', 3).total === 60000);
 
-// --- Elegibilidad Joven ≤40 (edad desde fecha de nacimiento) ---
+// --- Elegibilidad Joven ≤30 (edad calculada a la fecha del checkout, cumplidos) ---
 const hoy = new Date(); const y = hoy.getFullYear();
-t('edadDe: ~30 años → 30', edadDe((y - 30) + '-01-01') === 30);
-t('edadDe: >40 detecta la inelegibilidad', edadDe((y - 45) + '-06-15') > 40);
+t('edadDe: nacido hace 29 años → 29 (Joven PASA)', edadDe((y - 29) + '-01-01') === 29 && 29 <= 30);
+t('edadDe: nacido hace 31 años → 31 (Joven RECHAZA, >30)', edadDe((y - 31) + '-01-01') === 31 && 31 > 30);
+t('edadDe: cumpleaños aún no llegado no suma el año (cumplidos)', edadDe((y - 30) + '-12-31') === 29);
 t('edadDe: fecha vacía/ inválida → null (no bloquea de más)', edadDe('') === null && edadDe('xx') === null);
+// El límite Joven es 30 en TODOS lados (cliente, catálogo, server).
+t('CLIENTE: bloqueo Joven usa ed>30 (no 40) + mensaje "hasta 30 años"', /planKey==='joven' && ed!=null && ed>30/.test(html) && /El Plan Joven es hasta 30 años/.test(html));
+t('CLIENTE: tarjeta Joven "Individual, hasta 30 años" + maxEdad:30', /Individual, hasta 30 años/.test(html) && /maxEdad:30/.test(html));
 
 // --- Empalme chat: detección del plan recomendado ---
 t('planDeTexto: "te conviene el Plan Familiar" → familiar', planDeTexto('Para tu caso te conviene el Plan Familiar.') === 'familiar');
@@ -51,20 +55,30 @@ t('checkout pide fecha de nacimiento + domicilio (sin localidad libre)', /pt-fn/
 t('carga el módulo callejero.js compartido', /<script src="\.\.\/callejero\.js"><\/script>/.test(html));
 t('abrirPuente precarga el callejero (lazy)', /if\(window\.Callejero\) Callejero\.cargar\(\);/.test(html));
 t('domicilio con datalist del callejero (calles-pgm)', /list="calles-pgm"/.test(html) && /<datalist id="calles-pgm">/.test(html));
-t('valida el domicilio con Callejero.resolver (calleId + altura>0)', /Callejero\.resolver/.test(html) && /r\.calleId && r\.altura>0/.test(html));
+t('domicilio EN 3 CAMPOS: Calle + Altura + Piso/Depto (opcional)', /<label>Calle<\/label>/.test(html) && /<label>Altura<\/label>/.test(html) && /Piso\/Depto <span[^>]*>\(opcional\)/.test(html));
+t('arma "calle altura" con el MISMO núcleo (Callejero.resolver en puenteDomObj)', /function puenteDomObj[\s\S]{0,220}Callejero\.resolver\(c\+' '\+a\)/.test(html));
+t('valida domicilio: calleId≠null && altura>0 (domValido)', /const domValido=\(o\)=> !!\(o && o\.calleId && o\.altura>0\)/.test(html));
+t('altura obligatoria numérica >0 (titular)', /parseInt\(String\(g\.altura\|\|''\)\.replace\(\/\\D\/g,''\),10\)>0/.test(html));
 t('domicilio fuera del callejero → aviso "no está en el callejero de Pergamino"', /no está en el callejero de Pergamino/.test(html));
-t('persiste domicilio {texto,calleId,altura} al pagar', /domicilio:\{ texto:P\.datos\.domicilio, calleId:rt\.calleId, altura:rt\.altura \}/.test(html));
+t('persiste domicilio {texto,calleId,altura,pisoDepto} al pagar', /domicilio:puenteDomObj\(g\.calle,g\.altura,g\.pisoDepto\)/.test(html) && /pisoDepto:String\(pisoDepto\|\|''\)\.trim\(\)\.slice\(0,60\)/.test(html));
+t('pisoDepto es opcional (texto libre, no lo valida el callejero)', /Piso\/Depto/.test(html) && /puenteDomObj[\s\S]{0,220}pisoDepto/.test(html));
 
 // --- INTEGRANTES del grupo (Familiar) ---
 t('Familiar: fichas de integrantes (N-1) vía ajustarGrupo', /function ajustarGrupo[\s\S]{0,200}planKey==='familiar'\)\?Math\.max\(0,P\.integrantes-1\)/.test(html));
 t('stepper ajusta fichas sin borrar (ajustarGrupo preserva y recorta)', /while\(P\.grupo\.length<n\) P\.grupo\.push/.test(html) && /P\.grupo=P\.grupo\.slice\(0,n\)/.test(html));
 t('checkbox "Comparte los datos del titular" default marcado', /comparte:true/.test(html) && /Comparte los datos del titular/.test(html));
-t('desmarcado → pide su propio domicilio con el callejero', /Domicilio de este integrante[\s\S]{0,80}list="calles-pgm"/.test(html));
+t('desmarcado → pide su propio domicilio con el callejero (3 campos)', /Domicilio de este integrante[\s\S]{0,120}domFields\(m,\(k\)=>`puenteIntegDato/.test(html));
 t('integrante pide nombre+DNI+fecha nac+vínculo (VINCULOS)', /const VINCULOS=\['Cónyuge'/.test(html) && /puenteIntegDato\(\$\{i\},'vinculo'/.test(html));
 t('SIN teléfono por integrante (el del titular cubre al grupo)', !/puenteIntegDato\(\$\{i\},'telefono'/.test(html));
 t('validación: DNI de integrante único y ≠ titular', /ese DNI ya está cargado \(no puede repetirse\)/.test(html) && /titDni=String\(\(S\.prospecto&&S\.prospecto\.dni\)/.test(html));
 t('Joven/Senior: sin sección de integrantes (solo familiar)', /P\.planKey==='familiar'\?`<div style="font-weight:800;margin:1rem 0 \.5rem">Integrantes del grupo/.test(html));
 t('paga con grupo[] (comparteDomicilio o domicilio propio)', /grupo=\(P\.grupo\|\|\[\]\)\.map/.test(html) && /comparteDomicilio:!!m\.comparte/.test(html));
+
+// --- SERVER (functions/index.js): límite Joven=30 + pisoDepto persistido ---
+const fn = require('fs').readFileSync(require('path').resolve(__dirname, '../functions/index.js'), 'utf8');
+t('SERVER: PLANES_CHECKOUT joven maxEdad:30', /joven: \{ nombre: 'Plan Joven', base: 20000, maxEdad: 30 \}/.test(fn));
+t('SERVER: enforcement edad > p.maxEdad (30) para Joven', /d\.planKey === 'joven' && edad != null && edad > p\.maxEdad/.test(fn) && /El Plan Joven es hasta 30 años/.test(fn));
+t('SERVER: domCanon persiste pisoDepto (cap 60) + exige calleId+altura>0', /pisoDepto = String\(o\.pisoDepto \|\| ''\)\.trim\(\)\.slice\(0, 60\)/.test(fn) && /texto && calleId && altura > 0/.test(fn));
 
 console.log(`\n${fail ? '✗' : '✓'} smoke-puente: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);

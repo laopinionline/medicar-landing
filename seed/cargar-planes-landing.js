@@ -27,7 +27,7 @@ const PLANES = [
   {
     id: 'plan-joven', orden: 1, destacado: false,
     nombre: 'Plan Joven',
-    descripcion: 'Cobertura individual para personas de hasta 40 años.',
+    descripcion: 'Cobertura individual para personas de hasta 30 años.',
     precio: 20000, modeloPrecio: 'fijo',
     ctaLanding: 'Quiero afiliarme',
     itemsLanding: ['Cobertura individual', 'Atención domiciliaria 24hs', 'Médico de guardia permanente', 'Unidad móvil equipada', 'Línea directa 443044'],

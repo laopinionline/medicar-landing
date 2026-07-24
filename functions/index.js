@@ -1700,12 +1700,12 @@ exports.solicitarAfiliacion = onCall(async (request) => {
 /* PUENTE DE COMPRA — checkoutAfiliacion: el prospecto eligió plan y "pagó" (SIMULADO, client-side). La CF persiste el
    LEAD ENRIQUECIDO (plan/integrantes/total recomputado server-side + datos de alta) y deja estado 'afiliacion_en_proceso'.
    A5: la activación REAL la hace el admin desde este lead (el pago simulado NO da de alta al socio). */
-const PLANES_CHECKOUT = { joven: { nombre: 'Plan Joven', base: 20000, maxEdad: 40 }, familiar: { nombre: 'Plan Familiar', base: 40000, adicional: 10000, baseIntegrantes: 2 }, senior: { nombre: 'Plan Senior', base: 60000 } };
+const PLANES_CHECKOUT = { joven: { nombre: 'Plan Joven', base: 20000, maxEdad: 30 }, familiar: { nombre: 'Plan Familiar', base: 40000, adicional: 10000, baseIntegrantes: 2 }, senior: { nombre: 'Plan Senior', base: 60000 } };
 const edadDeISO = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '')); if (!m) return null; const h = new Date(); let e = h.getFullYear() - (+m[1]); if (((h.getMonth() + 1) * 100 + h.getDate()) < ((+m[2]) * 100 + (+m[3]))) e--; return e; };
 const ISO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 // Domicilio de despacho: exige calleId (canónico del callejero) + altura>0 + texto. NO re-resuelve el callejero server-side
 // (vive en el cliente); valida PRESENCIA — sin domicilio válido NO hay pago. (Con pasarela REAL habrá que endurecer.)
-const domCanon = (o) => { o = o || {}; const texto = String(o.texto || '').trim().slice(0, 200); const calleId = String(o.calleId || '').trim().slice(0, 120); const altura = Number(o.altura) || 0; return (texto && calleId && altura > 0) ? { texto, calleId, altura } : null; };
+const domCanon = (o) => { o = o || {}; const texto = String(o.texto || '').trim().slice(0, 200); const calleId = String(o.calleId || '').trim().slice(0, 120); const altura = Number(o.altura) || 0; const pisoDepto = String(o.pisoDepto || '').trim().slice(0, 60); return (texto && calleId && altura > 0) ? { texto, calleId, altura, pisoDepto } : null; };
 exports.checkoutAfiliacion = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
   const ref = db.collection('prospectos').doc(request.auth.uid);
@@ -1719,7 +1719,7 @@ exports.checkoutAfiliacion = onCall(async (request) => {
   const fechaNacimiento = String(d.fechaNacimiento || '').slice(0, 10);
   if (!ISO_FECHA.test(fechaNacimiento)) throw new HttpsError('invalid-argument', 'Falta la fecha de nacimiento.');
   const edad = edadDeISO(fechaNacimiento);
-  if (d.planKey === 'joven' && edad != null && edad > 40) throw new HttpsError('failed-precondition', 'El Plan Joven es hasta 40 años.');
+  if (d.planKey === 'joven' && edad != null && edad > p.maxEdad) throw new HttpsError('failed-precondition', 'El Plan Joven es hasta 30 años.');
   // Domicilio del TITULAR (dato de despacho) — obligatorio y con calleId del callejero.
   const domTitular = domCanon(d.domicilio);
   if (!domTitular) throw new HttpsError('invalid-argument', 'El domicilio del titular debe estar en el callejero de Pergamino.');
