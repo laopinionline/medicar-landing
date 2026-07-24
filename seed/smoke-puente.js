@@ -45,7 +45,26 @@ t('Área Protegida / Corporativo NO están en el catálogo del selector', !/PLAN
 t('desglose visible "2 base + N adicionales"', /2 base \+ \$\{Math\.max\(0,P\.integrantes-2\)\} adicionales|2 base \+ .* adicionales/.test(html));
 t('post-pago: confirmación "¡Bienvenido a MEDICAR!"', /¡Bienvenido a MEDICAR!/.test(html) && /Estamos activando tu cobertura/.test(html));
 t('asesor: camino secundario "Prefiero que me contacte un asesor"', /Prefiero que me contacte un asesor/.test(html));
-t('checkout pide fecha de nacimiento + domicilio + localidad', /pt-fn/.test(html) && /pt-dom/.test(html) && /pt-loc/.test(html));
+t('checkout pide fecha de nacimiento + domicilio (sin localidad libre)', /pt-fn/.test(html) && /pt-dom/.test(html) && !/pt-loc/.test(html));
+
+// --- DOMICILIO con CALLEJERO (Pergamino) ---
+t('carga el módulo callejero.js compartido', /<script src="\.\.\/callejero\.js"><\/script>/.test(html));
+t('abrirPuente precarga el callejero (lazy)', /if\(window\.Callejero\) Callejero\.cargar\(\);/.test(html));
+t('domicilio con datalist del callejero (calles-pgm)', /list="calles-pgm"/.test(html) && /<datalist id="calles-pgm">/.test(html));
+t('valida el domicilio con Callejero.resolver (calleId + altura>0)', /Callejero\.resolver/.test(html) && /r\.calleId && r\.altura>0/.test(html));
+t('domicilio fuera del callejero → aviso "no está en el callejero de Pergamino"', /no está en el callejero de Pergamino/.test(html));
+t('persiste domicilio {texto,calleId,altura} al pagar', /domicilio:\{ texto:P\.datos\.domicilio, calleId:rt\.calleId, altura:rt\.altura \}/.test(html));
+
+// --- INTEGRANTES del grupo (Familiar) ---
+t('Familiar: fichas de integrantes (N-1) vía ajustarGrupo', /function ajustarGrupo[\s\S]{0,200}planKey==='familiar'\)\?Math\.max\(0,P\.integrantes-1\)/.test(html));
+t('stepper ajusta fichas sin borrar (ajustarGrupo preserva y recorta)', /while\(P\.grupo\.length<n\) P\.grupo\.push/.test(html) && /P\.grupo=P\.grupo\.slice\(0,n\)/.test(html));
+t('checkbox "Comparte los datos del titular" default marcado', /comparte:true/.test(html) && /Comparte los datos del titular/.test(html));
+t('desmarcado → pide su propio domicilio con el callejero', /Domicilio de este integrante[\s\S]{0,80}list="calles-pgm"/.test(html));
+t('integrante pide nombre+DNI+fecha nac+vínculo (VINCULOS)', /const VINCULOS=\['Cónyuge'/.test(html) && /puenteIntegDato\(\$\{i\},'vinculo'/.test(html));
+t('SIN teléfono por integrante (el del titular cubre al grupo)', !/puenteIntegDato\(\$\{i\},'telefono'/.test(html));
+t('validación: DNI de integrante único y ≠ titular', /ese DNI ya está cargado \(no puede repetirse\)/.test(html) && /titDni=String\(\(S\.prospecto&&S\.prospecto\.dni\)/.test(html));
+t('Joven/Senior: sin sección de integrantes (solo familiar)', /P\.planKey==='familiar'\?`<div style="font-weight:800;margin:1rem 0 \.5rem">Integrantes del grupo/.test(html));
+t('paga con grupo[] (comparteDomicilio o domicilio propio)', /grupo=\(P\.grupo\|\|\[\]\)\.map/.test(html) && /comparteDomicilio:!!m\.comparte/.test(html));
 
 console.log(`\n${fail ? '✗' : '✓'} smoke-puente: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);
