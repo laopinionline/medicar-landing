@@ -22,7 +22,9 @@ PROSPECTO vs SOCIO (REGLA ESPEJO — mirá el contexto):
 - Si el contexto trae el bloque TU CUENTA, hablás con un SOCIO: YA está afiliado. JAMÁS le ofrezcas afiliarse ni le "vendas" un plan como si no lo tuviera, NUNCA cierres con [Quiero afiliarme]. Como mucho, si de verdad le conviene otro plan, [Cambiar mi plan]. (Venderle a un socio es un error grave.)
 - Si el contexto dice que hablás con un PROSPECTO (todavía no es socio), SÍ podés OFRECER AFILIARSE, con naturalidad y SOLO cuando el tema lo habilita: preguntó por un plan/precio/cobertura, o consultó algo de salud y el mientras-tanto da pie ("esto mismo, con un médico de MEDICAR, lo tenés con el Plan Joven a $20.000"). No en cada mensaje. Cerrás con [Quiero afiliarme].
 - A un PROSPECTO que pregunta por "mi cuota / mis turnos / mi plan / mis facturas": decile con claridad que TODAVÍA NO es socio (no tiene cuenta ni esos datos) y ofrecele afiliarse. NUNCA inventes datos de cuenta.
-- La urgencia es de TODOS: ante una bandera roja, el 443044 va igual sea socio o prospecto.
+- 🔴 SOCIO con URGENCIA (bandera roja): que llame YA al 443044 (su guardia, cubierta).
+- 🔴 PROSPECTO con URGENCIA (bandera roja): el 443044 es de SOCIOS — NO se lo ofrezcas como vía. Decile que busque atención médica urgente YA en la GUARDIA u HOSPITAL más cercano (o emergencias públicas, 107). Sumá UNA sola línea de que la cobertura de emergencias 24hs de MEDICAR es un beneficio de afiliarse. NADA más de venta durante el síntoma: la urgencia primero.
+- ENCUADRE (prospecto): el chat es un servicio abierto, NO una "prueba", "demo", "versión gratis" ni "muestra de lo que tendrías" — NUNCA uses ese lenguaje. La oferta de afiliación aparece SOLO cuando el tema la trae (planes, cobertura, el gate de emergencias) o cuando el usuario la pide; NUNCA como upsell permanente.
 
 *** PRIORIDAD ABSOLUTA (por encima de todo lo demás) ***
 Si en el mensaje aparece CUALQUIER señal de alarma —desmayo o pérdida de conocimiento, dolor de pecho, falta de aire, sangrado, convulsión, dolor intenso o súbito, problema de habla/cara/fuerza— AUNQUE sea mencionado al pasar, en broma, o diga que "ya se le pasó" o "ya estoy bien": tu respuesta DEBE (1) responder lo otro que haya preguntado si podés, (2) decir con CLARIDAD y FIRMEZA que eso conviene que lo vea un médico AHORA, y (3) TERMINAR con la etiqueta [[ESCALAR]] en una línea aparte. Un desmayo SIEMPRE se escala, aunque ya haya pasado. Ante una urgencia real NO aflojes: esto no se negocia.
@@ -77,7 +79,7 @@ function buildContexto(d) {
     const memBloque = bloqueMemoria(d.memoria);
     if (memBloque) P.push(memBloque);
     P.push(CATALOGO_PLANES);
-    P.push('DATOS MEDICAR: Emergencias ' + (d.tel || '443044') + ' (para TODOS, socio o no). Afiliación desde [Quiero afiliarme].');
+    P.push('DATOS MEDICAR: MEDICAR es una empresa de emergencias médicas de Pergamino (su línea 443044 es un dato INSTITUCIONAL de qué es MEDICAR, NO una vía que le ofrezcas a un no socio). La guardia de emergencias 24hs es un BENEFICIO de los socios; el prospecto todavía NO la tiene.');
     return P.join('\n');
   }
   const L = [];
@@ -157,6 +159,25 @@ function bloqueMemoria(mem) {
   return ['DE CHARLAS ANTERIORES (memoria de conversaciones pasadas — es SECUNDARIO: si algo acá contradice TU CUENTA de arriba, MANDA TU CUENTA. Usalo solo para retomar con naturalidad, no lo recites entero):', ...L].join('\n');
 }
 
+// GATE DE EMERGENCIAS (prospecto) — determinista, no depende del modelo: el 443044 NO es vía para un no socio. Reemplaza
+// el CTA telefónico por urgencia pública y saca el número residual (la guía real la da el banner del cliente). Institucional
+// ("MEDICAR, 443044, es…") también se limpia: la garantía es que NUNCA aparezca el 443044 como algo a marcar.
+function gateProspectoEmergencia(texto) {
+  let t = String(texto || '');
+  t = t.replace(/(?:llam[aá]\w*|marc[aá]\w*|comunic\w+|contact\w+|and[aá]|acud[ií]\w*)\s*(?:ya\s+|de inmediato\s+)?(?:al\s+|a\s+)?443044/gi, 'buscá atención médica urgente en la guardia u hospital más cercano');
+  t = t.replace(/\bal\s+443044\b/gi, 'a una guardia u hospital').replace(/\b443044\b/g, '');
+  return t.replace(/\s{2,}/g, ' ').replace(/\s+([.,;:!?])/g, '$1').replace(/([.,;:!?])\1+/g, '$1').trim();
+}
+
+// REGRESIÓN SAGRADA (socio) — determinista: elimina las FRASES que OFRECEN afiliación a quien YA es socio (el modelo a
+// veces desliza "podés afiliarte"). Conserva las que DECLINAN ("ya sos socio, no hace falta") y todo lo demás (plan/cuenta).
+function quitarOfertaAfiliacionSocio(texto) {
+  // Para quien YA es socio, CUALQUIER frase que mencione afiliarse sobra — salvo la que DECLINA ("ya sos socio").
+  const menciona = /afili|hacerte socio|asociarte|sumate a medicar|hacete socio/i;
+  const declina = /ya (sos|estás|es) (socio|afiliad)|no (necesit|hace falta|hace)\w*[^.!?\n]{0,20}afiliar/i;
+  return String(texto || '').split(/(?<=[.!?])\s+/).filter((f) => !(menciona.test(f) && !declina.test(f))).join(' ').replace(/\s{2,}/g, ' ').replace(/\s+([.,;:!?])/g, '$1').trim();
+}
+
 // Quita la etiqueta de control [[ESCALAR]] del texto visible y reporta si estaba.
 function stripEscalar(texto) {
   const tag = /\[\[ESCALAR\]\]/g;
@@ -220,4 +241,4 @@ function voseoAr(texto) {
   return t;
 }
 
-module.exports = { SYSTEM, buildContexto, bloqueMemoria, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr, BOTONES };
+module.exports = { SYSTEM, buildContexto, bloqueMemoria, gateProspectoEmergencia, quitarOfertaAfiliacionSocio, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr, BOTONES };
