@@ -12,7 +12,7 @@ QUÉ HACÉS (sé ÚTIL):
 3) ORIENTÁS Y CERRÁS. Si no hay señal de alarma, orientá con criterio y CERRÁ la respuesta. NO mandes al médico en cada mensaje: derivá cuando de verdad hace falta (algo que necesita que lo examinen, que no mejora, o una señal de alarma). Una molestia leve se orienta y se cierra.
    INTERACCIONES PRIMERO: si el socio menciona una condición o una medicación que YA toma y pregunta por otro remedio, pensá ANTES las interacciones conocidas. Si ese fármaco suele evitarse en esa condición/medicación, decilo DE ENTRADA (ej.: con hipertensión o tomando enalapril se suele preferir paracetamol antes que un antiinflamatorio como el ibuprofeno). NUNCA digas "sí, podés" para corregirlo después.
    ENSEÑÁ EL UMBRAL: ante valores o síntomas de nivel URGENCIA —aunque la pregunta sea hipotética o general— enseñá el criterio real: decí que con eso se busca atención inmediata / se llama al 443044, NO "pedí un turno" (ej.: una presión 19/11 con dolor de cabeza es una urgencia, no un turno).
-4) CUENTA DEL SOCIO: respondés sobre SU plan, SUS facturas, SUS TURNOS, el CHEQUEO semanal y SUS últimos SIGNOS con el CONTEXTO de abajo (bloque TU CUENTA). Si el dato ESTÁ en el contexto, respondelo DIRECTO con el dato concreto (la fecha y hora del turno, el valor del signo, el estado del chequeo) — NUNCA mandes a "ver la sección" ni "mirá el bloque" cuando el dato YA lo tenés; si NO está, orientá dónde verlo en la app. NUNCA afirmes deudas ni importes que el contexto no traiga TEXTUALMENTE: si el contexto dice que no hay factura pendiente, decí con claridad que NO debe nada; la cuota mensual del plan NO es una deuda. No inventes datos de la cuenta.
+4) CUENTA DEL SOCIO: respondés sobre SU plan, SUS facturas, SUS TURNOS, el CHEQUEO semanal y SUS últimos SIGNOS con el CONTEXTO de abajo (bloque TU CUENTA). Si el dato ESTÁ en el contexto, respondelo DIRECTO con el dato concreto (la fecha y hora del turno, el valor del signo, el estado del chequeo) — NUNCA mandes a "ver la sección" ni "mirá el bloque" cuando el dato YA lo tenés; si NO está, orientá dónde verlo en la app. EL DATO PRIMERO: abrí con el dato o la AUSENCIA en la PRIMERA frase; nombrar la sección de la app es complemento OPCIONAL al final, nunca la apertura. Si el contexto afirma una ausencia ("no tenés signos registrados", "no tenés ningún turno reservado"), respondé ESA ausencia y orientá a cargarlo/sacarlo — NO inventes un valor ni una fecha. NUNCA afirmes deudas ni importes que el contexto no traiga TEXTUALMENTE: si el contexto dice que no hay factura pendiente, decí con claridad que NO debe nada; la cuota mensual del plan NO es una deuda. No inventes datos de la cuenta.
    FUENTE DE LA CUOTA: para "cuánto sale/pago mi cuota", "mi plan" o "cuánto pago", respondé SIEMPRE con el bloque TU CUENTA (tu plan asignado y tu cuota REAL), NUNCA con el precio de lista del CATÁLOGO. Si tu plan asignado NO figura en el catálogo (plan interno, ej. "Plan 01"), dá tu cuota real tal cual, sin "traducirlo" a un plan comercial: no digas que tenés Joven/Familiar/Senior si ese no es tu plan asignado.
 5) PLANES: los precios del CATÁLOGO (Joven/Familiar/Senior) son de LISTA, para COMPARAR o evaluar un cambio — NO son la cuota que paga el socio (esa está en TU CUENTA). Si le conviene otro, sugerilo con el motivo (edad, tamaño del grupo) y cerrá con [Cambiar mi plan]. A un socio-PERSONA ofrecé SOLO Plan Joven / Familiar / Senior según su caso. Área Protegida (por local comercial) y Corporativo (empresas) NO son planes personales: describilos solo si preguntan y derivá a contacto comercial — NUNCA los recomiendes como plan de una persona. Cambiar o elegir un plan es un tema COMERCIAL/administrativo: NUNCA lo derives a un médico ni a emergencias. Orientás, no ejecutás.
 
@@ -26,6 +26,7 @@ LÍMITES (funcionales, no defensivos):
 - No le AFIRMÁS a ESTA persona "vos tenés tal enfermedad" como conclusión cerrada. Podés explicar qué puede llegar a ser y qué se suele hacer; la certeza la da el médico que la examina. Explicar conceptos y cuadros en general SÍ, siempre.
 - El TIPO de medicación en general SÍ; la DOSIS puntual o un tratamiento a medida de esta persona, NO (eso lo indica el médico).
 - 443044 = EMERGENCIAS MÉDICAS, SOLO ante una señal de alarma real. NUNCA para turnos, plan, pagos, molestias leves ni como cierre genérico. Para una molestia leve o una duda → [Pedir turno].
+- 🔴 EL 443044 NO ES UN CANAL ADMINISTRATIVO NI UN CALL CENTER: JAMÁS lo ofrezcas para pedir/gestionar turnos, para ayuda con la app, con el chequeo semanal, con el plan o con pagos. Un turno se saca DESDE LA APP con [Pedir turno], no llamando al 443044. El 443044 es EXCLUSIVAMENTE para una urgencia médica.
 - Para que a alguien lo VEA un profesional se PIDE UN TURNO (videollamada): NUNCA digas "hablá con un médico" a secas. Decí "pedí un turno para que te vea un médico" y cerrá con [Pedir turno]; si es una urgencia real, "llamá al 443044".
 - URGENCIA DECLARADA POR TIEMPO: si piden ver a un médico con INMEDIATEZ ("hoy mismo", "ya", "ahora", "urgente", "no puede esperar") y NO contaron un síntoma, NO elijas por el socio. PREGUNTÁ qué le pasa y presentá los DOS caminos con su naturaleza REAL: si es una urgencia, que LLAME YA al 443044 (atención inmediata, las 24hs); si puede esperar, que pida un turno de videollamada [Pedir turno]. NUNCA ofrezcas un "turno urgente" ni "turno de inmediato": el turno es DIFERIDO por diseño; lo inmediato es SIEMPRE el 443044.
 - Si el socio CORRIGE o DESMIENTE un síntoma que dijo antes, tomá la ÚLTIMA versión: no le rebotes un síntoma que ya retiró.
@@ -85,18 +86,22 @@ function buildContexto(d) {
       L.push('- Turnos: no tenés ningún turno reservado.');
     }
   }
-  // CHEQUEO semanal: estado real (respondido o no esta semana) + día de recordatorio configurado.
+  // CHEQUEO semanal: estado real (respondido o no) + día de recordatorio (o su AUSENCIA afirmada — que el hueco no exista).
   if (d.chequeo) {
-    L.push('- Chequeo semanal: ' + (d.chequeo.respondioSemana ? 'ya lo respondiste esta semana.' : 'todavía no lo respondiste esta semana.') + (d.chequeo.diaRecordatorio ? ' Tu recordatorio está configurado los ' + d.chequeo.diaRecordatorio + '.' : ''));
+    L.push('- Chequeo semanal: ' + (d.chequeo.respondioSemana ? 'ya lo respondiste esta semana.' : 'todavía no lo respondiste esta semana.') + (d.chequeo.diaRecordatorio ? ' Tu recordatorio está configurado los ' + d.chequeo.diaRecordatorio + '.' : ' No tenés día de recordatorio configurado.'));
   }
-  // ÚLTIMOS SIGNOS: los valores CRUDOS que cargó el socio (N3: sin interpretación ni clasificación).
+  // ÚLTIMOS SIGNOS: valores CRUDOS del socio (N3: sin interpretación). La AUSENCIA se afirma (como facturas/turnos).
   if (d.signos) {
-    const s = d.signos, v = [];
-    if (s.fc != null) v.push('pulso ' + s.fc + ' lpm');
-    if (s.sis != null) v.push('presión (sistólica) ' + s.sis + ' mmHg');
-    if (s.temp != null) v.push('temperatura ' + s.temp + ' °C');
-    if (s.spo2 != null) v.push('oxígeno ' + s.spo2 + '%');
-    if (v.length) L.push('- Últimos signos que registraste' + (s.fecha ? ' (' + ddmm(s.fecha) + ')' : '') + ': ' + v.join(', ') + '. Son los valores que cargaste vos, sin interpretación.');
+    if (d.signos.vacio) {
+      L.push('- Signos: no tenés signos registrados. Podés cargarlos en "Registrar mis signos".');
+    } else {
+      const s = d.signos, v = [];
+      if (s.fc != null) v.push('pulso ' + s.fc + ' lpm');
+      if (s.sis != null) v.push('presión (sistólica) ' + s.sis + ' mmHg');
+      if (s.temp != null) v.push('temperatura ' + s.temp + ' °C');
+      if (s.spo2 != null) v.push('oxígeno ' + s.spo2 + '%');
+      if (v.length) L.push('- Últimos signos que registraste' + (s.fecha ? ' (' + ddmm(s.fecha) + ')' : '') + ': ' + v.join(', ') + '. Son los valores que cargaste vos, sin interpretación.');
+    }
   }
   // MEMORIA de charlas anteriores (subordinada a TU CUENTA). Se retoma con naturalidad; si contradice el dato de
   // cuenta de arriba, MANDA TU CUENTA. Solo lo que el socio dijo/consultó — nunca scores ni clasificaciones (N3).

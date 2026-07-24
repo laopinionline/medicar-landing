@@ -68,6 +68,16 @@ t('sin signos: no aparece la línea de signos', !/Últimos signos/.test(ctxSinTu
 t('SYSTEM (B2): registro profesional, sin muletillas playeras ("qué onda")', /REGISTRO PROFESIONAL/.test(SYSTEM) && /qué onda/.test(SYSTEM));
 t('SYSTEM (B3): sin memoria → "no tengo registro de charlas anteriores"', /no tengo registro de charlas anteriores, contame de nuevo/.test(SYSTEM) && /NUNCA digas que sos "un asistente nuevo"/.test(SYSTEM));
 
+// --- AUSENCIA de signos afirmada + hueco de recordatorio + 443044 SOLO urgencias + dato-primero ---
+const ctxSinSignos = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', precio: 18000 }, factura: null, ultimaFactura: null, turnos: [], chequeo: { respondioSemana: false, diaRecordatorio: null }, signos: { vacio: true }, tel: '443044' });
+t('signos ausentes: afirma "no tenés signos registrados" + orienta a cargarlos', /Signos: no tenés signos registrados\. Podés cargarlos en "Registrar mis signos"/.test(ctxSinSignos));
+t('recordatorio sin configurar: afirma "No tenés día de recordatorio configurado"', /No tenés día de recordatorio configurado/.test(ctxSinSignos));
+t('signos CON datos NO dispara el texto de ausencia', !/no tenés signos registrados/.test(ctxFull));
+t('SYSTEM: 443044 NO es canal administrativo/call center', /EL 443044 NO ES UN CANAL ADMINISTRATIVO NI UN CALL CENTER/.test(SYSTEM) && /JAMÁS lo ofrezcas para pedir\/gestionar turnos/.test(SYSTEM));
+t('SYSTEM: turno se saca desde la app, no llamando al 443044', /Un turno se saca DESDE LA APP con \[Pedir turno\], no llamando al 443044/.test(SYSTEM));
+t('SYSTEM: EL DATO PRIMERO (dato/ausencia en la primera frase)', /EL DATO PRIMERO: abrí con el dato o la AUSENCIA en la PRIMERA frase/.test(SYSTEM));
+t('SYSTEM: ante ausencia responde la ausencia, no inventa valor', /Si el contexto afirma una ausencia.*NO inventes un valor ni una fecha/.test(SYSTEM));
+
 // --- AJUSTE: strip robusto de tokens de botón en la prosa ---
 t('limpia [Cambiar mi plan] de la prosa', limpiarBotonesDelTexto('Te conviene el Familiar. [Cambiar mi plan]') === 'Te conviene el Familiar.');
 t('NO deja frase colgada: "hacé clic en [X]"', limpiarBotonesDelTexto('Podés cambiar tu plan haciendo clic en [Cambiar mi plan].') === 'Podés cambiar tu plan.');

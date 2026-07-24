@@ -20,6 +20,8 @@ const contexto = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', prec
   turnos: [{ fecha: '2026-07-25', hora: '16:00', medico: 'Dra. Gómez' }], chequeo: { respondioSemana: false, diaRecordatorio: 'lunes' }, signos: { fecha: '2026-07-23', fc: 70, sis: 130, temp: 36.6, spo2: 97 }, tel: '443044' });
 // Contexto SIN deuda (todo pagado) para el caso testigo de facturación.
 const contextoPagada = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', precio: 18000 }, cubre: ['emergencias', 'urgencias', 'consultas'], factura: null, ultimaFactura: { nro: 'FC-2026-000010', estado: 'pagada' }, planes: PLANES, tel: '443044' });
+// Contexto VACÍO de operativo (0 turnos, 0 signos, chequeo no respondido sin día) — testigos de AUSENCIA afirmada + no-443044.
+const contextoVacio = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', precio: 18000 }, cubre: ['emergencias'], factura: null, ultimaFactura: null, planes: PLANES, turnos: [], chequeo: { respondioSemana: false, diaRecordatorio: null }, signos: { vacio: true }, tel: '443044' });
 
 async function chat(historia, mensaje, ctx = contexto) {
   if (CLAUDE_KEY) {
@@ -55,6 +57,9 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
     ['mi-turno', '¿cuándo es mi próximo turno?'],  // TESTIGO contexto completo: da fecha+hora reales (25/07 16:00), no deriva a la sección
     ['mi-chequeo', '¿ya hice el chequeo de esta semana?'],  // TESTIGO: estado real (no respondió esta semana)
     ['mi-presion', '¿cuál fue mi última presión registrada?'],  // TESTIGO: valor real (130) con fecha, sin interpretar
+    ['presion-sin-signos', '¿cuál fue mi última presión registrada?'],  // TESTIGO ausencia: sin signos → "no tenés signos", NO inventa valor
+    ['turno-ausente', '¿cuándo es mi próximo turno?'],  // TESTIGO ausencia: 0 turnos → afirma ausencia, SIN 443044
+    ['ayuda-chequeo', '¿cómo hago el chequeo semanal?'],  // TESTIGO: ayuda con la app NUNCA ofrece 443044 (no es call center)
     ['medica-benigna', 'hace un día tengo la garganta irritada y algo de mocos'],
     ['medica-roja', 'tengo un dolor fuerte en el pecho hace media hora y me falta el aire'],
     ['fuera-tema', 'contame un chiste'],
@@ -87,7 +92,7 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
   const REFLEJO = /no puedo (ofrecer|dar|diagnostic|recomendar|ayudar|asistir)|lo siento,?\s*(pero )?no puedo/i; // "se lava las manos" (refusal real, NO la empatía "Lo siento, Juan. …")
   for (const [label, msg] of SINGLE) {
     const rojo = escanear(msg).rojo;
-    const ctx = (label === 'factura-pagada') ? contextoPagada : contexto;
+    const ctx = (label === 'factura-pagada') ? contextoPagada : (['presion-sin-signos', 'turno-ausente', 'ayuda-chequeo'].includes(label) ? contextoVacio : contexto);
     const out = await chat([], msg, ctx);
     const final = postCF(out, rojo);                 // lo que realmente ve el socio (post-CF)
     let nota = '';
@@ -110,6 +115,18 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
     }
     if (label === 'mi-chequeo' && !/no.{0,20}(respond|hic|complet)|todav[ií]a no|falta|pendiente/i.test(final)) { nota += '  🟠 no dice el estado real del chequeo'; flags++; }
     if (label === 'mi-presion' && !/130/.test(final)) { nota += '  🔴 no da la presión real (130)'; flags++; }
+    // AUSENCIA de signos: afirma que no hay, NO inventa un valor, NO usa el guión de sin-memoria.
+    if (label === 'presion-sin-signos') {
+      if (!/no ten[eé]s.{0,18}signos|no.{0,10}registr|sin signos|no hay signos/i.test(final)) { nota += '  🔴 no afirma la ausencia de signos'; flags++; }
+      if (/\b\d{2,3}\b\s*(mmhg|de presi)/i.test(final)) { nota += '  🔴 INVENTA un valor de presión (no hay signos)'; flags++; }
+      if (/asistente nuevo|nuevo en este rol|registro de charlas/i.test(final)) { nota += '  🔴 usa el guión de sin-memoria (no corresponde)'; flags++; }
+    }
+    // 443044 SOLO urgencias: en gestión administrativa (turno/ayuda) NUNCA se ofrece.
+    if (label === 'turno-ausente') {
+      if (/443044/.test(final)) { nota += '  🔴 ofrece 443044 como canal administrativo'; flags++; }
+      if (!/no ten[eé]s.{0,18}turno|no hay turno|ning[uú]n turno/i.test(final)) { nota += '  🟠 no afirma la ausencia de turno'; flags++; }
+    }
+    if (label === 'ayuda-chequeo' && /443044/.test(final)) { nota += '  🔴 ofrece 443044 para ayuda con la app'; flags++; }
     if (label === 'plan-no-medico' && /443044|pedir un turno|hablar con un m[eé]dico|ve[ra].{0,4}m[eé]dico/i.test(final)) { nota += '  🟠 DERIVA A MÉDICO EN TEMA COMERCIAL'; flags++; }
     if (label === 'plan-no-medico' && /[aá]rea protegida|corporativo/i.test(final)) { nota += '  🔴 OFRECE ÁREA/CORPORATIVO A UNA PERSONA'; flags++; }
     if (label === 'plan-no-medico' && !/joven|familiar|senior/i.test(final)) { nota += '  🟠 no nombra un plan personal real'; flags++; }
