@@ -39,6 +39,8 @@ t('GATE regresión: abrirPuente exige esProspectoUI', /function abrirPuente[\s\S
 t('GATE regresión: puenteView cae a prospectoView si no es prospecto', /function puenteView[\s\S]{0,120}if\(!esProspectoUI\(\)\)\{ return prospectoView/.test(html));
 t('CTA home: estado en proceso → "Afiliación en proceso ✓"', /Afiliación en proceso ✓/.test(html) && /function afiliacionCTA/.test(html));
 t('CTA home: asesor → "Un asesor te contacta ✓"', /Un asesor te contacta ✓/.test(html));
+t('gate: el puente SOLO se bloquea con afiliacion_en_proceso (asesor NO bloquea)', /if\(est==='afiliacion_en_proceso'\)\{ set\(\{ view:'prospecto' \}\); return; \}/.test(html) && !/est==='afiliacion_en_proceso'\|\|est==='solicito_afiliacion'/.test(html));
+t('home asesor: ADEMÁS ofrece "O afiliate ahora online"', /Un asesor te contacta ✓[\s\S]{0,400}O afiliate ahora online/.test(html));
 t('Área Protegida / Corporativo NO están en el catálogo del selector', !/PLANES_COMERCIALES[\s\S]{0,400}(area protegida|corporativo)/i.test(html));
 t('desglose visible "2 base + N adicionales"', /2 base \+ \$\{Math\.max\(0,P\.integrantes-2\)\} adicionales|2 base \+ .* adicionales/.test(html));
 t('post-pago: confirmación "¡Bienvenido a MEDICAR!"', /¡Bienvenido a MEDICAR!/.test(html) && /Estamos activando tu cobertura/.test(html));
