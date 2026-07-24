@@ -27,24 +27,36 @@ const SALUD = new RegExp([
   '\\bde \\d{1,3} años\\b.{0,40}(fiebre|dolor|duele|tos|con\\b|tiene|vomit|mocos|mal|grados)',
 ].join('|'));
 
+// LÉXICO COMERCIAL (planes/precio/cuota/afiliación/cobertura). Va a CLAUDE: es sales-sensitive (al prospecto se le
+// vende bien y sin alucinar cuenta; al socio JAMÁS se le vende — la REGRESIÓN SAGRADA no se juega en el 8B).
+const COMERCIAL = new RegExp([
+  '\\bplan(es)?\\b|afiliar|afiliaci|hacerme socio|ser socio|asociar|darme de alta|contratar', // "afiliado" (nº de socio) NO es comercial
+  'cuanto (sale|cuesta|vale|es|salen|cuestan)|precio|\\bcuota|tarifa|\\babono|cobertura|\\bcubre|que incluye|beneficio',
+  '\\bjoven\\b|familiar|\\bsenior\\b|corporativo|area protegida',
+].join('|'));
+
 // Categoría del mensaje (usa el resultado del escaneo de banderas para lo rojo).
 function clasificar(mensaje, scan) {
   if (scan && scan.rojo) {
     return { categoria: (scan.matched || []).includes('urgencia_declarada') ? 'urgencia' : 'rojo' };
   }
-  return { categoria: SALUD.test(norm(mensaje)) ? 'salud' : 'resto' };
+  const n = norm(mensaje);
+  if (SALUD.test(n)) return { categoria: 'salud' };       // salud primero (ante duda de salud, al mejor modelo)
+  if (COMERCIAL.test(n)) return { categoria: 'comercial' }; // planes/cuota/afiliación → claude (sales-sensitive)
+  return { categoria: 'resto' };
 }
 
 // MAPA categoría→proveedor + cascada. DEFAULTS en código; config.ruteo.{mapa,cascada} overridea (DATA, sin redeploy).
-const MAPA_DEFAULT = { rojo: 'claude', urgencia: 'claude', salud: 'claude', resto: 'ollama' };
+const MAPA_DEFAULT = { rojo: 'claude', urgencia: 'claude', salud: 'claude', comercial: 'claude', resto: 'ollama' };
 
 // Orden de ramas a intentar (cascada = respaldo mutuo). Devuelve [elegida] o [elegida, otra].
-function ramas(categoria, ruteoCfg) {
+// esProspecto → FUERZA claude: el prospecto no tiene cuenta que alucinar y es el funnel de ventas; va al mejor modelo.
+function ramas(categoria, ruteoCfg, esProspecto) {
   const mapa = Object.assign({}, MAPA_DEFAULT, (ruteoCfg && ruteoCfg.mapa) || {});
-  const elegida = mapa[categoria] || 'ollama';
+  const elegida = esProspecto ? 'claude' : (mapa[categoria] || 'ollama');
   const otra = elegida === 'claude' ? 'ollama' : 'claude';
   const cascada = !ruteoCfg || ruteoCfg.cascada !== false; // default ON (respaldo mutuo)
   return cascada ? [elegida, otra] : [elegida];
 }
 
-module.exports = { clasificar, ramas, SALUD, MAPA_DEFAULT };
+module.exports = { clasificar, ramas, SALUD, COMERCIAL, MAPA_DEFAULT };

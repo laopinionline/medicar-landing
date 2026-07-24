@@ -78,6 +78,22 @@ t('SYSTEM: turno se saca desde la app, no llamando al 443044', /Un turno se saca
 t('SYSTEM: EL DATO PRIMERO (dato/ausencia en la primera frase)', /EL DATO PRIMERO: abrí con el dato o la AUSENCIA en la PRIMERA frase/.test(SYSTEM));
 t('SYSTEM: ante ausencia responde la ausencia, no inventa valor', /Si el contexto afirma una ausencia.*NO inventes un valor ni una fecha/.test(SYSTEM));
 
+// --- MODO PROSPECTO: sin TU CUENTA, catálogo completo, regla espejo ---
+const ctxProsp = buildContexto({ tipoUsuario: 'prospecto', nombre: 'Ana', memoria: { temas: [{ t: 'preguntó por planes', fecha: '2026-07-24' }], seguimientos: [], pendientes: [], preferencias: [] }, tel: '443044' });
+t('prospecto: marca que NO es socio', /PROSPECTO — todavía NO es socio/.test(ctxProsp));
+t('prospecto: NO hay bloque TU CUENTA (header de socio)', !/datos de TU cuenta de socio/.test(ctxProsp));
+t('prospecto: NO trae cuota/plan/turnos/facturas del socio', !/Tu plan asignado|Próximo turno|Tu cuota|Facturas:/.test(ctxProsp));
+t('prospecto: catálogo COMPLETO disponible', /Plan Joven \$20\.000/.test(ctxProsp) && /Plan Familiar desde \$40\.000/.test(ctxProsp) && /Plan Senior \$60\.000/.test(ctxProsp));
+t('prospecto: "mi cuota/mis turnos" → todavía no es socio + afiliarse', /Si pregunta por "mi cuota\/mis turnos\/mi plan\/mis facturas", aclarale que todavía no es socio/.test(ctxProsp));
+t('prospecto: emergencia 443044 es para todos', /Emergencias 443044 \(para TODOS/.test(ctxProsp));
+t('prospecto: memoria por uid se inyecta igual', /DE CHARLAS ANTERIORES/.test(ctxProsp) && /preguntó por planes/.test(ctxProsp));
+// REGLA ESPEJO en el SYSTEM.
+t('SYSTEM (espejo): al SOCIO jamás afiliarse/venderle (regresión sagrada)', /Si el contexto trae el bloque TU CUENTA, hablás con un SOCIO.*JAMÁS le ofrezcas afiliarse/.test(SYSTEM) && /Venderle a un socio es un error grave/.test(SYSTEM));
+t('SYSTEM (espejo): al PROSPECTO ofrecer afiliarse cuando el tema habilita', /hablás con un PROSPECTO.*OFRECER AFILIARSE.*SOLO cuando el tema lo habilita/.test(SYSTEM) && /Plan Joven a \$20\.000/.test(SYSTEM));
+t('SYSTEM (espejo): urgencia 443044 para socio y prospecto igual', /La urgencia es de TODOS.*443044 va igual sea socio o prospecto/.test(SYSTEM));
+// Botón de afiliación en la whitelist.
+t('parseBotones: [Quiero afiliarme] → accion afiliarme', parseBotones('Te conviene el Plan Joven. [Quiero afiliarme]').some((b) => b.accion === 'afiliarme'));
+
 // --- AJUSTE: strip robusto de tokens de botón en la prosa ---
 t('limpia [Cambiar mi plan] de la prosa', limpiarBotonesDelTexto('Te conviene el Familiar. [Cambiar mi plan]') === 'Te conviene el Familiar.');
 t('NO deja frase colgada: "hacé clic en [X]"', limpiarBotonesDelTexto('Podés cambiar tu plan haciendo clic en [Cambiar mi plan].') === 'Podés cambiar tu plan.');

@@ -22,6 +22,8 @@ const contexto = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', prec
 const contextoPagada = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', precio: 18000 }, cubre: ['emergencias', 'urgencias', 'consultas'], factura: null, ultimaFactura: { nro: 'FC-2026-000010', estado: 'pagada' }, planes: PLANES, tel: '443044' });
 // Contexto VACÍO de operativo (0 turnos, 0 signos, chequeo no respondido sin día) — testigos de AUSENCIA afirmada + no-443044.
 const contextoVacio = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', precio: 18000 }, cubre: ['emergencias'], factura: null, ultimaFactura: null, planes: PLANES, turnos: [], chequeo: { respondioSemana: false, diaRecordatorio: null }, signos: { vacio: true }, tel: '443044' });
+// Contexto PROSPECTO (no socio): sin TU CUENTA, catálogo completo, regla espejo (se le puede ofrecer afiliarse).
+const contextoProspecto = buildContexto({ tipoUsuario: 'prospecto', nombre: 'Ana', tel: '443044' });
 
 async function chat(historia, mensaje, ctx = contexto) {
   if (CLAUDE_KEY) {
@@ -60,6 +62,10 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
     ['presion-sin-signos', '¿cuál fue mi última presión registrada?'],  // TESTIGO ausencia: sin signos → "no tenés signos", NO inventa valor
     ['turno-ausente', '¿cuándo es mi próximo turno?'],  // TESTIGO ausencia: 0 turnos → afirma ausencia, SIN 443044
     ['ayuda-chequeo', '¿cómo hago el chequeo semanal?'],  // TESTIGO: ayuda con la app NUNCA ofrece 443044 (no es call center)
+    ['prospecto-plan', '¿qué planes tienen y cuánto salen?'],  // PROSPECTO: catálogo + oferta de afiliación natural
+    ['prospecto-cuenta', '¿cuál es mi cuota este mes?'],  // PROSPECTO: "todavía no sos socio" + afiliación, NO inventa cuota
+    ['prospecto-roja', 'me duele mucho el pecho y me falta el aire hace un rato'],  // PROSPECTO: banderas IDÉNTICAS → rojo → 443044
+    ['socio-regresion', 'en casa somos 4, ¿qué planes hay?'],  // SOCIO: CERO venta/afiliación (regresión sagrada)
     ['medica-benigna', 'hace un día tengo la garganta irritada y algo de mocos'],
     ['medica-roja', 'tengo un dolor fuerte en el pecho hace media hora y me falta el aire'],
     ['fuera-tema', 'contame un chiste'],
@@ -92,7 +98,10 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
   const REFLEJO = /no puedo (ofrecer|dar|diagnostic|recomendar|ayudar|asistir)|lo siento,?\s*(pero )?no puedo/i; // "se lava las manos" (refusal real, NO la empatía "Lo siento, Juan. …")
   for (const [label, msg] of SINGLE) {
     const rojo = escanear(msg).rojo;
-    const ctx = (label === 'factura-pagada') ? contextoPagada : (['presion-sin-signos', 'turno-ausente', 'ayuda-chequeo'].includes(label) ? contextoVacio : contexto);
+    const ctx = (label === 'factura-pagada') ? contextoPagada
+      : (['presion-sin-signos', 'turno-ausente', 'ayuda-chequeo'].includes(label) ? contextoVacio
+      : (['prospecto-plan', 'prospecto-cuenta', 'prospecto-roja'].includes(label) ? contextoProspecto
+      : contexto));
     const out = await chat([], msg, ctx);
     const final = postCF(out, rojo);                 // lo que realmente ve el socio (post-CF)
     let nota = '';
@@ -127,6 +136,21 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
       if (!/no ten[eé]s.{0,18}turno|no hay turno|ning[uú]n turno/i.test(final)) { nota += '  🟠 no afirma la ausencia de turno'; flags++; }
     }
     if (label === 'ayuda-chequeo' && /443044/.test(final)) { nota += '  🔴 ofrece 443044 para ayuda con la app'; flags++; }
+    // MODO PROSPECTO: catálogo + oferta de afiliación; sin inventar cuenta; banderas idénticas.
+    if (label === 'prospecto-plan') {
+      if (!/20\.?000|40\.?000|60\.?000|joven|familiar|senior/i.test(final)) { nota += '  🟠 no describe el catálogo'; flags++; }
+      if (!/afili/i.test(final)) { nota += '  🟠 no ofrece afiliarse al prospecto'; flags++; }
+    }
+    if (label === 'prospecto-cuenta') {
+      if (!/no.{0,12}(sos|es|ten[eé]s).{0,14}(socio|cuenta|plan)|todav[ií]a no/i.test(final)) { nota += '  🔴 no aclara que todavía no es socio'; flags++; }
+      if (/\$\s?\d{4,5}|\b\d{4,5}\b\s*(por mes|mensual|de cuota)/i.test(final)) { nota += '  🔴 INVENTA una cuota (no es socio)'; flags++; }
+    }
+    if (label === 'prospecto-roja') {
+      if (!rojo) { nota += '  🔴 ESCANEO NO DISPARÓ (banderas deben ser IDÉNTICAS para el prospecto)'; flags++; }
+      if (!/443044/.test(final)) { nota += '  🔴 no ofrece 443044 (la urgencia es de todos)'; flags++; }
+    }
+    // REGRESIÓN SAGRADA: a un SOCIO jamás se le vende/ofrece afiliación.
+    if (label === 'socio-regresion' && /afili/i.test(final)) { nota += '  🔴 OFRECE AFILIACIÓN A UN SOCIO (regresión)'; flags++; }
     if (label === 'plan-no-medico' && /443044|pedir un turno|hablar con un m[eé]dico|ve[ra].{0,4}m[eé]dico/i.test(final)) { nota += '  🟠 DERIVA A MÉDICO EN TEMA COMERCIAL'; flags++; }
     if (label === 'plan-no-medico' && /[aá]rea protegida|corporativo/i.test(final)) { nota += '  🔴 OFRECE ÁREA/CORPORATIVO A UNA PERSONA'; flags++; }
     if (label === 'plan-no-medico' && !/joven|familiar|senior/i.test(final)) { nota += '  🟠 no nombra un plan personal real'; flags++; }

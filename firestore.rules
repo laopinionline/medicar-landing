@@ -928,6 +928,13 @@ service cloud.firestore {
     //   la CF asistenteResumir y la lee SOLO asistenteChat (Admin SDK). Calcado de asistente_secreto: el cliente NUNCA
     //   la lee ni la pisa (contiene lo que el socio dijo/consultó — se sirve inyectada en el contexto, jamás directo).
     match /asistente_memoria/{personaId} { allow read, write: if false; }
+    // prospectos/{uid}: cuenta AUTOREGISTRADA sin persona asociada (lead comercial: nombre/email/telefono + estado).
+    //   La CREA/ESCRIBE solo la CF (registrarProspecto / solicitarAfiliacion, Admin SDK). El propio prospecto LEE su
+    //   doc (routing de la home reducida); el STAFF lo lee (lista de leads). El cliente NUNCA escribe (write:false).
+    match /prospectos/{uid} {
+      allow read:  if isSignedIn() && (request.auth.uid == uid || esInterno());
+      allow write: if false;
+    }
     // asistente_incidentes/{id}: log del GUARDRAIL (texto clínico del socio + respuesta del modelo). SOLO-STAFF lee
     //   para auditar el comportamiento del modelo; el cliente nunca. Escribe solo la CF (Admin SDK).
     match /asistente_incidentes/{id} {

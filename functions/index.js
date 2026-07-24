@@ -1446,7 +1446,7 @@ exports.episodiosDeArea = onCall(async (request) => {
    (Admin SDK) -> adaptador (ollama|claude) -> guardrail de salida -> { respuesta, rojo, escalar, botones }.
    La SEGURIDAD no depende del modelo: 'rojo' (escaneo) manda la urgencia; [[ESCALAR]] es secundario. Degrada limpio:
    si el modelo no responde, devuelve un mensaje claro con 'rojo' igual computado (la UI sigue, el botón médico sigue). */
-const IA_RL_MAX = 30, IA_RL_VENTANA_MS = 10 * 60 * 1000; // rate limit por uid (autenticado)
+const IA_RL_MAX = 30, IA_RL_MAX_PROSPECTO = 12, IA_RL_VENTANA_MS = 10 * 60 * 1000; // rate limit por uid; prospecto (cuenta abierta) = cupo más bajo
 exports.asistenteChat = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
   const uid = request.auth.uid;
@@ -1457,39 +1457,48 @@ exports.asistenteChat = onCall(async (request) => {
         .map((m) => ({ role: m.role, content: String(m.content).slice(0, 1000) }))
     : [];
 
-  // 1) rate-limit por uid (calco de buscarTitular). Admin SDK -> saltea reglas; el doc vive lockeado.
+  // 0) tipoUsuario server-side: personaId presente → SOCIO; ausente → PROSPECTO. La memoria cuelga de personaId
+  //    (socio) o del uid (prospecto). La REGRESIÓN SAGRADA se sostiene sola: un socio SIEMPRE tiene personaId.
+  let personaId = null;
+  try { const uSnap = await db.collection('usuarios').doc(uid).get(); personaId = uSnap.exists ? ((uSnap.data() || {}).personaId || null) : null; } catch (_) {}
+  const esProspecto = !personaId;
+  const memKey = personaId || uid;
+
+  // 1) rate-limit por uid. Prospecto (registro abierto = invita abuso) = cupo más bajo. Admin SDK saltea reglas.
+  const rlMax = esProspecto ? IA_RL_MAX_PROSPECTO : IA_RL_MAX;
   const rlRef = db.collection('rate_asistente').doc(uid);
   await db.runTransaction(async (tx) => {
     const s = await tx.get(rlRef); const now = Date.now();
     const d = s.exists ? s.data() : null;
     const dentro = d && d.ventanaMs && (now - d.ventanaMs) < IA_RL_VENTANA_MS;
     const count = dentro ? (d.count || 0) + 1 : 1;
-    if (count > IA_RL_MAX) throw new HttpsError('resource-exhausted', 'Estás yendo muy rápido. Esperá un momento y seguimos.');
+    if (count > rlMax) throw new HttpsError('resource-exhausted', 'Estás yendo muy rápido. Esperá un momento y seguimos.');
     tx.set(rlRef, { count, ventanaMs: dentro ? d.ventanaMs : now }, { merge: true });
   });
 
-  // 2) ESCANEO de banderas rojas SOBRE EL TEXTO DEL SOCIO (esto —y solo esto— decide la urgencia 443044).
+  // 2) ESCANEO de banderas rojas SOBRE EL TEXTO (esto —y solo esto— decide la urgencia 443044). IDÉNTICO para socio y prospecto.
   const scan = escanearBanderas(mensaje);
 
   // 2.5) OLVIDO: pedido determinista de borrado ("olvidate de esto / borrá lo que hablamos") → la CF borra el doc
-  //   ENTERO de memoria (over-delete seguro). La urgencia MANDA: si hay bandera roja, NO se corta acá (se atiende).
+  //   ENTERO de memoria (over-delete seguro, socio o prospecto). La urgencia MANDA: si hay bandera roja, NO se corta acá.
   if (!scan.rojo && escanearOlvido(mensaje)) {
-    try {
-      const personaId = await assertAfiliado(request);
-      await db.collection('asistente_memoria').doc(personaId).delete();
-      logger.info('[asistenteChat] memoria borrada por pedido del socio');
-    } catch (e) { logger.warn('[asistenteChat] olvido: no se pudo borrar', { err: e.message }); }
+    try { await db.collection('asistente_memoria').doc(memKey).delete(); logger.info('[asistenteChat] memoria borrada por pedido del usuario'); }
+    catch (e) { logger.warn('[asistenteChat] olvido: no se pudo borrar', { err: e.message }); }
     return { respuesta: 'Listo, borré lo que veníamos hablando. Arrancamos de cero cuando quieras.', rojo: false, escalar: false, botones: [], olvidado: true };
   }
 
-  // 3) miPersonaId + CONTEXTO mínimo server-side (NUNCA DNI/clínico/terceros) + MEMORIA de charlas anteriores.
+  // 3) MEMORIA (por memKey) + CONTEXTO. PROSPECTO: sin TU CUENTA, catálogo completo, oferta de afiliación (regla espejo).
   let contexto;
+  let memoria = null;
+  try { const mSnap = await db.collection('asistente_memoria').doc(memKey).get(); if (mSnap.exists) { const m = mSnap.data(); if (tieneContenido(m)) memoria = { temas: m.temas || [], seguimientos: m.seguimientos || [], pendientes: m.pendientes || [], preferencias: m.preferencias || [] }; } }
+  catch (e) { logger.warn('[asistenteChat] no se pudo leer memoria', { err: e.message }); }
+  if (esProspecto) {
+    let nombre = 'la persona';
+    try { const pSnap = await db.collection('prospectos').doc(uid).get(); if (pSnap.exists && (pSnap.data() || {}).nombre) nombre = String(pSnap.data().nombre).trim().split(' ')[0]; } catch (_) {}
+    contexto = buildContexto({ tipoUsuario: 'prospecto', nombre, memoria, tel: '443044' });
+  } else {
   try {
-    const personaId = await assertAfiliado(request);
-    // Memoria del socio (subordinada a TU CUENTA; la lee SOLO la CF vía Admin SDK).
-    let memoria = null;
-    try { const mSnap = await db.collection('asistente_memoria').doc(personaId).get(); if (mSnap.exists) { const m = mSnap.data(); if (tieneContenido(m)) memoria = { temas: m.temas || [], seguimientos: m.seguimientos || [], pendientes: m.pendientes || [], preferencias: m.preferencias || [] }; } }
-    catch (e) { logger.warn('[asistenteChat] no se pudo leer memoria', { err: e.message }); }
+    // (socio) — personaId y memoria ya resueltos arriba (memKey = personaId).
     const socioSnap = await db.collection('socios').where('personaId', '==', personaId).where('activo', '==', true).limit(1).get();
     const socio = socioSnap.empty ? null : socioSnap.docs[0].data();
     let plan = null, cubre = [];
@@ -1551,12 +1560,13 @@ exports.asistenteChat = onCall(async (request) => {
     logger.warn('[asistenteChat] contexto degradado', { err: e.message }); // sin contexto sigue: el modelo orienta genérico
     contexto = buildContexto({ nombre: 'socio', planes: [], tel: '443044' });
   }
+  } // fin del else (socio)
 
   // 4) adaptador del modelo (DEGRADA LIMPIO si no responde: túnel caído / compu apagada / timeout).
   const cfgSnap = await db.collection('asistente_secreto').doc('config').get();
   const cfg = cfgSnap.exists ? cfgSnap.data() : { proveedor: 'ollama' };
-  const { categoria } = iaClasificar(mensaje, scan);            // semáforo determinista (rojo/urgencia/salud/resto)
-  const orden = iaRamas(categoria, cfg.ruteo);                  // orden de ramas a intentar (solo se usa en modo 'ruteo')
+  const { categoria } = iaClasificar(mensaje, scan);            // semáforo determinista (rojo/urgencia/salud/comercial/resto)
+  const orden = iaRamas(categoria, cfg.ruteo, esProspecto);     // orden de ramas; prospecto → claude forzado (funnel + sin cuenta)
   let raw;
   try {
     const r = await iaResponder(cfg, { system: IA_SYSTEM, contexto, historia, mensaje, orden });
@@ -1585,6 +1595,10 @@ exports.asistenteChat = onCall(async (request) => {
   if (neu.cambiado) logger.info('[asistenteChat] 443044 neutralizado (rojo=false)');
   let botones = gr.motivo ? [{ label: 'Que te vea un médico', accion: 'medico' }] : parseBotones(gr.respuesta);
   if (scan.rojo) botones = botones.filter((b) => b.accion !== 'turno'); // urgencia real: NO ofrecer turno (determinista)
+  // REGRESIÓN SAGRADA (determinista, no depende del modelo): al SOCIO nunca el botón de afiliación; al PROSPECTO solo
+  //   afiliarse/emergencia/médico (no tiene cuenta → plan/comprobantes/pagar/turno serían botones muertos).
+  if (esProspecto) botones = botones.filter((b) => ['afiliarme', 'emergencia', 'medico'].includes(b.accion));
+  else botones = botones.filter((b) => b.accion !== 'afiliarme');
   const respuesta = voseoAr(limpiarBotonesDelTexto(neu.texto)); // saca tokens [Botón] + convierte a voseo rioplatense
   return { respuesta, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
 });
@@ -1605,8 +1619,12 @@ exports.asistenteResumir = onCall(async (request) => {
   // Solo resumimos una charla con intercambio real (al menos un turno del socio y uno del asistente).
   if (!(historia.some((m) => m.role === 'user') && historia.some((m) => m.role === 'assistant'))) return { ok: false, razon: 'sin-intercambio' };
 
-  const personaId = await assertAfiliado(request);
-  const memRef = db.collection('asistente_memoria').doc(personaId);
+  // memKey = personaId (socio) o uid (prospecto). Espejo de asistenteChat: la memoria del prospecto cuelga del uid.
+  const uid = request.auth.uid;
+  let personaId = null;
+  try { const uSnap = await db.collection('usuarios').doc(uid).get(); personaId = uSnap.exists ? ((uSnap.data() || {}).personaId || null) : null; } catch (_) {}
+  const memKey = personaId || uid;
+  const memRef = db.collection('asistente_memoria').doc(memKey);
   const prevSnap = await memRef.get();
   const prev = prevSnap.exists ? (prevSnap.data() || {}) : {};
   // Debounce: el doble disparo (cerrarAsistente + visibilitychange) no reprocesa lo mismo en segundos.
@@ -1630,8 +1648,42 @@ exports.asistenteResumir = onCall(async (request) => {
   // Guard anti-wipe: si el resumidor no devuelve nada útil, NO pisamos la memoria previa (el borrado real es "olvidate").
   if (!memoria || !tieneContenido(memoria)) return { ok: false, razon: 'sin-contenido' };
 
-  await memRef.set({ personaId, ...memoria, actualizadoEn: FV(), version: 1 }, { merge: false });
+  await memRef.set({ personaId: personaId || null, ...memoria, actualizadoEn: FV(), version: 1 }, { merge: false });
   logger.info('[asistenteResumir] memoria actualizada', { temas: memoria.temas.length, seguimientos: memoria.seguimientos.length, pendientes: memoria.pendientes.length, preferencias: memoria.preferencias.length });
+  return { ok: true };
+});
+
+/* ===================== MODO PROSPECTO — registro abierto (cuenta sin persona asociada) =====================
+   registrarProspecto: tras el signup client-side (createUserWithEmailAndPassword), la CF crea prospectos/{uid}
+   (Admin SDK; usuarios queda cerrada, create=superadmin-only). NO pisa identidades: si ya es socio/staff, rechaza.
+   solicitarAfiliacion: [Quiero afiliarme] → marca el lead (el admin lo ve; el cliente NO escribe prospectos). */
+const STAFF_ROLES = ['medico', 'despachante', 'admin', 'chofer', 'contable', 'superadmin'];
+exports.registrarProspecto = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const nombre = String((request.data || {}).nombre || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  const telefono = String((request.data || {}).telefono || '').trim().slice(0, 30);
+  if (!nombre) throw new HttpsError('invalid-argument', 'Falta el nombre.');
+  // NO pisar identidades existentes: un socio/staff no es prospecto.
+  const uSnap = await db.collection('usuarios').doc(uid).get();
+  if (uSnap.exists) {
+    const u = uSnap.data() || {};
+    const roles = Array.isArray(u.roles) ? u.roles : (u.rol ? [u.rol] : []);
+    if (u.personaId || roles.some((r) => ['afiliado', ...STAFF_ROLES].includes(r))) throw new HttpsError('failed-precondition', 'Tu cuenta ya está registrada.');
+  }
+  const ref = db.collection('prospectos').doc(uid);
+  if (!(await ref.get()).exists) {
+    await ref.set({ nombre, telefono: telefono || null, email: (request.auth.token && request.auth.token.email) || null, estado: 'nuevo', solicitoAfiliacion: false, creadoEn: FV() });
+    logger.info('[registrarProspecto] alta de prospecto', { uid });
+  }
+  return { ok: true };
+});
+exports.solicitarAfiliacion = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const ref = db.collection('prospectos').doc(request.auth.uid);
+  if (!(await ref.get()).exists) throw new HttpsError('failed-precondition', 'Solo para prospectos.');
+  await ref.set({ solicitoAfiliacion: true, estado: 'solicito_afiliacion', solicitadoEn: FV() }, { merge: true });
+  logger.info('[solicitarAfiliacion] lead marcado', { uid: request.auth.uid });
   return { ok: true };
 });
 

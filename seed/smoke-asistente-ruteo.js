@@ -28,25 +28,34 @@ esClaude('rojo pecho', 'me duele el pecho fuerte y me falta el aire');
 esClaude('rojo desmayo', 'me desmayé recién');
 esClaude('urgencia declarada', 'necesito que hoy mismo lo vea un médico a mi nene');
 
-console.log('\n— RESTO (admin/planes/agenda/fuera de tema) → ollama —');
-esOllama('cobertura plan', '¿qué cubre mi plan?');
-esOllama('deuda', '¿cuánto debo y para cuándo vence?');
-esOllama('cambio de plan', 'quiero cambiar de plan, ¿me conviene?');
+console.log('\n— COMERCIAL (planes/precio/cuota/afiliación) → claude (sales-sensitive, no-venta al socio) —');
+esClaude('cobertura plan', '¿qué cubre mi plan?');
+esClaude('cambio de plan', 'quiero cambiar de plan, ¿me conviene?');
+esClaude('pagar cuota', 'quiero pagar mi cuota de este mes');
+esClaude('plan familiar cubre hijos', '¿el plan familiar cubre a mis hijos?');
+esClaude('anotar en el plan', 'quiero anotar a mi hijo en el plan');
+esClaude('precio de un plan', '¿cuánto sale el Plan Joven?');
+esClaude('quiere afiliarse', 'quiero afiliarme a MEDICAR, ¿cómo hago?');
+
+console.log('\n— RESTO (admin/agenda/pagos/fuera de tema) → ollama —');
+esOllama('deuda (sin palabra comercial)', '¿cuánto debo y para cuándo vence?');
 esOllama('turno (agenda)', '¿cómo pido un turno por videollamada?');
 esOllama('TRAMPA "tengo una factura"', 'tengo una factura pendiente, ¿la puedo pagar?');
 esOllama('comprobantes', '¿dónde veo mis comprobantes?');
-esOllama('pagar cuota', 'quiero pagar mi cuota de este mes');
-esOllama('plan familiar (hijos, sin síntoma)', '¿el plan familiar cubre a mis hijos?');
-esOllama('anotar dependiente', 'quiero anotar a mi hijo en el plan');
 esOllama('fuera de tema', 'contame un chiste');
-esOllama('credencial', '¿dónde está mi número de afiliado?');
+esOllama('credencial (nº de afiliado ≠ comercial)', '¿dónde está mi número de afiliado?');
 
-console.log('\n— MAPA/cascada parametrizables —');
+console.log('\n— MAPA/cascada parametrizables + PROSPECTO forzado a claude —');
 const t = (l, c) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}`); c ? ok++ : fail++; };
 t('salud → cascada [claude, ollama]', JSON.stringify(ramas('salud')) === JSON.stringify(['claude', 'ollama']));
+t('comercial → claude', ramas('comercial')[0] === 'claude');
 t('resto → cascada [ollama, claude]', JSON.stringify(ramas('resto')) === JSON.stringify(['ollama', 'claude']));
 t('cascada OFF → una sola rama', JSON.stringify(ramas('salud', { cascada: false })) === JSON.stringify(['claude']));
 t('override mapa salud→ollama (DATA)', ramas('salud', { mapa: { salud: 'ollama' } })[0] === 'ollama');
+t('override mapa comercial→ollama (rollback por DATA)', ramas('comercial', { mapa: { comercial: 'ollama' } })[0] === 'ollama');
+t('PROSPECTO: resto → claude (forzado)', ramas('resto', undefined, true)[0] === 'claude');
+t('PROSPECTO: salud → claude', ramas('salud', undefined, true)[0] === 'claude');
+t('SOCIO: resto → ollama (sin forzar)', ramas('resto', undefined, false)[0] === 'ollama');
 
 console.log(`\n${fail ? '✗' : '✓'} smoke-asistente-ruteo: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);
