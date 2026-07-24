@@ -1702,31 +1702,61 @@ exports.solicitarAfiliacion = onCall(async (request) => {
    A5: la activación REAL la hace el admin desde este lead (el pago simulado NO da de alta al socio). */
 const PLANES_CHECKOUT = { joven: { nombre: 'Plan Joven', base: 20000, maxEdad: 40 }, familiar: { nombre: 'Plan Familiar', base: 40000, adicional: 10000, baseIntegrantes: 2 }, senior: { nombre: 'Plan Senior', base: 60000 } };
 const edadDeISO = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '')); if (!m) return null; const h = new Date(); let e = h.getFullYear() - (+m[1]); if (((h.getMonth() + 1) * 100 + h.getDate()) < ((+m[2]) * 100 + (+m[3]))) e--; return e; };
+const ISO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+// Domicilio de despacho: exige calleId (canónico del callejero) + altura>0 + texto. NO re-resuelve el callejero server-side
+// (vive en el cliente); valida PRESENCIA — sin domicilio válido NO hay pago. (Con pasarela REAL habrá que endurecer.)
+const domCanon = (o) => { o = o || {}; const texto = String(o.texto || '').trim().slice(0, 200); const calleId = String(o.calleId || '').trim().slice(0, 120); const altura = Number(o.altura) || 0; return (texto && calleId && altura > 0) ? { texto, calleId, altura } : null; };
 exports.checkoutAfiliacion = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
   const ref = db.collection('prospectos').doc(request.auth.uid);
-  if (!(await ref.get()).exists) throw new HttpsError('failed-precondition', 'Solo para prospectos.');
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('failed-precondition', 'Solo para prospectos.');
   const d = request.data || {};
   const p = PLANES_CHECKOUT[String(d.planKey || '')];
   if (!p) throw new HttpsError('invalid-argument', 'Plan inválido.');
   const integrantes = (d.planKey === 'familiar') ? Math.max(2, Math.min(12, Number(d.integrantes) || 2)) : 1;
   const total = (d.planKey === 'familiar') ? (p.base + Math.max(0, integrantes - 2) * p.adicional) : p.base; // recomputado server-side (no se confía en el cliente)
   const fechaNacimiento = String(d.fechaNacimiento || '').slice(0, 10);
-  const domicilio = String(d.domicilio || '').trim().slice(0, 200);
-  const localidad = String(d.localidad || '').trim().slice(0, 100);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaNacimiento)) throw new HttpsError('invalid-argument', 'Falta la fecha de nacimiento.');
-  if (!domicilio) throw new HttpsError('invalid-argument', 'Falta el domicilio.');
-  if (!localidad) throw new HttpsError('invalid-argument', 'Falta la localidad.');
+  if (!ISO_FECHA.test(fechaNacimiento)) throw new HttpsError('invalid-argument', 'Falta la fecha de nacimiento.');
   const edad = edadDeISO(fechaNacimiento);
   if (d.planKey === 'joven' && edad != null && edad > 40) throw new HttpsError('failed-precondition', 'El Plan Joven es hasta 40 años.');
+  // Domicilio del TITULAR (dato de despacho) — obligatorio y con calleId del callejero.
+  const domTitular = domCanon(d.domicilio);
+  if (!domTitular) throw new HttpsError('invalid-argument', 'El domicilio del titular debe estar en el callejero de Pergamino.');
+  const titDni = String((snap.data() || {}).dni || '').replace(/\D/g, '');
+  // INTEGRANTES (Familiar): deben ser N-1, con datos completos, DNIs válidos/únicos/≠titular, domicilio propio si no comparte.
+  const grupoIn = Array.isArray(d.grupo) ? d.grupo : [];
+  const integrantesOut = [];
+  if (d.planKey === 'familiar') {
+    if (grupoIn.length !== integrantes - 1) throw new HttpsError('invalid-argument', 'Faltan datos de integrantes del grupo.');
+    const dnis = new Set(titDni ? [titDni] : []);
+    for (let i = 0; i < grupoIn.length; i++) {
+      const m = grupoIn[i] || {}; const et = 'Integrante ' + (i + 2);
+      const nombre = String(m.nombre || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      const dni = String(m.dni || '').replace(/\D/g, '');
+      const fnac = String(m.fechaNacimiento || '').slice(0, 10);
+      const vinculo = String(m.vinculo || '').trim().slice(0, 30);
+      const comparteDomicilio = !!m.comparteDomicilio;
+      if (!nombre) throw new HttpsError('invalid-argument', et + ': falta el nombre.');
+      if (dni.length < 7 || dni.length > 8) throw new HttpsError('invalid-argument', et + ': DNI inválido.');
+      if (dnis.has(dni)) throw new HttpsError('invalid-argument', et + ': DNI repetido.');
+      dnis.add(dni);
+      if (!ISO_FECHA.test(fnac)) throw new HttpsError('invalid-argument', et + ': falta la fecha de nacimiento.');
+      if (!vinculo) throw new HttpsError('invalid-argument', et + ': falta el vínculo.');
+      const item = { nombre, dni, fechaNacimiento: fnac, vinculo, comparteDomicilio };
+      if (!comparteDomicilio) { const dm = domCanon(m.domicilio); if (!dm) throw new HttpsError('invalid-argument', et + ': el domicilio debe estar en el callejero de Pergamino.'); item.domicilio = dm; }
+      integrantesOut.push(item);
+    }
+  }
   await ref.set({
     estado: 'afiliacion_en_proceso',
     planElegido: { key: d.planKey, nombre: p.nombre, integrantes, total },
-    datosAlta: { fechaNacimiento, edad: edad != null ? edad : null, domicilio, localidad },
+    datosAlta: { fechaNacimiento, edad: edad != null ? edad : null, domicilio: domTitular },
+    integrantes: integrantesOut, // grupo del titular (vacío en Joven/Senior); cada uno con comparteDomicilio o su dirección {texto,calleId,altura}
     pago: { modo: 'simulado', estado: 'aprobado' }, // fase simulada: enchufar pasarela real (Mercado Pago) sin rehacer el flujo
     checkoutEn: FV(),
   }, { merge: true });
-  logger.info('[checkoutAfiliacion] lead enriquecido', { uid: request.auth.uid, plan: d.planKey, integrantes, total });
+  logger.info('[checkoutAfiliacion] lead enriquecido', { uid: request.auth.uid, plan: d.planKey, integrantes, total, grupo: integrantesOut.length });
   return { ok: true, total, integrantes };
 });
 
