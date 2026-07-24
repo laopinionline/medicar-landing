@@ -6163,7 +6163,8 @@ function mktAttach(){
   const upd=()=>{ if(!mktFormOpen()) render(); };
   S.mktUnsub=[
     db.collection('leads').onSnapshot(s=>{ if(!S.mkt) return; S.mkt.leads=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, e=>{ if(S.mkt){ S.mkt.err=(e.message||String(e)); render(); } }),
-    db.collection('campanas').onSnapshot(s=>{ if(!S.mkt) return; S.mkt.campanas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.mkt) S.mkt.campanas=[]; })
+    db.collection('campanas').onSnapshot(s=>{ if(!S.mkt) return; S.mkt.campanas=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.mkt) S.mkt.campanas=[]; }),
+    db.collection('prospectos').onSnapshot(s=>{ if(!S.mkt) return; S.mkt.prospectos=s.docs.map(d=>({id:d.id,...d.data()})); upd(); }, ()=>{ if(S.mkt) S.mkt.prospectos=[]; }) // afiliaciones online (funnel del checkout)
   ];
 }
 function mktDetach(){ if(S.mktUnsub){ S.mktUnsub.forEach(u=>{ try{u();}catch(_){} }); S.mktUnsub=null; } }
@@ -6171,15 +6172,15 @@ function mktErr(t){ const e=document.getElementById('mkt-err'); if(e){ e.textCon
 
 function mktPanel(){
   if(!puede('marketing')) return `<div class="card"><div class="ch">Marketing</div><div style="font-size:.8rem;color:var(--ink3)">No tenés permiso para gestionar marketing.</div></div>`;
-  if(!S.mkt){ S.mkt={sub:'leads',leads:null,campanas:null,edit:null,cedit:null,showAll:false,showInactC:false,metrics:null,err:''}; mktAttach(); }
+  if(!S.mkt){ S.mkt={sub:'leads',leads:null,campanas:null,prospectos:null,pedit:null,pShowDesc:false,edit:null,cedit:null,showAll:false,showInactC:false,metrics:null,err:''}; mktAttach(); }
   if(S.mkt.err) return `<div class="card">No se pudo cargar marketing: ${esc(S.mkt.err)}</div>`;
   const sub=S.mkt.sub||'leads';
   const tab=(id,lbl)=>`<button onclick="mktSub('${id}')" style="flex:1;padding:.45rem .3rem;border:1.5px solid ${sub===id?'var(--r)':'var(--border2)'};background:${sub===id?'var(--r)':'transparent'};color:${sub===id?'#fff':'var(--ink2)'};border-radius:10px;font-size:.68rem;font-weight:600;letter-spacing:.02em;cursor:pointer">${lbl}</button>`;
   const head=`
   <div style="font-weight:700;margin:.1rem 0 .6rem">Marketing <span style="font-size:.62rem;color:var(--ink3);font-weight:400">● en vivo</span></div>
-  <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${tab('leads','Leads')}${tab('campanas','Campañas')}${tab('metricas','Métricas')}</div>
+  <div style="display:flex;gap:.4rem;margin-bottom:.8rem">${tab('prospectos','Prospectos'+mktProspBadge())}${tab('leads','Leads')}${tab('campanas','Campañas')}${tab('metricas','Métricas')}</div>
   <div id="mkt-err" class="err" style="display:none;margin-bottom:.5rem"></div>`;
-  const body = sub==='campanas' ? mktCampanasView() : (sub==='metricas' ? mktMetricasView() : mktLeadsView());
+  const body = sub==='prospectos' ? mktProspectosView() : (sub==='campanas' ? mktCampanasView() : (sub==='metricas' ? mktMetricasView() : mktLeadsView()));
   return head + body;
 }
 function mktSub(id){ if(!S.mkt) return; S.mkt.sub=id; S.mkt.edit=null; S.mkt.cedit=null; render(); }
@@ -6289,6 +6290,75 @@ function mktConvertir(id){
   if(enAfil && S.af){ S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.convOpenAlta=false; render(); return; }
   if(S.user && S.user.rol==='superadmin'){ superNav('afiliados'); }
   else { S.tab='afiliados'; render(); }
+}
+
+/* ---- Prospectos (afiliaciones ONLINE del checkout — colección prospectos/, distinta de leads/) ---- */
+const PROSP_ORDEN={afiliacion_en_proceso:0,solicito_afiliacion:1,nuevo:2};
+function prospOrden(e){ return (PROSP_ORDEN[e]!=null)?PROSP_ORDEN[e]:3; } // orden del listado (en-proceso primero)
+function prospTs(p){ return tms(p.checkoutEn)||tms(p.solicitadoEn)||tms(p.creadoEn)||0; }
+const prospMoney=(n)=>'$'+Number(n||0).toLocaleString('es-AR');
+function prospFecha(t){ const ms=tms(t); return ms?new Intl.DateTimeFormat('es-AR',{dateStyle:'short',timeStyle:'short',timeZone:'America/Argentina/Buenos_Aires'}).format(new Date(ms)):'—'; }
+function prospFechaCorta(iso){ const p=String(iso||'').split('-'); return p.length===3?(p[2]+'/'+p[1]+'/'+p[0]):(iso||'—'); }
+const PROSP_EST={ afiliacion_en_proceso:['Afiliación en proceso','var(--g,#1D9E75)'], solicito_afiliacion:['Pidió asesor','var(--o,#E08A00)'], nuevo:['Registrado','var(--ink3)'] };
+function prospEstBadge(e){ const b=PROSP_EST[e]||[e||'—','var(--ink3)']; return `<span style="background:${b[1]};color:#fff;border-radius:7px;padding:.1rem .4rem;font-size:.62rem;font-weight:700;white-space:nowrap">${b[0]}</span>`; }
+function mktProspBadge(){ const n=((S.mkt&&S.mkt.prospectos)||[]).filter(p=>p.estado==='afiliacion_en_proceso'&&!(p.gestion&&p.gestion.descartado)).length; return n?` <span style="background:#fff;color:var(--r);border-radius:8px;padding:0 .28rem;font-size:.6rem;font-weight:800">${n}</span>`:''; }
+function mktProspectosView(){
+  if(S.mkt.prospectos===null) return `<div class="card">Cargando prospectos…</div>`;
+  if(S.mkt.pedit!=null) return mktProspFicha(S.mkt.pedit);
+  const showDesc=!!S.mkt.pShowDesc; const desc=p=>!!(p.gestion&&p.gestion.descartado);
+  const all=(S.mkt.prospectos||[]); const nDesc=all.filter(desc).length;
+  const list=all.filter(p=>showDesc||!desc(p)).slice().sort((a,b)=>(prospOrden(a.estado)-prospOrden(b.estado))||(prospTs(b)-prospTs(a)));
+  const rows=list.length?list.map(p=>{
+    const g=p.gestion||{}; const contacto=[p.telefono,p.email].filter(Boolean).join(' · ')||p.dni||'—';
+    const sub=p.estado==='afiliacion_en_proceso'?(((p.planElegido&&p.planElegido.nombre)||'')+' · '+prospMoney(p.planElegido&&p.planElegido.total)):contacto;
+    const marks=(g.contactado?' <span style="color:var(--g,#1D9E75);font-size:.68rem">✓ contactado</span>':'')+(desc(p)?' <span style="color:var(--ink3);font-size:.68rem">✕ descartado</span>':'');
+    return `<div class="lr" style="cursor:pointer" onclick="mktProspAbrir('${p.id}')"><div class="lrb"><div class="lrn">${esc(p.nombre||'—')}${marks}</div><div class="lrs">${esc(sub)}</div></div>${prospEstBadge(p.estado)}</div>`;
+  }).join(''):`<div style="font-size:.78rem;color:var(--ink3)">Sin prospectos${showDesc?'':' activos'}</div>`;
+  const toggle=nDesc?`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="mktProspShowDesc(this.checked)" ${showDesc?'checked':''}>Ver descartados (${nDesc})</label>`:'';
+  return `${toggle}<div class="card">${rows}</div>`;
+}
+function mktProspShowDesc(on){ if(S.mkt) S.mkt.pShowDesc=!!on; render(); }
+function mktProspAbrir(id){ if(S.mkt){ S.mkt.pedit=id; render(); } }
+function mktProspVolver(){ if(S.mkt){ S.mkt.pedit=null; render(); } }
+function mktProspFicha(id){
+  const p=((S.mkt&&S.mkt.prospectos)||[]).find(x=>x.id===id); if(!p) return `<div class="card">Prospecto no encontrado. <button class="btn-o" onclick="mktProspVolver()">Volver</button></div>`;
+  const g=p.gestion||{}; const pe=p.planElegido||{}; const da=p.datosAlta||{}; const dom=da.domicilio||{};
+  const row=(l,v)=>v?`<div class="lr"><div class="lrb"><div class="lrs">${l}</div><div class="lrn" style="font-size:.85rem">${v}</div></div></div>`:'';
+  const telLink=p.telefono?`<a href="tel:${esc(p.telefono)}" style="color:var(--r);font-weight:700">${esc(p.telefono)}</a>`:'';
+  const mailLink=p.email?`<a href="mailto:${esc(p.email)}" style="color:var(--r);font-weight:700">${esc(p.email)}</a>`:'';
+  const domTxt=dom.texto?(esc(dom.texto)+(dom.pisoDepto?(' — '+esc(dom.pisoDepto)):'')+(dom.calleId?` <span style="color:var(--ink3);font-size:.68rem">[${esc(dom.calleId)}]</span>`:'')):'';
+  const integ=(p.integrantes||[]).map((m,i)=>{
+    const md=m.comparteDomicilio?'comparte domicilio del titular':(m.domicilio?(esc(m.domicilio.texto||'')+(m.domicilio.pisoDepto?(' — '+esc(m.domicilio.pisoDepto)):'')):'—');
+    return `<div class="card" style="background:var(--bg);margin-top:.4rem"><div style="font-weight:700;font-size:.8rem">Integrante ${i+2} · ${esc(m.vinculo||'')}</div><div style="font-size:.76rem;color:var(--ink2)">${esc(m.nombre||'—')} · DNI ${esc(m.dni||'—')} · nac ${prospFechaCorta(m.fechaNacimiento)}</div><div style="font-size:.72rem;color:var(--ink3)">${md}</div></div>`;
+  }).join('');
+  const contactadoBox=g.contactado
+    ? `<div style="background:var(--g,#1D9E75);color:#fff;border-radius:8px;padding:.5rem .65rem;font-size:.76rem;font-weight:600">✓ Contactado ${g.contactadoPor?('por '+esc(g.contactadoPor)):''} · ${prospFecha(g.contactadoEn)} <button class="btn-o" style="width:auto;padding:.2rem .5rem;margin:.35rem 0 0" onclick="mktProspAccion('${p.id}','descontactar')">Deshacer</button></div>`
+    : `<button class="btn-r" style="width:auto;padding:.4rem .8rem;margin-top:0" onclick="mktProspAccion('${p.id}','contactado')">Marcar contactado</button>`;
+  const descBox=g.descartado
+    ? `<div style="font-size:.75rem;color:var(--ink3)">✕ Descartado${g.descartadoMotivo?(' · '+esc(g.descartadoMotivo)):''} · ${prospFecha(g.descartadoEn)} <button class="btn-o" style="width:auto;padding:.2rem .5rem;margin:.35rem 0 0" onclick="mktProspAccion('${p.id}','reactivar')">Reactivar</button></div>`
+    : `<div class="card" style="margin-top:.6rem;background:var(--bg)"><div style="font-size:.74rem;font-weight:700;margin-bottom:.3rem">Descartar</div><div class="field"><label>Motivo</label><input id="mkt-p-desc" placeholder="fuera de zona / no interesa / duplicado"></div><button class="btn-o" onclick="mktProspDescartar('${p.id}')">Descartar</button></div>`;
+  const activar=(p.estado==='afiliacion_en_proceso')?`<div style="margin-top:.7rem;border-top:1px solid var(--border);padding-top:.6rem"><button class="btn-r" style="width:auto;padding:.45rem .9rem;margin-top:0" onclick="mktActivarProspecto('${p.id}')">Activar → alta precargada</button><div style="font-size:.7rem;color:var(--ink3);margin-top:.3rem">Abre el alta de Afiliados con nombre y teléfono precargados. La activación real es el alta de siempre.</div></div>`:'';
+  return `<button class="btn-o" onclick="mktProspVolver()" style="width:auto;padding:.3rem .6rem;margin-bottom:.6rem">← Volver</button>
+    <div id="mkt-err" class="err" style="display:none;margin-bottom:.5rem"></div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start"><div class="ch" style="margin:0">${esc(p.nombre||'—')}</div>${prospEstBadge(p.estado)}</div>
+      <div style="font-size:.72rem;color:var(--ink3);margin:.2rem 0 .6rem">Registrado ${prospFecha(p.creadoEn)}${p.solicitadoEn?(' · pidió asesor '+prospFecha(p.solicitadoEn)):''}${p.checkoutEn?(' · checkout '+prospFecha(p.checkoutEn)):''}</div>
+      ${row('Teléfono',telLink)}${row('Email',mailLink)}${row('DNI',esc(p.dni||''))}${row('Fecha de nacimiento',da.fechaNacimiento?(prospFechaCorta(da.fechaNacimiento)+(da.edad!=null?(' ('+da.edad+' años)'):'')):'')}${row('Domicilio',domTxt)}
+      ${pe.key?`<div class="lr"><div class="lrb"><div class="lrs">Plan elegido</div><div class="lrn" style="font-size:.85rem">${esc(pe.nombre||'')} · ${pe.integrantes||1} ${(pe.integrantes||1)>1?'personas':'persona'} · <b>${prospMoney(pe.total)}</b>/mes</div></div></div>`:''}
+    </div>
+    ${integ?`<div style="font-weight:700;font-size:.82rem;margin:.8rem 0 .2rem">Integrantes del grupo</div>${integ}`:''}
+    <div class="card" style="margin-top:.8rem"><div style="font-weight:700;font-size:.82rem;margin-bottom:.4rem">Gestión</div>${contactadoBox}<div style="margin-top:.6rem">${descBox}</div>${activar}</div>`;
+}
+async function mktProspAccion(id,accion){ if(!puede('marketing')) return; mktErr(''); try{ await fnsCall('gestionarProspecto',{prospectoId:id,accion}); }catch(e){ mktErr((e&&e.message)||'No se pudo.'); } }
+async function mktProspDescartar(id){ if(!puede('marketing')) return; const motivo=(document.getElementById('mkt-p-desc')?.value||'').trim(); if(!motivo){ mktErr('Ingresá el motivo del descarte.'); return; } try{ await fnsCall('gestionarProspecto',{prospectoId:id,accion:'descartar',motivo}); }catch(e){ mktErr((e&&e.message)||'No se pudo.'); } }
+// "Activar" (barato): reusa el prefill del alta (convPrefill/convOpenAlta), sin marcar convertido (auto-link = follow-up).
+function mktActivarProspecto(id){
+  if(!puede('marketing')) return;
+  const p=((S.mkt&&S.mkt.prospectos)||[]).find(x=>x.id===id); if(!p) return;
+  S.convLeadId=null; S.convPrefill={ nombre:p.nombre||'', telefono:p.telefono||'', email:p.email||'' }; S.convOpenAlta=true;
+  const enAfil=(S.user&&S.user.rol==='superadmin')?(S.superSec==='afiliados'):(S.tab==='afiliados');
+  if(enAfil&&S.af){ S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.convOpenAlta=false; render(); return; }
+  if(S.user&&S.user.rol==='superadmin'){ superNav('afiliados'); } else { S.tab='afiliados'; render(); }
 }
 
 /* ---- Campañas (ABM, baja lógica) ---- */

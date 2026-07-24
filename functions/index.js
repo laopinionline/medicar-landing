@@ -1697,6 +1697,36 @@ exports.solicitarAfiliacion = onCall(async (request) => {
   return { ok: true };
 });
 
+/* PANEL — gestionarProspecto: acciones del STAFF sobre un lead del funnel (contactado / descartar / reactivar). La
+   colección prospectos sigue write:false → todo pasa por esta CF (Admin SDK). Gate: cap 'marketing' o superadmin. */
+exports.gestionarProspecto = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uSnap = await db.collection('usuarios').doc(request.auth.uid).get();
+  const u = uSnap.exists ? (uSnap.data() || {}) : {};
+  const roles = Array.isArray(u.roles) ? u.roles : (u.rol ? [u.rol] : []);
+  if (!(roles.includes('superadmin') || (u.permisos && u.permisos.marketing === true))) throw new HttpsError('permission-denied', 'Necesitás la habilidad Marketing.');
+  const d = request.data || {};
+  const prospectoId = String(d.prospectoId || '');
+  const accion = String(d.accion || '');
+  if (!prospectoId) throw new HttpsError('invalid-argument', 'Falta el prospecto.');
+  const ref = db.collection('prospectos').doc(prospectoId);
+  if (!(await ref.get()).exists) throw new HttpsError('not-found', 'Prospecto inexistente.');
+  const quien = u.nombre || (request.auth.token && request.auth.token.email) || request.auth.uid;
+  if (accion === 'contactado') {
+    await ref.set({ gestion: { contactado: true, contactadoEn: FV(), contactadoPor: quien } }, { merge: true });
+  } else if (accion === 'descontactar') {
+    await ref.set({ gestion: { contactado: false, contactadoEn: null, contactadoPor: null } }, { merge: true });
+  } else if (accion === 'descartar') {
+    const motivo = String(d.motivo || '').trim().slice(0, 120);
+    if (!motivo) throw new HttpsError('invalid-argument', 'Falta el motivo del descarte.');
+    await ref.set({ gestion: { descartado: true, descartadoMotivo: motivo, descartadoEn: FV(), descartadoPor: quien } }, { merge: true });
+  } else if (accion === 'reactivar') {
+    await ref.set({ gestion: { descartado: false, descartadoMotivo: null, descartadoEn: null } }, { merge: true });
+  } else throw new HttpsError('invalid-argument', 'Acción inválida.');
+  logger.info('[gestionarProspecto]', { prospecto: prospectoId, accion, por: request.auth.uid });
+  return { ok: true };
+});
+
 /* PUENTE DE COMPRA — checkoutAfiliacion: el prospecto eligió plan y "pagó" (SIMULADO, client-side). La CF persiste el
    LEAD ENRIQUECIDO (plan/integrantes/total recomputado server-side + datos de alta) y deja estado 'afiliacion_en_proceso'.
    A5: la activación REAL la hace el admin desde este lead (el pago simulado NO da de alta al socio). */
