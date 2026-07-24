@@ -1280,9 +1280,11 @@ function afiliacionCTA(){
       <div style="font-size:.8rem;color:var(--gris);margin-top:.25rem">Estamos activando tu cobertura — te contactamos para los últimos pasos.</div></div>`;
   }
   if(est==='solicito_afiliacion'){
+    // La confirmación del asesor NO reemplaza el CTA de compra: el prospecto puede autocomprar online igual.
     return `<div style="margin-top:.9rem;background:#eafaf0;border:1px solid #bfe6cd;border-radius:12px;padding:.9rem;text-align:center">
       <div style="font-weight:800;color:var(--verde,#2E8B57)">Un asesor te contacta ✓</div>
-      <div style="font-size:.8rem;color:var(--gris);margin-top:.25rem">Recibimos tu solicitud. Un asesor de MEDICAR se comunica a la brevedad.</div></div>`;
+      <div style="font-size:.8rem;color:var(--gris);margin-top:.25rem">Recibimos tu solicitud. Un asesor de MEDICAR se comunica a la brevedad.</div></div>
+    <button class="btn-r" onclick="abrirPuente(null)" style="margin-top:.7rem;width:100%">O afiliate ahora online</button>`;
   }
   return `<button class="btn-r" onclick="abrirPuente(null)" style="margin-top:.9rem;width:100%">✚ Quiero afiliarme a MEDICAR</button>`;
 }
@@ -1927,7 +1929,9 @@ function edadDe(iso){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso||''));
 function abrirPuente(planKey){
   if(!esProspectoUI()) return; // REGRESIÓN: el puente es solo del prospecto; el socio jamás lo alcanza
   const est=(S.prospecto&&S.prospecto.estado)||'nuevo';
-  if(est==='afiliacion_en_proceso'||est==='solicito_afiliacion'){ set({ view:'prospecto' }); return; } // ya solicitó → no reabrir el checkout (no duplica)
+  // Solo bloquea el checkout ya COMPLETADO (no comprar dos veces). Con 'solicito_afiliacion' (pidió asesor) el
+  // prospecto PUEDE autocomprar igual — el checkout es el camino principal; completarlo pisa el estado de asesor.
+  if(est==='afiliacion_en_proceso'){ set({ view:'prospecto' }); return; }
   S.puente={ step:'selector', planKey:planKey||'', integrantes:2, datos:{ fechaNac:'', domicilio:'', localidad:'' }, err:'', busy:false };
   S.view='puente'; render(); navPush();
 }
