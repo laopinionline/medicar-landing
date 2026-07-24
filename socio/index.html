@@ -1089,6 +1089,7 @@ auth.onAuthStateChanged(async user => {
     // Canje PENDIENTE del flujo por código (identidad recién resuelta: cuenta creada o socio recién logueado).
     // El código YA se validó antes de crear la cuenta → acá solo lo consumimos y vamos al panel.
     if(S.refCanjePendiente){ await procesarCanjePendiente(user); return; }
+    if(S.prospectoPendiente){ await procesarAltaProspecto(user); return; } // alta de prospecto recién creada → home de prospecto (sin cartel de vínculo)
 
     const tok = await user.getIdTokenResult();
     const esRef = !!(tok.claims && tok.claims.rol === 'referente'); // marca de referente (NO gobierna acceso a datos)
@@ -1191,55 +1192,67 @@ function loginView(){
       <div style="font-size:.82rem;color:var(--gris);margin-bottom:.5rem">¿Querés consultar con MEDICAR IA?</div>
       <button class="btn-o" onclick="irRegistro()" style="width:100%">Crear una cuenta</button>
     </div>
-    <div class="foot-note" style="margin-top:1.1rem">Ante una emergencia llamá al <b>${TEL_EMERG}</b>.</div>
   </div>`;
 }
-function irRegistro(){ set({ view:'registro', busy:false, err:'' }); navPush(); }
+function irRegistro(){ set({ view:'registro', busy:false, err:'', reg:null }); navPush(); } // reg:null = formulario en blanco al abrir
 function registroView(){
+  const g = S.reg || {}; // valores conservados entre re-renders (un error de validación NO borra el formulario)
   return `<div class="login">
     <div class="login-brand"><div class="brand">${chv(28)}<span class="word">medicar</span></div><div class="login-sub">Crear cuenta</div></div>
     <h2>Crear cuenta</h2>
     <p style="font-size:.82rem;color:var(--gris);margin:-.3rem 0 .9rem">Creá una cuenta para consultar con MEDICAR IA.</p>
     <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
-    <div class="field"><label>Nombre y apellido</label><input id="rg-nom" type="text" autocomplete="name" placeholder="Tu nombre y apellido"></div>
-    <div class="field"><label>DNI</label><input id="rg-dni" type="text" inputmode="numeric" autocomplete="off" placeholder="Sin puntos"></div>
-    <div class="field"><label>Teléfono</label><input id="rg-tel" type="tel" inputmode="tel" autocomplete="tel" placeholder="Cód. de área + número"></div>
-    <div class="field"><label>Email</label><input id="rg-em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com"></div>
-    <div class="field"><label>Contraseña</label><input id="rg-pw" type="password" autocomplete="new-password" placeholder="Mínimo 6 caracteres"></div>
-    <div class="field"><label>Repetí la contraseña</label><input id="rg-pw2" type="password" autocomplete="new-password" placeholder="Volvé a escribirla"></div>
+    <div class="field"><label>Nombre y apellido</label><input id="rg-nom" type="text" autocomplete="name" placeholder="Tu nombre y apellido" value="${esc(g.nombre)}"></div>
+    <div class="field"><label>DNI</label><input id="rg-dni" type="text" inputmode="numeric" autocomplete="off" placeholder="Sin puntos" value="${esc(g.dni)}"></div>
+    <div class="field"><label>Teléfono</label><input id="rg-tel" type="tel" inputmode="tel" autocomplete="tel" placeholder="Cód. de área + número" value="${esc(g.tel)}"></div>
+    <div class="field"><label>Email</label><input id="rg-em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com" value="${esc(g.email)}"></div>
+    <div class="field"><label>Contraseña</label><input id="rg-pw" type="password" autocomplete="new-password" placeholder="Mínimo 6 caracteres" value="${esc(g.pw)}"></div>
+    <div class="field"><label>Repetí la contraseña</label><input id="rg-pw2" type="password" autocomplete="new-password" placeholder="Volvé a escribirla" value="${esc(g.pw2)}"></div>
     <button class="btn-r" onclick="doRegistro()">${S.busy?'Creando…':'Crear cuenta'}${S.busy?'':chv(15,'cw')}</button>
     <button class="linkish" onclick="navBack()" style="margin-top:1rem;background:none;border:none;color:var(--rojo);font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">Ya tengo cuenta</button>
   </div>`;
 }
 async function doRegistro(){
   if(S.busy) return;
-  const nombre=(el('rg-nom')?.value||'').trim();
-  const dni=(el('rg-dni')?.value||'').trim();
-  const tel=(el('rg-tel')?.value||'').trim();
-  const email=(el('rg-em')?.value||'').trim();
-  const pw=el('rg-pw')?.value||'';
-  const pw2=el('rg-pw2')?.value||'';
-  const dniDig=dni.replace(/\D/g,''); const telDig=tel.replace(/\D/g,'');
-  if(!nombre){ set({ err:'Ingresá tu nombre y apellido.' }); return; }
-  if(dniDig.length<7 || dniDig.length>8){ set({ err:'Ingresá un DNI válido (7 u 8 números).' }); return; }
-  if(telDig.length<8){ set({ err:'Ingresá un teléfono válido (con código de área).' }); return; }
-  if(!email){ set({ err:'Ingresá tu email.' }); return; }
-  if(pw.length<6){ set({ err:'La contraseña necesita al menos 6 caracteres.' }); return; }
-  if(pw!==pw2){ set({ err:'Las contraseñas no coinciden.' }); return; } // verificado ANTES de crear la cuenta
-  set({ busy:true, err:'' });
+  const reg={ nombre:(el('rg-nom')?.value||'').trim(), dni:(el('rg-dni')?.value||'').trim(), tel:(el('rg-tel')?.value||'').trim(),
+              email:(el('rg-em')?.value||'').trim(), pw:el('rg-pw')?.value||'', pw2:el('rg-pw2')?.value||'' };
+  const dniDig=reg.dni.replace(/\D/g,''); const telDig=reg.tel.replace(/\D/g,'');
+  // Validación: ante CUALQUIER error se conserva todo el formulario (set con reg) — solo se muestra el mensaje.
+  const err = !reg.nombre ? 'Ingresá tu nombre y apellido.'
+    : (dniDig.length<7||dniDig.length>8) ? 'Ingresá un DNI válido (7 u 8 números).'
+    : telDig.length<8 ? 'Ingresá un teléfono válido (con código de área).'
+    : !reg.email ? 'Ingresá tu email.'
+    : reg.pw.length<6 ? 'La contraseña necesita al menos 6 caracteres.'
+    : reg.pw!==reg.pw2 ? 'Las contraseñas no coinciden.'
+    : '';
+  if(err){ set({ err, reg }); return; } // ← el formulario NO se borra
+  // El alta la termina onAuthStateChanged (ve prospectoPendiente → registrarProspecto → home de prospecto). Así el
+  // prospecto NUNCA ve el cartel de "cuenta sin vínculo": la vista se decide DESPUÉS de que exista prospectos/{uid}.
+  S.prospectoPendiente={ nombre:reg.nombre, telefono:reg.tel, dni:reg.dni };
+  set({ busy:true, err:'', reg });
   try{
-    await auth.createUserWithEmailAndPassword(email, pw);
-    // La cuenta Auth ya existe; registramos el prospecto (Admin SDK, valida tel+DNI) ANTES de dejar rutear onAuthStateChanged.
-    await fnsCall('registrarProspecto', { nombre, telefono:tel, dni });
-    // onAuthStateChanged tomará el control; cargarCredencial verá prospectos/{uid} → home de prospecto.
+    await auth.createUserWithEmailAndPassword(reg.email, reg.pw);
+    // onAuthStateChanged toma el control (ve prospectoPendiente).
   }catch(e){
+    S.prospectoPendiente=null; // el alta falló → no queda alta colgada
     const code=(e&&e.code)||'';
     const msg = /email-already-in-use/.test(code) ? 'Ese email ya tiene una cuenta. Ingresá con ella.'
       : (/invalid-email/.test(code) ? 'El email no es válido.'
       : (/weak-password/.test(code) ? 'La contraseña es muy débil (mínimo 6 caracteres).'
-      : ((e&&e.message&&/dni|tel/i.test(e.message)) ? e.message
-      : 'No se pudo crear la cuenta. Revisá tu conexión.')));
-    set({ busy:false, err:msg });
+      : 'No se pudo crear la cuenta. Revisá tu conexión.'));
+    set({ busy:false, err:msg, reg }); // conserva el formulario también en error de Auth
+  }
+}
+// Termina el alta del prospecto DENTRO del callback de auth (garantiza prospectos/{uid} antes de rutear la vista).
+async function procesarAltaProspecto(user){
+  const datos=S.prospectoPendiente; S.prospectoPendiente=null;
+  try{
+    await fnsCall('registrarProspecto', datos);
+    set({ view:'prospecto', prospecto:{ nombre:datos.nombre }, cred:null, reg:null, busy:false, ia:null }); navReplace();
+  }catch(e){
+    // Cuenta Auth creada pero el registro falló (raro: el cliente ya validó tel/DNI). Volvé al form con el mensaje.
+    const msg=(e&&e.message&&/dni|tel/i.test(e.message)) ? e.message : 'No pudimos completar tu registro. Probá de nuevo.';
+    set({ view:'registro', err:msg, busy:false });
   }
 }
 function prospectoView(){
