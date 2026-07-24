@@ -632,8 +632,9 @@ function navPush(){ if(navRestoring) return; try{ history.pushState(navDesc(),''
 function navReplace(){ if(navRestoring) return; try{ history.replaceState(navDesc(),''); }catch(_){} } // base (home/login)
 function navBack(){ history.back(); }                                                                  // "Volver/Cancelar" internos
 function navRestore(desc){
-  // Prospecto (sin credencial): el único "atrás" es cerrar el chat → volver a su home reducida.
+  // Prospecto (sin credencial): el "atrás" cierra el chat o el puente → vuelve a su home reducida.
   if(esProspectoUI() && S.view==='asistente'){ navRestoring=true; try{ cerrarAsistente(); }finally{ navRestoring=false; } return; }
+  if(esProspectoUI() && S.view==='puente'){ navRestoring=true; try{ puenteCerrar(); }finally{ navRestoring=false; } return; }
   // solo dentro de la app (home + apiladas). login/boot/no-afiliado/sin-vinculo/error los maneja onAuthStateChanged.
   if(!S.cred || !(S.view==='home' || APILADAS.includes(S.view))) return;
   navRestoring=true;
@@ -1228,7 +1229,7 @@ async function doRegistro(){
   if(err){ set({ err, reg }); return; } // ← el formulario NO se borra
   // El alta la termina onAuthStateChanged (ve prospectoPendiente → registrarProspecto → home de prospecto). Así el
   // prospecto NUNCA ve el cartel de "cuenta sin vínculo": la vista se decide DESPUÉS de que exista prospectos/{uid}.
-  S.prospectoPendiente={ nombre:reg.nombre, telefono:reg.tel, dni:reg.dni };
+  S.prospectoPendiente={ nombre:reg.nombre, telefono:reg.tel, dni:reg.dni, email:reg.email };
   set({ busy:true, err:'', reg });
   try{
     await auth.createUserWithEmailAndPassword(reg.email, reg.pw);
@@ -1248,7 +1249,7 @@ async function procesarAltaProspecto(user){
   const datos=S.prospectoPendiente; S.prospectoPendiente=null;
   try{
     await fnsCall('registrarProspecto', datos);
-    set({ view:'prospecto', prospecto:{ nombre:datos.nombre }, cred:null, reg:null, busy:false, ia:null }); navReplace();
+    set({ view:'prospecto', prospecto:{ nombre:datos.nombre, dni:datos.dni, telefono:datos.telefono, email:datos.email, estado:'nuevo' }, cred:null, reg:null, busy:false, ia:null }); navReplace();
   }catch(e){
     // Cuenta Auth creada pero el registro falló (raro: el cliente ya validó tel/DNI). Volvé al form con el mensaje.
     const msg=(e&&e.message&&/dni|tel/i.test(e.message)) ? e.message : 'No pudimos completar tu registro. Probá de nuevo.';
@@ -1265,9 +1266,25 @@ function prospectoView(){
       <span class="tile-tx"><span class="tile-t">Consultá con MEDICAR IA</span><span class="tile-s">Preguntá por planes, cobertura o cómo cuidarte.</span></span>
       <span class="tile-go">${chv(15)}</span>
     </button>
-    <button class="btn-r" onclick="iaAfiliarme()" style="margin-top:.9rem;width:100%">✚ Quiero afiliarme a MEDICAR</button>
+    ${afiliacionCTA()}
     <div class="foot-note" style="margin-top:auto;padding-top:1.2rem;text-align:center">MEDICAR — Emergencias médicas · Pergamino</div>
   </div>`;
+}
+// CTA de afiliación de la home del prospecto según su estado (persiste vía prospectos/{uid}.estado): disponible /
+// afiliación en proceso (post-checkout) / asesor solicitado. En proceso o asesor → botón hecho, no re-clickeable.
+function afiliacionCTA(){
+  const est = (S.prospecto && S.prospecto.estado) || 'nuevo';
+  if(est==='afiliacion_en_proceso'){
+    return `<div style="margin-top:.9rem;background:#eafaf0;border:1px solid #bfe6cd;border-radius:12px;padding:.9rem;text-align:center">
+      <div style="font-weight:800;color:var(--verde,#2E8B57)">Afiliación en proceso ✓</div>
+      <div style="font-size:.8rem;color:var(--gris);margin-top:.25rem">Estamos activando tu cobertura — te contactamos para los últimos pasos.</div></div>`;
+  }
+  if(est==='solicito_afiliacion'){
+    return `<div style="margin-top:.9rem;background:#eafaf0;border:1px solid #bfe6cd;border-radius:12px;padding:.9rem;text-align:center">
+      <div style="font-weight:800;color:var(--verde,#2E8B57)">Un asesor te contacta ✓</div>
+      <div style="font-size:.8rem;color:var(--gris);margin-top:.25rem">Recibimos tu solicitud. Un asesor de MEDICAR se comunica a la brevedad.</div></div>`;
+  }
+  return `<button class="btn-r" onclick="abrirPuente(null)" style="margin-top:.9rem;width:100%">✚ Quiero afiliarme a MEDICAR</button>`;
 }
 
 function bootView(){ return `<div class="center"><svg class="chev chev-load" width="30" height="37" viewBox="0 0 1794 2190"><use href="#cm"/></svg><p style="margin-top:1rem;color:var(--gris)">Cargando tu credencial…</p></div>`; }
@@ -1884,15 +1901,148 @@ async function iaMandar(mensaje){
 function iaAccion(accion){
   if(accion==='emergencia'){ location.href='tel:'+TEL_EMERG; return; }
   if(accion==='medico'){ iaEscalar(); return; }
-  if(accion==='afiliarme'){ iaAfiliarme(); return; }
+  if(accion==='afiliarme'){ // desde el chat: si la IA nombró un plan, el puente abre con ESE plan pre-seleccionado
+    const ult=((S.ia&&S.ia.msgs)||[]).filter(m=>m.role==='ia').slice(-1)[0];
+    abrirPuente(planDeTexto(ult?ult.texto:''));
+    return;
+  }
   if(accion==='plan'){ abrirCambiarPlan(); return; }
   if(accion==='comprobantes'||accion==='pagar'){ abrirComprobantes(); return; }
   if(accion==='turno'){ cerrarAsistente(); return; } // los turnos viven en el home
 }
 // Conversión del prospecto: marca el lead (CF, fire-and-forget) + abre el form AFILIARME de la landing.
-async function iaAfiliarme(){
-  try{ fnsCall('solicitarAfiliacion', {}).catch(()=>{}); }catch(_){}
-  try{ window.open('https://medicaronline.ar/#contacto', '_blank', 'noopener'); }catch(_){ location.href='https://medicaronline.ar/#contacto'; }
+/* ===================== PUENTE DE COMPRA (checkout de afiliación del prospecto) =====================
+   Solo-prospecto. Pasos: selector → resumen → datos → pago SIMULADO → post-pago. checkoutAfiliacion persiste el lead
+   enriquecido (estado 'afiliacion_en_proceso'); la activación real la hace el admin (A5). Catálogo curado client-side
+   (espeja el server; los docs de planes no traen elegibilidad). Área Protegida/Corporativo NO son de persona → fuera. */
+const PLANES_COMERCIALES = [
+  { key:'joven',    nombre:'Plan Joven',    para:'Individual, hasta 40 años', precio:20000, maxEdad:40, incluye:['Emergencias 24hs','Consultas por videollamada'] },
+  { key:'familiar', nombre:'Plan Familiar', para:'Toda la familia, todas las edades', base:40000, adicional:10000, baseIntegrantes:2, incluye:['Emergencias 24hs','Consultas por videollamada','Chequeo semanal'] },
+  { key:'senior',   nombre:'Plan Senior',   para:'Adultos mayores', precio:60000, incluye:['Emergencias 24hs','Consultas por videollamada'] },
+];
+const planDe = (k) => PLANES_COMERCIALES.find(p=>p.key===k) || null;
+function planDeTexto(txt){ const t=String(txt||''); if(/plan\s+joven/i.test(t))return 'joven'; if(/plan\s+familiar/i.test(t))return 'familiar'; if(/plan\s+senior/i.test(t))return 'senior'; return null; }
+function totalPlan(key,integrantes){ if(key==='familiar'){ const n=Math.max(2,Math.min(12,Number(integrantes)||2)); return { total:40000+Math.max(0,n-2)*10000, n }; } return { total:(key==='joven'?20000:60000), n:1 }; }
+function edadDe(iso){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso||'')); if(!m) return null; const h=new Date(); let e=h.getFullYear()-(+m[1]); if(((h.getMonth()+1)*100+h.getDate())<((+m[2])*100+(+m[3]))) e--; return e; }
+function abrirPuente(planKey){
+  if(!esProspectoUI()) return; // REGRESIÓN: el puente es solo del prospecto; el socio jamás lo alcanza
+  const est=(S.prospecto&&S.prospecto.estado)||'nuevo';
+  if(est==='afiliacion_en_proceso'||est==='solicito_afiliacion'){ set({ view:'prospecto' }); return; } // ya solicitó → no reabrir el checkout (no duplica)
+  S.puente={ step:'selector', planKey:planKey||'', integrantes:2, datos:{ fechaNac:'', domicilio:'', localidad:'' }, err:'', busy:false };
+  S.view='puente'; render(); navPush();
+}
+function puenteCerrar(){ S.puente=null; S.view='prospecto'; render(); }
+function puenteSel(k){ S.puente.planKey=k; S.puente.err=''; render(); }
+function puenteInteg(delta){ S.puente.integrantes=Math.max(2,Math.min(12,(S.puente.integrantes||2)+delta)); render(); }
+function puentePaso(step){ S.puente.step=step; S.puente.err=''; render(); const c=el('app'); if(c) c.scrollTop=0; }
+function puenteDato(k,v){ S.puente.datos[k]=v; }
+async function puentePagar(){
+  const P=S.puente; if(P.busy) return; P.busy=true; P.err=''; render();
+  try{
+    await fnsCall('checkoutAfiliacion', { planKey:P.planKey, integrantes:P.integrantes, fechaNacimiento:P.datos.fechaNac, domicilio:P.datos.domicilio, localidad:P.datos.localidad });
+    if(S.prospecto) S.prospecto.estado='afiliacion_en_proceso'; // la home ya muestra "Afiliación en proceso ✓"
+    P.step='ok'; P.busy=false; render();
+  }catch(e){ P.busy=false; P.err=errCF(e,'No se pudo completar. Probá de nuevo.'); render(); }
+}
+async function pedirAsesor(){
+  const P=S.puente; if(P&&P.busy) return; if(P) P.busy=true; render();
+  try{ await fnsCall('solicitarAfiliacion', {}); if(S.prospecto) S.prospecto.estado='solicito_afiliacion'; if(P){ P.step='asesor'; P.busy=false; } render(); }
+  catch(e){ if(P){ P.busy=false; P.err=errCF(e,'No se pudo enviar. Probá de nuevo.'); } render(); }
+}
+function puenteView(){
+  if(!esProspectoUI()){ return prospectoView(); } // guarda dura: solo prospecto
+  const P=S.puente||{}; const step=P.step||'selector'; const money=(n)=>'$'+Number(n||0).toLocaleString('es-AR');
+  const top=(t,cerrarLbl)=>`<div class="topbar">${chv(16)}<div class="tb-t" style="margin-left:.4rem">${t}</div><div class="tb-sp"></div><button class="mini" onclick="puenteCerrar()">${cerrarLbl||'Cerrar'}</button></div>`;
+  if(step==='ok'){
+    return `<div class="home" style="padding:1rem">${top('Afiliación','Listo')}
+      <div style="text-align:center;margin-top:2rem"><div style="font-size:2.6rem">🎉</div>
+      <div style="font-size:1.15rem;font-weight:800;margin-top:.5rem">¡Bienvenido a MEDICAR!</div>
+      <div style="color:var(--gris);font-size:.9rem;margin:.5rem 0 1.3rem;line-height:1.5">Estamos activando tu cobertura — te contactamos para los últimos pasos.</div>
+      <button class="btn-r" onclick="puenteCerrar()" style="width:100%">Volver al inicio</button></div></div>`;
+  }
+  if(step==='asesor'){
+    return `<div class="home" style="padding:1rem">${top('Afiliación','Listo')}
+      <div style="text-align:center;margin-top:2rem"><div style="font-size:2.4rem">📞</div>
+      <div style="font-size:1.1rem;font-weight:800;margin-top:.5rem">¡Listo!</div>
+      <div style="color:var(--gris);font-size:.9rem;margin:.5rem 0 1.3rem;line-height:1.5">Un asesor de MEDICAR te contacta a la brevedad para completar tu afiliación.</div>
+      <button class="btn-r" onclick="puenteCerrar()" style="width:100%">Volver al inicio</button></div></div>`;
+  }
+  const errBox = P.err?`<div class="err on" style="margin:.4rem 0">${esc(P.err)}</div>`:'';
+  if(step==='selector'){
+    const cards=PLANES_COMERCIALES.map(p=>{
+      const on=P.planKey===p.key; const precio=p.key==='familiar'?('desde '+money(p.base)):money(p.precio);
+      const integ=(on&&p.key==='familiar')?`<div style="margin-top:.5rem;display:flex;align-items:center;justify-content:center;gap:.7rem">
+          <button onclick="event.stopPropagation();puenteInteg(-1)" style="width:30px;height:30px;border-radius:8px;border:1px solid var(--linea);background:#fff;font-weight:800;cursor:pointer">−</button>
+          <div style="min-width:8rem;text-align:center"><b>${P.integrantes}</b> personas</div>
+          <button onclick="event.stopPropagation();puenteInteg(1)" style="width:30px;height:30px;border-radius:8px;border:1px solid var(--linea);background:#fff;font-weight:800;cursor:pointer">+</button>
+        </div><div style="text-align:center;font-size:.72rem;color:var(--gris);margin-top:.35rem">2 base + ${Math.max(0,P.integrantes-2)} adicionales</div>`:'';
+      const total=(on&&p.key==='familiar')?`<div style="text-align:center;font-weight:800;color:var(--rojo);margin-top:.35rem">${money(totalPlan('familiar',P.integrantes).total)}/mes</div>`:'';
+      return `<div onclick="puenteSel('${p.key}')" style="border:2px solid ${on?'var(--rojo)':'var(--linea)'};border-radius:14px;padding:.8rem;margin-bottom:.7rem;cursor:pointer;background:${on?'#fff6f6':'#fff'}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><div style="font-weight:800">${p.nombre}</div><div style="font-weight:800;color:var(--rojo)">${precio}${p.key==='familiar'?'':'/mes'}</div></div>
+        <div style="font-size:.78rem;color:var(--gris);margin:.15rem 0 .4rem">${p.para}</div>
+        <div style="font-size:.75rem;color:var(--tinta)">${p.incluye.map(i=>'✓ '+i).join(' &nbsp; ')}</div>
+        ${integ}${total}</div>`;
+    }).join('');
+    return `<div class="home" style="padding:1rem">${top('Elegí tu plan')}
+      ${errBox}
+      <div style="font-size:.82rem;color:var(--gris);margin-bottom:.7rem">Planes personales de MEDICAR. Elegí el que mejor se adapte a vos.</div>
+      ${cards}
+      <button class="btn-r" ${P.planKey?'':'disabled'} onclick="${P.planKey?"puentePaso('resumen')":''}" style="width:100%;margin-top:.4rem;opacity:${P.planKey?'1':'.5'}">Continuar</button>
+      <button class="linkish" onclick="pedirAsesor()" ${P.busy?'disabled':''} style="margin-top:.9rem;background:none;border:none;color:var(--gris);font-size:.8rem;text-decoration:underline;cursor:pointer;width:100%">${P.busy?'Enviando…':'Prefiero que me contacte un asesor'}</button>
+    </div>`;
+  }
+  const plan=planDe(P.planKey)||{}; const calc=totalPlan(P.planKey,P.integrantes);
+  if(step==='resumen'){
+    const desglose=P.planKey==='familiar'?`<div class="row"><span class="rl">Integrantes</span><span class="rv">2 base + ${Math.max(0,P.integrantes-2)} adicionales = ${P.integrantes}</span></div>`:'';
+    return `<div class="home" style="padding:1rem">${top('Resumen')}
+      <div class="card" style="padding:1rem">
+        <div class="row"><span class="rl">Plan</span><span class="rv" style="font-weight:800">${plan.nombre}</span></div>
+        ${desglose}
+        <div class="row" style="border-top:1px solid var(--linea);margin-top:.4rem;padding-top:.5rem"><span class="rl" style="font-weight:800">Total mensual</span><span class="rv" style="font-weight:800;color:var(--rojo);font-size:1.1rem">${money(calc.total)}</span></div>
+      </div>
+      <button class="btn-r" onclick="puentePaso('datos')" style="width:100%;margin-top:1rem">Continuar</button>
+      <button class="linkish" onclick="puentePaso('selector')" style="margin-top:.8rem;background:none;border:none;color:var(--rojo);font-size:.8rem;text-decoration:underline;cursor:pointer;width:100%">Cambiar plan</button>
+    </div>`;
+  }
+  if(step==='datos'){
+    const pr=S.prospecto||{}; const g=P.datos;
+    const pre=[['Nombre',pr.nombre],['DNI',pr.dni],['Teléfono',pr.telefono],['Email',pr.email]].filter(r=>r[1]).map(r=>`<div class="row"><span class="rl">${r[0]}</span><span class="rv">${esc(r[1])}</span></div>`).join('');
+    return `<div class="home" style="padding:1rem">${top('Tus datos')}
+      ${errBox}
+      <div class="card" style="padding:.8rem 1rem;margin-bottom:.8rem">${pre}<div class="row" style="border-top:1px solid var(--linea);margin-top:.3rem;padding-top:.4rem"><span class="rl" style="font-size:.72rem;color:var(--gris)">Ya tenemos estos datos de tu registro</span><span class="rv"></span></div></div>
+      <div class="field"><label>Fecha de nacimiento</label><input id="pt-fn" type="date" value="${esc(g.fechaNac)}" oninput="puenteDato('fechaNac',this.value)"></div>
+      <div class="field"><label>Domicilio</label><input id="pt-dom" type="text" placeholder="Calle y número" value="${esc(g.domicilio)}" oninput="puenteDato('domicilio',this.value)"></div>
+      <div class="field"><label>Localidad</label><input id="pt-loc" type="text" placeholder="Localidad" value="${esc(g.localidad)}" oninput="puenteDato('localidad',this.value)"></div>
+      <button class="btn-r" onclick="puenteDatosContinuar()" style="width:100%;margin-top:.4rem">Continuar al pago</button>
+      <button class="linkish" onclick="puentePaso('resumen')" style="margin-top:.8rem;background:none;border:none;color:var(--rojo);font-size:.8rem;text-decoration:underline;cursor:pointer;width:100%">Volver</button>
+    </div>`;
+  }
+  if(step==='pago'){
+    return `<div class="home" style="padding:1rem">${top('Pago')}
+      ${errBox}
+      <div style="background:#fff8e6;border:1px solid #f3e2b0;border-radius:10px;padding:.6rem .8rem;font-size:.76rem;color:#8a6d1f;margin-bottom:.9rem;text-align:center">SIMULACIÓN — no se realiza ningún cobro real.</div>
+      <div class="card" style="padding:1.1rem 1rem;text-align:center">
+        <div style="font-size:.8rem;color:var(--gris)">${esc(plan.nombre)}${P.planKey==='familiar'?(' · '+P.integrantes+' personas'):''}</div>
+        <div style="font-size:1.8rem;font-weight:800;margin:.15rem 0 1rem">${money(calc.total)}<span style="font-size:.9rem;font-weight:600;color:var(--gris)">/mes</span></div>
+        <button class="btn-r" onclick="puentePagar()" ${P.busy?'disabled':''} style="width:100%;opacity:${P.busy?'.6':'1'}">${P.busy?'Procesando…':'Pagar (simulado)'}</button>
+      </div>
+      <button class="linkish" onclick="puentePaso('datos')" style="margin-top:.8rem;background:none;border:none;color:var(--rojo);font-size:.8rem;text-decoration:underline;cursor:pointer;width:100%">Volver</button>
+    </div>`;
+  }
+  return prospectoView();
+}
+function puenteDatosContinuar(){
+  const P=S.puente, g=P.datos;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(g.fechaNac||'')){ P.err='Ingresá tu fecha de nacimiento.'; render(); return; }
+  if(!(g.domicilio||'').trim()){ P.err='Ingresá tu domicilio.'; render(); return; }
+  if(!(g.localidad||'').trim()){ P.err='Ingresá tu localidad.'; render(); return; }
+  // Elegibilidad Joven ≤40: no solo bloquea — ofrece la alternativa (Familiar / asesor).
+  const ed=edadDe(g.fechaNac);
+  if(P.planKey==='joven' && ed!=null && ed>40){
+    P.err='El Plan Joven es hasta 40 años. Podés elegir el Plan Familiar, o pedir que te contacte un asesor.';
+    P.step='selector'; render(); return;
+  }
+  puentePaso('pago');
 }
 function homeReporteBlock(c){
   return `<div class="sec">
@@ -2636,6 +2786,7 @@ function render(){
     case 'login': html=loginView(); break;
     case 'registro': html=registroView(); break;
     case 'prospecto': html=prospectoView(); break;
+    case 'puente': html=puenteView(); break;
     case 'referente-codigo': html=referenteCodigoView(); break;
     case 'referente-login': html=referenteLoginView(); break;
     case 'referente-auth': html=referenteAuthView(); break;
