@@ -1532,8 +1532,9 @@ exports.asistenteChat = onCall(async (request) => {
       chequeo = { respondioSemana: lastMs > 0 && (Date.now() - lastMs) < 7 * 86400000, diaRecordatorio: (typeof pref === 'number' && pref >= 0 && pref <= 6) ? DIAS[pref] : null };
     } catch (e) { logger.warn('[asistenteChat] no se pudo leer chequeo', { err: e.message }); }
 
-    // ÚLTIMOS SIGNOS (chequeos_parametros): el más reciente. N3 INVIOLABLE: NUNCA los news2* (score/nivel), solo los valores crudos que cargó el socio.
-    let signos = null;
+    // ÚLTIMOS SIGNOS (chequeos_parametros): el más reciente. N3 INVIOLABLE: NUNCA los news2* (score/nivel), solo los valores
+    // crudos que cargó el socio. Sin signos → {vacio:true} (la ausencia se AFIRMA); solo si la query FALLA → null (se omite).
+    let signos = { vacio: true };
     try {
       const sq = await db.collection('chequeos_parametros').where('personaId', '==', personaId).get();
       if (!sq.empty) {
@@ -1541,7 +1542,7 @@ exports.asistenteChat = onCall(async (request) => {
         const fecha = ult.creadoEn && ult.creadoEn.toDate ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(ult.creadoEn.toDate()) : '';
         signos = { fecha, fc: ult.fc != null ? ult.fc : null, sis: ult.sis != null ? ult.sis : null, temp: ult.temp != null ? ult.temp : null, spo2: ult.spo2 != null ? ult.spo2 : null };
       }
-    } catch (e) { logger.warn('[asistenteChat] no se pudieron leer signos', { err: e.message }); }
+    } catch (e) { signos = null; logger.warn('[asistenteChat] no se pudieron leer signos', { err: e.message }); }
 
     // catálogo de planes = curado en buildContexto (landing); NO se lee de Firestore (los docs no traen elegibilidad).
     const nombre = (socio && socio.nombreVista) ? String(socio.nombreVista).split(',').pop().trim().split(' ')[0] : 'socio';
