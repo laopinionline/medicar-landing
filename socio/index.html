@@ -632,6 +632,8 @@ function navPush(){ if(navRestoring) return; try{ history.pushState(navDesc(),''
 function navReplace(){ if(navRestoring) return; try{ history.replaceState(navDesc(),''); }catch(_){} } // base (home/login)
 function navBack(){ history.back(); }                                                                  // "Volver/Cancelar" internos
 function navRestore(desc){
+  // Prospecto (sin credencial): el único "atrás" es cerrar el chat → volver a su home reducida.
+  if(esProspectoUI() && S.view==='asistente'){ navRestoring=true; try{ cerrarAsistente(); }finally{ navRestoring=false; } return; }
   // solo dentro de la app (home + apiladas). login/boot/no-afiliado/sin-vinculo/error los maneja onAuthStateChanged.
   if(!S.cred || !(S.view==='home' || APILADAS.includes(S.view))) return;
   navRestoring=true;
@@ -945,7 +947,11 @@ function calcularNEWS2(fc, sis, temp, spo2){
 /* ---------- Carga de datos del socio ---------- */
 async function cargarCredencial(uid){
   const uDoc = await db.collection('usuarios').doc(uid).get();
-  if(!uDoc.exists) return { estado:'sin-vinculo', u:null };
+  // Sin usuarios doc: puede ser un PROSPECTO autoregistrado (prospectos/{uid}). Si no, sin-vínculo.
+  if(!uDoc.exists){
+    try{ const p = await db.collection('prospectos').doc(uid).get(); if(p.exists) return { estado:'prospecto', u:null, prospecto:p.data() }; }catch(_){}
+    return { estado:'sin-vinculo', u:null };
+  }
   const u = uDoc.data();
   // Multi-rol (espejo de /app/): quien tiene 'afiliado' se queda acá (incluido el doble-rol afiliado+staff).
   // Staff PURO (sin afiliado) → redirige silencioso a /app/ (en vez del cartel noAfiliadoView). Sin loop:
@@ -1069,8 +1075,9 @@ async function cargarCredencial(uid){
 // entra por error por "acceso de referente" NO cae en un panel vacío, y un referente que vuelve llega a su panel.
 function destinoTrasAuth(esRef, credEstado){
   if(credEstado === 'staff') return 'staff';
-  if(credEstado === 'ok') return 'home';        // afiliado (socio o socio+referente) → su credencial, SIEMPRE
+  if(credEstado === 'ok') return 'home';        // afiliado (socio o socio+referente) → su credencial, SIEMPRE (prioridad)
   if(esRef) return 'referente';                 // referente puro → su panel (con sus vínculos)
+  if(credEstado === 'prospecto') return 'prospecto'; // cuenta autoregistrada sin persona → home reducida (chat+emerg+afiliarme)
   if(credEstado === 'no-afiliado') return 'no-afiliado';
   return 'sin-vinculo';
 }
@@ -1111,6 +1118,11 @@ auth.onAuthStateChanged(async user => {
       const ref = await cargarReferente(user.uid);
       set({ view:'referente', ref, cred:null, busy:false }); navReplace();
       registrarPush(user.uid);
+      return;
+    }
+    if(destino === 'prospecto'){ // cuenta autoregistrada (aún no socio) → home reducida
+      modoReferenteOff();
+      set({ view:'prospecto', cred:null, prospecto:cred.prospecto||{}, busy:false, ia:null }); navReplace();
       return;
     }
     if(destino === 'no-afiliado'){ set({ view:'no-afiliado', cred }); return; }
@@ -1175,7 +1187,65 @@ function loginView(){
     <div class="field"><label>Contraseña</label><input id="pw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
     <button class="btn-r" onclick="doLogin()">${S.busy?'Ingresando…':'Ingresar'}${S.busy?'':chv(15,'cw')}</button>
     <button class="linkish" onclick="irReferenteAuth()" style="margin-top:1rem;background:none;border:none;color:var(--rojo);font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">Ingresar como referente</button>
-    <div class="foot-note" style="margin-top:1.3rem">Esta app es exclusiva para socios de MEDICAR.<br>Ante una emergencia llamá al <b>${TEL_EMERG}</b>.</div>
+    <div style="margin-top:1.3rem;padding-top:1.1rem;border-top:1px solid var(--linea);text-align:center">
+      <div style="font-size:.82rem;color:var(--gris);margin-bottom:.5rem">¿Todavía no sos socio?</div>
+      <button class="btn-o" onclick="irRegistro()" style="width:100%">Crear una cuenta y probar MEDICAR IA</button>
+    </div>
+    <div class="foot-note" style="margin-top:1.1rem">Ante una emergencia llamá al <b>${TEL_EMERG}</b>.</div>
+  </div>`;
+}
+function irRegistro(){ set({ view:'registro', busy:false, err:'' }); navPush(); }
+function registroView(){
+  return `<div class="login">
+    <div class="login-brand"><div class="brand">${chv(28)}<span class="word">medicar</span></div><div class="login-sub">Crear cuenta</div></div>
+    <h2>Probá MEDICAR</h2>
+    <p style="font-size:.82rem;color:var(--gris);margin:-.3rem 0 .9rem">Creá una cuenta gratis para consultar con MEDICAR IA. La emergencia (${TEL_EMERG}) es para todos.</p>
+    <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
+    <div class="field"><label>Nombre</label><input id="rg-nom" type="text" autocomplete="name" placeholder="Tu nombre"></div>
+    <div class="field"><label>Email</label><input id="rg-em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com"></div>
+    <div class="field"><label>Teléfono <span style="color:var(--gris);font-weight:400">(opcional)</span></label><input id="rg-tel" type="tel" inputmode="tel" autocomplete="tel" placeholder="Para que te contactemos"></div>
+    <div class="field"><label>Contraseña</label><input id="rg-pw" type="password" autocomplete="new-password" placeholder="Mínimo 6 caracteres"></div>
+    <button class="btn-r" onclick="doRegistro()">${S.busy?'Creando…':'Crear cuenta'}${S.busy?'':chv(15,'cw')}</button>
+    <button class="linkish" onclick="navBack()" style="margin-top:1rem;background:none;border:none;color:var(--rojo);font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">Ya tengo cuenta</button>
+  </div>`;
+}
+async function doRegistro(){
+  if(S.busy) return;
+  const nombre=(el('rg-nom')?.value||'').trim();
+  const email=(el('rg-em')?.value||'').trim();
+  const tel=(el('rg-tel')?.value||'').trim();
+  const pw=el('rg-pw')?.value||'';
+  if(!nombre){ set({ err:'Ingresá tu nombre.' }); return; }
+  if(!email || !pw){ set({ err:'Ingresá email y contraseña.' }); return; }
+  if(pw.length<6){ set({ err:'La contraseña necesita al menos 6 caracteres.' }); return; }
+  set({ busy:true, err:'' });
+  try{
+    await auth.createUserWithEmailAndPassword(email, pw);
+    // La cuenta Auth ya existe; registramos el prospecto (Admin SDK) ANTES de dejar que rutee onAuthStateChanged.
+    await fnsCall('registrarProspecto', { nombre, telefono:tel });
+    // onAuthStateChanged tomará el control; cargarCredencial verá prospectos/{uid} → home de prospecto.
+  }catch(e){
+    const code=(e&&e.code)||'';
+    const msg = /email-already-in-use/.test(code) ? 'Ese email ya tiene una cuenta. Probá ingresar.'
+      : (/invalid-email/.test(code) ? 'El email no es válido.'
+      : (/weak-password/.test(code) ? 'La contraseña es muy débil (mínimo 6 caracteres).'
+      : 'No se pudo crear la cuenta. Revisá tu conexión.'));
+    set({ busy:false, err:msg });
+  }
+}
+function prospectoView(){
+  const nom = (S.prospecto && S.prospecto.nombre) ? String(S.prospecto.nombre).split(' ')[0] : '';
+  return `<div class="home" style="display:flex;flex-direction:column;min-height:100dvh;padding:1rem">
+    <div class="topbar" style="justify-content:space-between"><div class="ia-wm" style="font-weight:800">MED<span class="l lI">I</span>C<span class="l lA">A</span>R</div><button class="mini" onclick="salir()">Salir</button></div>
+    <div style="text-align:center;margin:1rem 0 .5rem"><div style="font-size:1.15rem;font-weight:800">Hola${nom?', '+esc(nom):''} 👋</div><div style="color:var(--gris);font-size:.85rem;margin-top:.3rem">Todavía no sos socio, pero podés consultar con MEDICAR IA y, ante una urgencia, contás con nuestra guardia.</div></div>
+    <button class="tile" onclick="abrirAsistente()" style="margin-top:.6rem">
+      <span class="tile-ic">💬</span>
+      <span class="tile-tx"><span class="tile-t">Consultá con MEDICAR IA</span><span class="tile-s">Preguntá por planes, cobertura o cómo cuidarte.</span></span>
+      <span class="tile-go">${chv(15)}</span>
+    </button>
+    <a href="tel:${TEL_EMERG}" class="call" style="margin-top:.6rem">${IC.phone}<span>Emergencias — llamar al ${TEL_EMERG}</span></a>
+    <button class="btn-r" onclick="iaAfiliarme()" style="margin-top:.9rem;width:100%">✚ Quiero afiliarme a MEDICAR</button>
+    <div class="foot-note" style="margin-top:auto;padding-top:1.2rem;text-align:center">MEDICAR — Emergencias médicas · Pergamino</div>
   </div>`;
 }
 
@@ -1700,8 +1770,9 @@ function homeIaBlock(c){
     <div style="font-size:.68rem;color:var(--gris);margin:.45rem .2rem 0;line-height:1.4">¿Preferís un profesional? La videollamada con un médico puede demorar, pero te atiende una persona. <button onclick="cerrarAsistente()" style="background:none;border:none;color:var(--rojo);font-weight:700;cursor:pointer;padding:0">Pedir turno ↓</button></div>
   </div>`;
 }
-function abrirAsistente(){ if(!S.cred) return; if(!S.ia) S.ia={ msgs:[], busy:false, err:'', escalando:false }; S.view='asistente'; render(); navPush(); }
-function cerrarAsistente(){ iaResumirSesion(); if(S.ia) S.ia.escalando=false; S.view='home'; render(); }
+const esProspectoUI = () => !S.cred && !!S.prospecto; // prospecto: cuenta autoregistrada, sin credencial de socio
+function abrirAsistente(){ if(!S.cred && !S.prospecto) return; if(!S.ia) S.ia={ msgs:[], busy:false, err:'', escalando:false }; S.view='asistente'; render(); navPush(); }
+function cerrarAsistente(){ iaResumirSesion(); if(S.ia) S.ia.escalando=false; S.view = S.cred ? 'home' : 'prospecto'; render(); }
 // Cierre explícito (B1): al salir del chat resume la sesión en segundo plano (fire-and-forget). El resumidor (CF,
 // SIEMPRE claude) destila el transcript y escribe la memoria por socio. No bloquea la UI; UNA vez por sesión;
 // suprimido si el socio pidió "olvidate" (ya borró en server). El backstop de visibilitychange usa la misma función.
@@ -1724,17 +1795,22 @@ function asistenteView(){
   const ia=S.ia||{msgs:[],busy:false,err:'',escalando:false};
   const anim = iaWmAnim ? ' anim' : ''; iaWmAnim=false;
   const msgs = ia.msgs.map(iaBurbuja).join('');
+  const prosp = esProspectoUI();
+  const chips = prosp ? ['Qué planes tienen','Cuánto sale afiliarme','No me siento bien','Qué cubre MEDICAR'] : ['Sobre mi plan','Mis facturas','No me siento bien','Cómo pedir un turno'];
   const empty = ia.msgs.length ? '' : `<div style="color:var(--gris);font-size:.85rem;text-align:center;margin:.6rem 0">Preguntame lo que quieras. Elegí un tema o escribí:</div>
     <div style="display:flex;flex-wrap:wrap;gap:.4rem;justify-content:center">
-      ${['Sobre mi plan','Mis facturas','No me siento bien','Cómo pedir un turno'].map(x=>`<button onclick="iaChip('${x}')" style="background:var(--nieve);border:1px solid var(--linea);border-radius:16px;padding:.45rem .8rem;font-size:.82rem;cursor:pointer">${x}</button>`).join('')}
+      ${chips.map(x=>`<button onclick="iaChip('${x}')" style="background:var(--nieve);border:1px solid var(--linea);border-radius:16px;padding:.45rem .8rem;font-size:.82rem;cursor:pointer">${x}</button>`).join('')}
     </div>`;
+  // Escalada: el socio puede reportar síntomas / pedir turno; el PROSPECTO (sin cuenta) solo emergencias + afiliarse.
   const sheet = ia.escalando ? `<div style="position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;z-index:50" onclick="iaCerrarEscalar(event)">
       <div style="background:#fff;width:100%;border-radius:18px 18px 0 0;padding:1rem 1.1rem 1.4rem" onclick="event.stopPropagation()">
         <div style="font-weight:800;font-size:1rem;margin-bottom:.2rem">Que te vea un médico</div>
-        <div style="font-size:.78rem;color:var(--gris);margin-bottom:.8rem">Elegí cómo seguir. Ante una urgencia, la vía más rápida es el teléfono.</div>
+        <div style="font-size:.78rem;color:var(--gris);margin-bottom:.8rem">Ante una urgencia, la vía más rápida es el teléfono.</div>
         <a href="tel:${TEL_EMERG}" class="call" style="margin-top:0">${IC.phone}<span>Emergencias — llamar al ${TEL_EMERG}</span></a>
-        <button class="btn-o" style="margin-top:.6rem;width:100%" onclick="iaEscalarReporte()">Contarle mis síntomas a un médico</button>
-        <button class="btn-o" style="margin-top:.5rem;width:100%" onclick="cerrarAsistente()">Pedir un turno por videollamada</button>
+        ${prosp
+          ? `<button class="btn-o" style="margin-top:.6rem;width:100%" onclick="iaAccion('afiliarme')">Quiero afiliarme a MEDICAR</button>`
+          : `<button class="btn-o" style="margin-top:.6rem;width:100%" onclick="iaEscalarReporte()">Contarle mis síntomas a un médico</button>
+        <button class="btn-o" style="margin-top:.5rem;width:100%" onclick="cerrarAsistente()">Pedir un turno por videollamada</button>`}
         <button class="btn-o" style="margin-top:.5rem;width:100%;border:none;color:var(--gris)" onclick="iaCerrarEscalar()">Cancelar</button>
       </div></div>` : '';
   return `<div class="home" style="display:flex;flex-direction:column;min-height:100dvh">
@@ -1744,7 +1820,9 @@ function asistenteView(){
     ${ia.busy?`<div style="color:var(--gris);font-size:.82rem;padding:.3rem .2rem">Escribiendo…</div>`:''}
     ${ia.err?`<div class="err on" style="margin:.3rem 0">${esc(ia.err)}</div>`:''}
     <div style="position:sticky;bottom:0;background:var(--fondo,#fff);padding:.5rem 0 .3rem">
-      <button onclick="iaAccion('turno')" style="width:100%;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:800;padding:.6rem;border-radius:12px;cursor:pointer;margin-bottom:.5rem">🩺 Pedir un turno con un médico</button>
+      ${prosp
+        ? `<button onclick="iaAccion('afiliarme')" style="width:100%;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:800;padding:.6rem;border-radius:12px;cursor:pointer;margin-bottom:.5rem">✚ Quiero afiliarme a MEDICAR</button>`
+        : `<button onclick="iaAccion('turno')" style="width:100%;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:800;padding:.6rem;border-radius:12px;cursor:pointer;margin-bottom:.5rem">🩺 Pedir un turno con un médico</button>`}
       <div style="display:flex;gap:.4rem">
         <input id="ia-input" placeholder="Escribí tu consulta…" autocomplete="off" ${ia.busy?'disabled':''} style="flex:1;border:1.5px solid var(--linea);border-radius:12px;padding:.6rem .8rem;font-size:.9rem;background:var(--nieve)">
         <button onclick="iaEnviar()" ${ia.busy?'disabled':''} style="background:var(--rojo);color:#fff;border:none;border-radius:12px;padding:0 1.1rem;font-weight:800;cursor:pointer">Enviar</button>
@@ -1780,9 +1858,15 @@ async function iaMandar(mensaje){
 function iaAccion(accion){
   if(accion==='emergencia'){ location.href='tel:'+TEL_EMERG; return; }
   if(accion==='medico'){ iaEscalar(); return; }
+  if(accion==='afiliarme'){ iaAfiliarme(); return; }
   if(accion==='plan'){ abrirCambiarPlan(); return; }
   if(accion==='comprobantes'||accion==='pagar'){ abrirComprobantes(); return; }
   if(accion==='turno'){ cerrarAsistente(); return; } // los turnos viven en el home
+}
+// Conversión del prospecto: marca el lead (CF, fire-and-forget) + abre el form AFILIARME de la landing.
+async function iaAfiliarme(){
+  try{ fnsCall('solicitarAfiliacion', {}).catch(()=>{}); }catch(_){}
+  try{ window.open('https://medicaronline.ar/#contacto', '_blank', 'noopener'); }catch(_){ location.href='https://medicaronline.ar/#contacto'; }
 }
 function homeReporteBlock(c){
   return `<div class="sec">
@@ -2524,6 +2608,8 @@ function render(){
   let html='';
   switch(S.view){
     case 'login': html=loginView(); break;
+    case 'registro': html=registroView(); break;
+    case 'prospecto': html=prospectoView(); break;
     case 'referente-codigo': html=referenteCodigoView(); break;
     case 'referente-login': html=referenteLoginView(); break;
     case 'referente-auth': html=referenteAuthView(); break;

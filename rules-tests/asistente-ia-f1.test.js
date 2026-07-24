@@ -19,6 +19,7 @@ async function seed(env) {
     await db.doc('rate_asistente/socioU').set({ count: 1, ventanaMs: 1 });
     await db.doc('asistente_incidentes/i1').set({ uid: 'socioU', motivo: 'diagnostico', creadoEn: 1 });
     await db.doc('asistente_memoria/pA').set({ personaId: 'pA', temas: [{ t: 'dolor de pie', fecha: '2026-07-20' }] });
+    await db.doc('prospectos/prosU').set({ nombre: 'Ana Prospecto', email: 'ana@x.com', estado: 'nuevo', solicitoAfiliacion: false });
   });
 }
 const ctx = (uid) => env.authenticatedContext(uid).firestore();
@@ -44,4 +45,11 @@ describe('MEDICAR IA — asistente_memoria (memoria por socio, calco de asistent
   it('✗ el socio NO lee su propia memoria desde el cliente (solo la CF, inyectada)', async () => { await assertFails(ctx('socioU').doc('asistente_memoria/pA').get()); });
   it('✗ el socio NO pisa/borra su memoria desde el cliente ("olvidate" pasa por la CF)', async () => { await assertFails(ctx('socioU').doc('asistente_memoria/pA').set({ temas: [] })); });
   it('✗ staff NO lee la memoria del socio desde el cliente', async () => { await assertFails(ctx('medico').doc('asistente_memoria/pA').get()); });
+});
+describe('MODO PROSPECTO — prospectos (cuenta autoregistrada, lead comercial)', () => {
+  it('✓ el prospecto LEE su propio doc (routing de la home reducida)', async () => { await assertSucceeds(ctx('prosU').doc('prospectos/prosU').get()); });
+  it('✓ el staff (esInterno) LEE los leads', async () => { await assertSucceeds(ctx('medico').doc('prospectos/prosU').get()); });
+  it('✗ otro usuario NO lee el doc de un prospecto ajeno', async () => { await assertFails(ctx('socioU').doc('prospectos/prosU').get()); });
+  it('✗ el prospecto NO crea/pisa su doc desde el cliente (solo la CF)', async () => { await assertFails(ctx('prosU').doc('prospectos/prosU').set({ solicitoAfiliacion: true })); });
+  it('✗ nadie crea un prospecto desde el cliente', async () => { await assertFails(ctx('prosU').doc('prospectos/otro').set({ nombre: 'x' })); });
 });

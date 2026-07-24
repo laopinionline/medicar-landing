@@ -18,6 +18,12 @@ QUÉ HACÉS (sé ÚTIL):
 
 NO EJECUTÁS ACCIONES. Llevás a los botones que YA existen: [Cambiar mi plan], [Ver comprobantes], [Pagar], [Pedir turno], [Emergencias 443044]. Nunca digas que hiciste vos el cambio/pago/reserva.
 
+PROSPECTO vs SOCIO (REGLA ESPEJO — mirá el contexto):
+- Si el contexto trae el bloque TU CUENTA, hablás con un SOCIO: YA está afiliado. JAMÁS le ofrezcas afiliarse ni le "vendas" un plan como si no lo tuviera, NUNCA cierres con [Quiero afiliarme]. Como mucho, si de verdad le conviene otro plan, [Cambiar mi plan]. (Venderle a un socio es un error grave.)
+- Si el contexto dice que hablás con un PROSPECTO (todavía no es socio), SÍ podés OFRECER AFILIARSE, con naturalidad y SOLO cuando el tema lo habilita: preguntó por un plan/precio/cobertura, o consultó algo de salud y el mientras-tanto da pie ("esto mismo, con un médico de MEDICAR, lo tenés con el Plan Joven a $20.000"). No en cada mensaje. Cerrás con [Quiero afiliarme].
+- A un PROSPECTO que pregunta por "mi cuota / mis turnos / mi plan / mis facturas": decile con claridad que TODAVÍA NO es socio (no tiene cuenta ni esos datos) y ofrecele afiliarse. NUNCA inventes datos de cuenta.
+- La urgencia es de TODOS: ante una bandera roja, el 443044 va igual sea socio o prospecto.
+
 *** PRIORIDAD ABSOLUTA (por encima de todo lo demás) ***
 Si en el mensaje aparece CUALQUIER señal de alarma —desmayo o pérdida de conocimiento, dolor de pecho, falta de aire, sangrado, convulsión, dolor intenso o súbito, problema de habla/cara/fuerza— AUNQUE sea mencionado al pasar, en broma, o diga que "ya se le pasó" o "ya estoy bien": tu respuesta DEBE (1) responder lo otro que haya preguntado si podés, (2) decir con CLARIDAD y FIRMEZA que eso conviene que lo vea un médico AHORA, y (3) TERMINAR con la etiqueta [[ESCALAR]] en una línea aparte. Un desmayo SIEMPRE se escala, aunque ya haya pasado. Ante una urgencia real NO aflojes: esto no se negocia.
 
@@ -62,6 +68,18 @@ const ddmm = (f) => { const p = String(f || '').split('-'); return p.length === 
 // Arma el bloque CONTEXTO server-side. MÍNIMO por diseño. `d` = { nombre, plan, cubre[], factura, turnos[], chequeo,
 // signos, memoria, tel }. NUNCA incluye: DNI, historial clínico, datos de terceros, nº de pago, scores/NEWS2 (N3).
 function buildContexto(d) {
+  // PROSPECTO: NO es socio → sin bloque TU CUENTA (no tiene plan/cuota/facturas/turnos/chequeo/signos). Catálogo COMPLETO
+  //   + memoria (por uid) + marcador que habilita la REGLA ESPEJO del SYSTEM (ofrecer afiliación cuando el tema da pie).
+  if (d.tipoUsuario === 'prospecto') {
+    const P = [];
+    P.push('QUIÉN TE HABLA: un PROSPECTO — todavía NO es socio de MEDICAR. NO tiene cuenta, plan, cuota, facturas, turnos, chequeo ni signos: no le inventes NINGUNO de esos datos. Si pregunta por "mi cuota/mis turnos/mi plan/mis facturas", aclarale que todavía no es socio y ofrecele afiliarse.');
+    P.push('- Nombre: ' + (d.nombre || 'la persona') + '.');
+    const memBloque = bloqueMemoria(d.memoria);
+    if (memBloque) P.push(memBloque);
+    P.push(CATALOGO_PLANES);
+    P.push('DATOS MEDICAR: Emergencias ' + (d.tel || '443044') + ' (para TODOS, socio o no). Afiliación desde [Quiero afiliarme].');
+    return P.join('\n');
+  }
   const L = [];
   // BLOQUE "TU CUENTA" — fuente CONTABLE (cuenta corriente/afiliado). Es LA fuente para "mi plan/mi cuota/cuánto pago".
   L.push('TU CUENTA — datos de TU cuenta de socio (fuente: tu cuenta corriente/afiliado). Es LA fuente para TODA pregunta sobre "mi plan", "mi cuota", "cuánto sale/pago mi plan" y "mis facturas". Usala solo si pregunta por lo suyo; no la recites entera:');
@@ -154,6 +172,7 @@ const BOTONES = {
   'Pagar': 'pagar',
   'Pedir turno': 'turno',
   'Emergencias 443044': 'emergencia',
+  'Quiero afiliarme': 'afiliarme', // SOLO prospecto (la regla espejo del SYSTEM lo gobierna; a un socio jamás se le ofrece)
 };
 function parseBotones(texto) {
   const out = [];
