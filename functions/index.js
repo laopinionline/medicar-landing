@@ -1697,6 +1697,39 @@ exports.solicitarAfiliacion = onCall(async (request) => {
   return { ok: true };
 });
 
+/* PUENTE DE COMPRA — checkoutAfiliacion: el prospecto eligió plan y "pagó" (SIMULADO, client-side). La CF persiste el
+   LEAD ENRIQUECIDO (plan/integrantes/total recomputado server-side + datos de alta) y deja estado 'afiliacion_en_proceso'.
+   A5: la activación REAL la hace el admin desde este lead (el pago simulado NO da de alta al socio). */
+const PLANES_CHECKOUT = { joven: { nombre: 'Plan Joven', base: 20000, maxEdad: 40 }, familiar: { nombre: 'Plan Familiar', base: 40000, adicional: 10000, baseIntegrantes: 2 }, senior: { nombre: 'Plan Senior', base: 60000 } };
+const edadDeISO = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '')); if (!m) return null; const h = new Date(); let e = h.getFullYear() - (+m[1]); if (((h.getMonth() + 1) * 100 + h.getDate()) < ((+m[2]) * 100 + (+m[3]))) e--; return e; };
+exports.checkoutAfiliacion = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const ref = db.collection('prospectos').doc(request.auth.uid);
+  if (!(await ref.get()).exists) throw new HttpsError('failed-precondition', 'Solo para prospectos.');
+  const d = request.data || {};
+  const p = PLANES_CHECKOUT[String(d.planKey || '')];
+  if (!p) throw new HttpsError('invalid-argument', 'Plan inválido.');
+  const integrantes = (d.planKey === 'familiar') ? Math.max(2, Math.min(12, Number(d.integrantes) || 2)) : 1;
+  const total = (d.planKey === 'familiar') ? (p.base + Math.max(0, integrantes - 2) * p.adicional) : p.base; // recomputado server-side (no se confía en el cliente)
+  const fechaNacimiento = String(d.fechaNacimiento || '').slice(0, 10);
+  const domicilio = String(d.domicilio || '').trim().slice(0, 200);
+  const localidad = String(d.localidad || '').trim().slice(0, 100);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaNacimiento)) throw new HttpsError('invalid-argument', 'Falta la fecha de nacimiento.');
+  if (!domicilio) throw new HttpsError('invalid-argument', 'Falta el domicilio.');
+  if (!localidad) throw new HttpsError('invalid-argument', 'Falta la localidad.');
+  const edad = edadDeISO(fechaNacimiento);
+  if (d.planKey === 'joven' && edad != null && edad > 40) throw new HttpsError('failed-precondition', 'El Plan Joven es hasta 40 años.');
+  await ref.set({
+    estado: 'afiliacion_en_proceso',
+    planElegido: { key: d.planKey, nombre: p.nombre, integrantes, total },
+    datosAlta: { fechaNacimiento, edad: edad != null ? edad : null, domicilio, localidad },
+    pago: { modo: 'simulado', estado: 'aprobado' }, // fase simulada: enchufar pasarela real (Mercado Pago) sin rehacer el flujo
+    checkoutEn: FV(),
+  }, { merge: true });
+  logger.info('[checkoutAfiliacion] lead enriquecido', { uid: request.auth.uid, plan: d.planKey, integrantes, total });
+  return { ok: true, total, integrantes };
+});
+
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================
    onSchedule (Cloud Scheduler auto-aprovisionado). TIMEZONE EXPLÍCITO: sin timeZone, '06:00' dispararía 03:00 AR.
    Escribe feed_posts en estado:'pendiente' (Admin SDK saltea reglas). Nada se publica solo — cola de aprobación en el panel.

@@ -1,0 +1,49 @@
+'use strict';
+// Smoke — PUENTE DE COMPRA (checkout del prospecto). Extrae los helpers PUROS de una línea del cliente y los testea,
+// + verifica el wiring estructural (checkout, gate de regresión, estados del CTA). node seed/smoke-puente.js
+const fs = require('fs'), path = require('path');
+const html = fs.readFileSync(path.resolve(__dirname, '../socio/index.html'), 'utf8');
+let ok = 0, fail = 0;
+const t = (l, c) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}`); c ? ok++ : fail++; };
+// Extrae una función de UNA línea por nombre (las del puente lo son) y la evalúa.
+const grab = (name) => { const m = new RegExp('^\\s*function ' + name + '\\s*\\([^)]*\\)\\s*\\{.*\\}\\s*$', 'm').exec(html); if (!m) throw new Error('no encontré ' + name); return (0, eval)('(' + m[0].trim().replace(/^function /, 'function ') + ')'); };
+
+const totalPlan = grab('totalPlan');
+const edadDe = grab('edadDe');
+const planDeTexto = grab('planDeTexto');
+
+// --- Familiar: 2 base + N adicionales, recalculado ---
+t('Familiar 2 personas = $40.000 (solo base)', totalPlan('familiar', 2).total === 40000);
+t('Familiar 3 = $50.000 (2 base + 1 adic)', totalPlan('familiar', 3).total === 50000);
+t('Familiar 4 = $60.000 (2 base + 2 adic)', totalPlan('familiar', 4).total === 60000);
+t('Familiar clamp mínimo 2 (integrantes<2 no baja de $40.000)', totalPlan('familiar', 1).total === 40000 && totalPlan('familiar', 1).n === 2);
+t('Joven = $20.000 fijo (1 persona)', totalPlan('joven', 5).total === 20000 && totalPlan('joven', 5).n === 1);
+t('Senior = $60.000 fijo', totalPlan('senior', 3).total === 60000);
+
+// --- Elegibilidad Joven ≤40 (edad desde fecha de nacimiento) ---
+const hoy = new Date(); const y = hoy.getFullYear();
+t('edadDe: ~30 años → 30', edadDe((y - 30) + '-01-01') === 30);
+t('edadDe: >40 detecta la inelegibilidad', edadDe((y - 45) + '-06-15') > 40);
+t('edadDe: fecha vacía/ inválida → null (no bloquea de más)', edadDe('') === null && edadDe('xx') === null);
+
+// --- Empalme chat: detección del plan recomendado ---
+t('planDeTexto: "te conviene el Plan Familiar" → familiar', planDeTexto('Para tu caso te conviene el Plan Familiar.') === 'familiar');
+t('planDeTexto: "Plan Joven a $20.000" → joven', planDeTexto('Eso lo tenés con el Plan Joven a $20.000.') === 'joven');
+t('planDeTexto: "Plan Senior" → senior', planDeTexto('El Plan Senior es para adultos mayores.') === 'senior');
+t('planDeTexto: sin plan nombrado → null (abre en el selector)', planDeTexto('¿En qué te puedo ayudar?') === null);
+
+// --- Wiring estructural ---
+t('CF checkoutAfiliacion se invoca desde el pago', /fnsCall\('checkoutAfiliacion'/.test(html));
+t('pago rotulado SIMULACIÓN — sin cobro real', /SIMULACIÓN — no se realiza ningún cobro real/.test(html));
+t('GATE regresión: abrirPuente exige esProspectoUI', /function abrirPuente[\s\S]{0,120}if\(!esProspectoUI\(\)\) return;/.test(html));
+t('GATE regresión: puenteView cae a prospectoView si no es prospecto', /function puenteView[\s\S]{0,120}if\(!esProspectoUI\(\)\)\{ return prospectoView/.test(html));
+t('CTA home: estado en proceso → "Afiliación en proceso ✓"', /Afiliación en proceso ✓/.test(html) && /function afiliacionCTA/.test(html));
+t('CTA home: asesor → "Un asesor te contacta ✓"', /Un asesor te contacta ✓/.test(html));
+t('Área Protegida / Corporativo NO están en el catálogo del selector', !/PLANES_COMERCIALES[\s\S]{0,400}(area protegida|corporativo)/i.test(html));
+t('desglose visible "2 base + N adicionales"', /2 base \+ \$\{Math\.max\(0,P\.integrantes-2\)\} adicionales|2 base \+ .* adicionales/.test(html));
+t('post-pago: confirmación "¡Bienvenido a MEDICAR!"', /¡Bienvenido a MEDICAR!/.test(html) && /Estamos activando tu cobertura/.test(html));
+t('asesor: camino secundario "Prefiero que me contacte un asesor"', /Prefiero que me contacte un asesor/.test(html));
+t('checkout pide fecha de nacimiento + domicilio + localidad', /pt-fn/.test(html) && /pt-dom/.test(html) && /pt-loc/.test(html));
+
+console.log(`\n${fail ? '✗' : '✓'} smoke-puente: ${ok} ok, ${fail} fallo(s)`);
+process.exit(fail ? 1 : 0);
