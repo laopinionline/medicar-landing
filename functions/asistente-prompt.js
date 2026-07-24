@@ -138,7 +138,7 @@ function buildContexto(d) {
 // a un socio-persona según edad/grupo). Área Protegida (por LOCAL) y Corporativo (empresas) NO son planes personales.
 const CATALOGO_PLANES = [
   'CATÁLOGO COMERCIAL DE PLANES — precios de LISTA (fuente: landing/comercial; SOLO para comparar o evaluar un cambio, NO es la cuota que paga el socio). Planes PERSONALES (ofrecé SOLO estos a un socio-persona, según su caso):',
-  '- Plan Joven $20.000: individual, para personas de hasta 40 años.',
+  '- Plan Joven $20.000: individual, para personas de hasta 30 años.',
   '- Plan Familiar desde $40.000: cubre 2 personas de base; por cada integrante adicional se suman $10.000 (ejemplo: 4 personas = 2 de base + 2 adicionales = $60.000). Atiende a todas las edades, incluidos los chicos.',
   '- Plan Senior $60.000: individual, pensado para adultos mayores.',
   'NO son planes personales (NO se los recomiendes a una persona; si preguntan, describilos breve y derivá a contacto comercial):',
