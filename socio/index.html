@@ -1188,8 +1188,8 @@ function loginView(){
     <button class="btn-r" onclick="doLogin()">${S.busy?'Ingresando…':'Ingresar'}${S.busy?'':chv(15,'cw')}</button>
     <button class="linkish" onclick="irReferenteAuth()" style="margin-top:1rem;background:none;border:none;color:var(--rojo);font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">Ingresar como referente</button>
     <div style="margin-top:1.3rem;padding-top:1.1rem;border-top:1px solid var(--linea);text-align:center">
-      <div style="font-size:.82rem;color:var(--gris);margin-bottom:.5rem">¿Todavía no sos socio?</div>
-      <button class="btn-o" onclick="irRegistro()" style="width:100%">Crear una cuenta y probar MEDICAR IA</button>
+      <div style="font-size:.82rem;color:var(--gris);margin-bottom:.5rem">¿Querés consultar con MEDICAR IA?</div>
+      <button class="btn-o" onclick="irRegistro()" style="width:100%">Crear una cuenta</button>
     </div>
     <div class="foot-note" style="margin-top:1.1rem">Ante una emergencia llamá al <b>${TEL_EMERG}</b>.</div>
   </div>`;
@@ -1198,13 +1198,15 @@ function irRegistro(){ set({ view:'registro', busy:false, err:'' }); navPush(); 
 function registroView(){
   return `<div class="login">
     <div class="login-brand"><div class="brand">${chv(28)}<span class="word">medicar</span></div><div class="login-sub">Crear cuenta</div></div>
-    <h2>Probá MEDICAR</h2>
-    <p style="font-size:.82rem;color:var(--gris);margin:-.3rem 0 .9rem">Creá una cuenta gratis para consultar con MEDICAR IA. La emergencia (${TEL_EMERG}) es para todos.</p>
+    <h2>Crear cuenta</h2>
+    <p style="font-size:.82rem;color:var(--gris);margin:-.3rem 0 .9rem">Creá una cuenta para consultar con MEDICAR IA.</p>
     <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
-    <div class="field"><label>Nombre</label><input id="rg-nom" type="text" autocomplete="name" placeholder="Tu nombre"></div>
+    <div class="field"><label>Nombre y apellido</label><input id="rg-nom" type="text" autocomplete="name" placeholder="Tu nombre y apellido"></div>
+    <div class="field"><label>DNI</label><input id="rg-dni" type="text" inputmode="numeric" autocomplete="off" placeholder="Sin puntos"></div>
+    <div class="field"><label>Teléfono</label><input id="rg-tel" type="tel" inputmode="tel" autocomplete="tel" placeholder="Cód. de área + número"></div>
     <div class="field"><label>Email</label><input id="rg-em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com"></div>
-    <div class="field"><label>Teléfono <span style="color:var(--gris);font-weight:400">(opcional)</span></label><input id="rg-tel" type="tel" inputmode="tel" autocomplete="tel" placeholder="Para que te contactemos"></div>
     <div class="field"><label>Contraseña</label><input id="rg-pw" type="password" autocomplete="new-password" placeholder="Mínimo 6 caracteres"></div>
+    <div class="field"><label>Repetí la contraseña</label><input id="rg-pw2" type="password" autocomplete="new-password" placeholder="Volvé a escribirla"></div>
     <button class="btn-r" onclick="doRegistro()">${S.busy?'Creando…':'Crear cuenta'}${S.busy?'':chv(15,'cw')}</button>
     <button class="linkish" onclick="navBack()" style="margin-top:1rem;background:none;border:none;color:var(--rojo);font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">Ya tengo cuenta</button>
   </div>`;
@@ -1212,24 +1214,31 @@ function registroView(){
 async function doRegistro(){
   if(S.busy) return;
   const nombre=(el('rg-nom')?.value||'').trim();
-  const email=(el('rg-em')?.value||'').trim();
+  const dni=(el('rg-dni')?.value||'').trim();
   const tel=(el('rg-tel')?.value||'').trim();
+  const email=(el('rg-em')?.value||'').trim();
   const pw=el('rg-pw')?.value||'';
-  if(!nombre){ set({ err:'Ingresá tu nombre.' }); return; }
-  if(!email || !pw){ set({ err:'Ingresá email y contraseña.' }); return; }
+  const pw2=el('rg-pw2')?.value||'';
+  const dniDig=dni.replace(/\D/g,''); const telDig=tel.replace(/\D/g,'');
+  if(!nombre){ set({ err:'Ingresá tu nombre y apellido.' }); return; }
+  if(dniDig.length<7 || dniDig.length>8){ set({ err:'Ingresá un DNI válido (7 u 8 números).' }); return; }
+  if(telDig.length<8){ set({ err:'Ingresá un teléfono válido (con código de área).' }); return; }
+  if(!email){ set({ err:'Ingresá tu email.' }); return; }
   if(pw.length<6){ set({ err:'La contraseña necesita al menos 6 caracteres.' }); return; }
+  if(pw!==pw2){ set({ err:'Las contraseñas no coinciden.' }); return; } // verificado ANTES de crear la cuenta
   set({ busy:true, err:'' });
   try{
     await auth.createUserWithEmailAndPassword(email, pw);
-    // La cuenta Auth ya existe; registramos el prospecto (Admin SDK) ANTES de dejar que rutee onAuthStateChanged.
-    await fnsCall('registrarProspecto', { nombre, telefono:tel });
+    // La cuenta Auth ya existe; registramos el prospecto (Admin SDK, valida tel+DNI) ANTES de dejar rutear onAuthStateChanged.
+    await fnsCall('registrarProspecto', { nombre, telefono:tel, dni });
     // onAuthStateChanged tomará el control; cargarCredencial verá prospectos/{uid} → home de prospecto.
   }catch(e){
     const code=(e&&e.code)||'';
-    const msg = /email-already-in-use/.test(code) ? 'Ese email ya tiene una cuenta. Probá ingresar.'
+    const msg = /email-already-in-use/.test(code) ? 'Ese email ya tiene una cuenta. Ingresá con ella.'
       : (/invalid-email/.test(code) ? 'El email no es válido.'
       : (/weak-password/.test(code) ? 'La contraseña es muy débil (mínimo 6 caracteres).'
-      : 'No se pudo crear la cuenta. Revisá tu conexión.'));
+      : ((e&&e.message&&/dni|tel/i.test(e.message)) ? e.message
+      : 'No se pudo crear la cuenta. Revisá tu conexión.')));
     set({ busy:false, err:msg });
   }
 }
@@ -1237,13 +1246,12 @@ function prospectoView(){
   const nom = (S.prospecto && S.prospecto.nombre) ? String(S.prospecto.nombre).split(' ')[0] : '';
   return `<div class="home" style="display:flex;flex-direction:column;min-height:100dvh;padding:1rem">
     <div class="topbar" style="justify-content:space-between"><div class="ia-wm" style="font-weight:800">MED<span class="l lI">I</span>C<span class="l lA">A</span>R</div><button class="mini" onclick="salir()">Salir</button></div>
-    <div style="text-align:center;margin:1rem 0 .5rem"><div style="font-size:1.15rem;font-weight:800">Hola${nom?', '+esc(nom):''} 👋</div><div style="color:var(--gris);font-size:.85rem;margin-top:.3rem">Todavía no sos socio, pero podés consultar con MEDICAR IA y, ante una urgencia, contás con nuestra guardia.</div></div>
+    <div style="text-align:center;margin:1rem 0 .5rem"><div style="font-size:1.15rem;font-weight:800">Hola${nom?', '+esc(nom):''} 👋</div><div style="color:var(--gris);font-size:.85rem;margin-top:.3rem">Consultá con MEDICAR IA lo que necesites.</div></div>
     <button class="tile" onclick="abrirAsistente()" style="margin-top:.6rem">
       <span class="tile-ic">💬</span>
       <span class="tile-tx"><span class="tile-t">Consultá con MEDICAR IA</span><span class="tile-s">Preguntá por planes, cobertura o cómo cuidarte.</span></span>
       <span class="tile-go">${chv(15)}</span>
     </button>
-    <a href="tel:${TEL_EMERG}" class="call" style="margin-top:.6rem">${IC.phone}<span>Emergencias — llamar al ${TEL_EMERG}</span></a>
     <button class="btn-r" onclick="iaAfiliarme()" style="margin-top:.9rem;width:100%">✚ Quiero afiliarme a MEDICAR</button>
     <div class="foot-note" style="margin-top:auto;padding-top:1.2rem;text-align:center">MEDICAR — Emergencias médicas · Pergamino</div>
   </div>`;
@@ -1786,7 +1794,12 @@ function iaResumirSesion(){
 }
 function iaBurbuja(m){
   if(m.role==='user') return `<div style="align-self:flex-end;max-width:85%;background:var(--rojo);color:#fff;border-radius:14px 14px 4px 14px;padding:.55rem .8rem;font-size:.9rem;line-height:1.4">${esc(m.texto)}</div>`;
-  const banner = m.rojo ? `<a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:.55rem;background:var(--rojo);color:#fff;font-weight:800;padding:.6rem;border-radius:10px;text-decoration:none">🚑 Emergencias ${TEL_EMERG}</a>` : '';
+  // Socio: banner-acción 443044 (su guardia). Prospecto: NUNCA el 443044 (es de socios) → aviso de urgencia pública, sin CTA telefónico.
+  const banner = m.rojo
+    ? (esProspectoUI()
+        ? `<div style="display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:.55rem;background:var(--rojo);color:#fff;font-weight:800;padding:.6rem;border-radius:10px">🚑 Es una urgencia — buscá atención médica ya (guardia u hospital)</div>`
+        : `<a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:.55rem;background:var(--rojo);color:#fff;font-weight:800;padding:.6rem;border-radius:10px;text-decoration:none">🚑 Emergencias ${TEL_EMERG}</a>`)
+    : '';
   const botones = (m.botones||[]).map(b=>`<button onclick="iaAccion('${b.accion}')" style="display:block;width:100%;margin-top:.4rem;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:700;padding:.5rem;border-radius:10px;cursor:pointer">${esc(b.label)}</button>`).join('');
   return `<div style="align-self:flex-start;max-width:90%;background:var(--nieve);border:1px solid var(--linea);border-radius:14px 14px 14px 4px;padding:.55rem .8rem;font-size:.9rem;line-height:1.45">${esc(m.texto).replace(/\n/g,'<br>')}${banner}${botones}</div>`;
 }
@@ -1796,7 +1809,7 @@ function asistenteView(){
   const anim = iaWmAnim ? ' anim' : ''; iaWmAnim=false;
   const msgs = ia.msgs.map(iaBurbuja).join('');
   const prosp = esProspectoUI();
-  const chips = prosp ? ['Qué planes tienen','Cuánto sale afiliarme','No me siento bien','Qué cubre MEDICAR'] : ['Sobre mi plan','Mis facturas','No me siento bien','Cómo pedir un turno'];
+  const chips = prosp ? ['Qué planes tienen','Qué cubre MEDICAR','No me siento bien','Cómo es la guardia 24hs'] : ['Sobre mi plan','Mis facturas','No me siento bien','Cómo pedir un turno'];
   const empty = ia.msgs.length ? '' : `<div style="color:var(--gris);font-size:.85rem;text-align:center;margin:.6rem 0">Preguntame lo que quieras. Elegí un tema o escribí:</div>
     <div style="display:flex;flex-wrap:wrap;gap:.4rem;justify-content:center">
       ${chips.map(x=>`<button onclick="iaChip('${x}')" style="background:var(--nieve);border:1px solid var(--linea);border-radius:16px;padding:.45rem .8rem;font-size:.82rem;cursor:pointer">${x}</button>`).join('')}
@@ -1815,13 +1828,13 @@ function asistenteView(){
       </div></div>` : '';
   return `<div class="home" style="display:flex;flex-direction:column;min-height:100dvh">
     <div class="topbar">${chv(16)}<div class="ia-wm${anim}" style="margin-left:.4rem">MED<span class="l lI">I</span>C<span class="l lA">A</span>R</div><div class="tb-sp"></div><button class="mini" onclick="cerrarAsistente()">Volver</button></div>
-    <div style="background:#fff3f3;border:1px solid #f3c9c9;border-radius:10px;padding:.5rem .7rem;font-size:.72rem;color:#7a1f1f;margin:.1rem 0 .6rem;line-height:1.4">Este chat funciona con inteligencia artificial. Orienta, pero no reemplaza a un médico. Ante una urgencia, llamá al <b>${TEL_EMERG}</b>.</div>
+    <div style="background:#fff3f3;border:1px solid #f3c9c9;border-radius:10px;padding:.5rem .7rem;font-size:.72rem;color:#7a1f1f;margin:.1rem 0 .6rem;line-height:1.4">Este chat funciona con inteligencia artificial. Orienta, pero no reemplaza a un médico. ${prosp?'Ante una urgencia, buscá atención médica de inmediato en una guardia u hospital.':`Ante una urgencia, llamá al <b>${TEL_EMERG}</b>.`}</div>
     <div id="ia-msgs" style="flex:1;display:flex;flex-direction:column;gap:.5rem;padding-bottom:.5rem;overflow-y:auto">${msgs}${empty}</div>
     ${ia.busy?`<div style="color:var(--gris);font-size:.82rem;padding:.3rem .2rem">Escribiendo…</div>`:''}
     ${ia.err?`<div class="err on" style="margin:.3rem 0">${esc(ia.err)}</div>`:''}
     <div style="position:sticky;bottom:0;background:var(--fondo,#fff);padding:.5rem 0 .3rem">
       ${prosp
-        ? `<button onclick="iaAccion('afiliarme')" style="width:100%;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:800;padding:.6rem;border-radius:12px;cursor:pointer;margin-bottom:.5rem">✚ Quiero afiliarme a MEDICAR</button>`
+        ? `` /* ENCUADRE: sin botón de afiliación permanente en el chat (no upsell). La oferta llega por chip [Quiero afiliarme] cuando el tema la trae. */
         : `<button onclick="iaAccion('turno')" style="width:100%;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:800;padding:.6rem;border-radius:12px;cursor:pointer;margin-bottom:.5rem">🩺 Pedir un turno con un médico</button>`}
       <div style="display:flex;gap:.4rem">
         <input id="ia-input" placeholder="Escribí tu consulta…" autocomplete="off" ${ia.busy?'disabled':''} style="flex:1;border:1.5px solid var(--linea);border-radius:12px;padding:.6rem .8rem;font-size:.9rem;background:var(--nieve)">

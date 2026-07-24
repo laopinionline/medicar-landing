@@ -40,7 +40,7 @@ const { RESULTADOS, puedeMarcar, debeBarrer } = require('./asistencia'); // Turn
 const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: escaneo determinista de banderas rojas (server-side)
 const guardrailAsistente = require('./asistente-guardrail').revisar; // MEDICAR IA: guardrail de salida
 const { neutralizarEmergencia } = require('./asistente-guardrail'); // MEDICAR IA: neutraliza 443044 si rojo=false (determinista)
-const { SYSTEM: IA_SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr } = require('./asistente-prompt'); // MEDICAR IA: prompt + contexto + salida
+const { SYSTEM: IA_SYSTEM, buildContexto, gateProspectoEmergencia, quitarOfertaAfiliacionSocio, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr } = require('./asistente-prompt'); // MEDICAR IA: prompt + contexto + salida + gates deterministas
 const { responder: iaResponder, viaClaude: iaViaClaude } = require('./asistente-adapter'); // MEDICAR IA: adaptador (ollama|claude|ruteo) + rama claude directa (resumidor)
 const { clasificar: iaClasificar, ramas: iaRamas } = require('./asistente-ruteo'); // MEDICAR IA: semáforo determinista de ruteo
 const { validarMemoria, tieneContenido, escanearOlvido, SYSTEM_RESUMIDOR, promptResumen, parseResumen } = require('./memoria-nucleo'); // MEDICAR IA: memoria por socio
@@ -1595,11 +1595,15 @@ exports.asistenteChat = onCall(async (request) => {
   if (neu.cambiado) logger.info('[asistenteChat] 443044 neutralizado (rojo=false)');
   let botones = gr.motivo ? [{ label: 'Que te vea un médico', accion: 'medico' }] : parseBotones(gr.respuesta);
   if (scan.rojo) botones = botones.filter((b) => b.accion !== 'turno'); // urgencia real: NO ofrecer turno (determinista)
-  // REGRESIÓN SAGRADA (determinista, no depende del modelo): al SOCIO nunca el botón de afiliación; al PROSPECTO solo
-  //   afiliarse/emergencia/médico (no tiene cuenta → plan/comprobantes/pagar/turno serían botones muertos).
-  if (esProspecto) botones = botones.filter((b) => ['afiliarme', 'emergencia', 'medico'].includes(b.accion));
+  // REGRESIÓN SAGRADA + GATE DE EMERGENCIAS (determinista, no depende del modelo): al SOCIO nunca el botón de afiliación;
+  //   al PROSPECTO SOLO [Quiero afiliarme] — NUNCA el 443044 como acción (es beneficio de socio) ni la escalada médica.
+  if (esProspecto) botones = botones.filter((b) => b.accion === 'afiliarme');
   else botones = botones.filter((b) => b.accion !== 'afiliarme');
-  const respuesta = voseoAr(limpiarBotonesDelTexto(neu.texto)); // saca tokens [Botón] + convierte a voseo rioplatense
+  let respuesta = voseoAr(limpiarBotonesDelTexto(neu.texto)); // saca tokens [Botón] + convierte a voseo rioplatense
+  // Backstops DETERMINISTAS por tipoUsuario (no dependen del modelo): prospecto → el 443044 nunca es vía (gate de
+  //   emergencias); socio → nunca una oferta de afiliación en el texto (regresión sagrada).
+  if (esProspecto) respuesta = gateProspectoEmergencia(respuesta);
+  else respuesta = quitarOfertaAfiliacionSocio(respuesta);
   return { respuesta, rojo: scan.rojo, escalar: scan.rojo || tag, botones };
 });
 
@@ -1663,7 +1667,13 @@ exports.registrarProspecto = onCall(async (request) => {
   const uid = request.auth.uid;
   const nombre = String((request.data || {}).nombre || '').trim().replace(/\s+/g, ' ').slice(0, 80);
   const telefono = String((request.data || {}).telefono || '').trim().slice(0, 30);
+  const dniRaw = String((request.data || {}).dni || '').trim().slice(0, 20);
+  const telDigitos = telefono.replace(/\D/g, '');
+  const dniDigitos = dniRaw.replace(/\D/g, '');
+  // ALTA ROBUSTA: nombre + teléfono + DNI OBLIGATORIOS (el DNI es clave para la aprobación en las reglas del sistema).
   if (!nombre) throw new HttpsError('invalid-argument', 'Falta el nombre.');
+  if (telDigitos.length < 8) throw new HttpsError('invalid-argument', 'Falta un teléfono válido (al menos 8 dígitos).');
+  if (dniDigitos.length < 7 || dniDigitos.length > 8) throw new HttpsError('invalid-argument', 'El DNI no es válido (7 u 8 dígitos).');
   // NO pisar identidades existentes: un socio/staff no es prospecto.
   const uSnap = await db.collection('usuarios').doc(uid).get();
   if (uSnap.exists) {
@@ -1673,7 +1683,7 @@ exports.registrarProspecto = onCall(async (request) => {
   }
   const ref = db.collection('prospectos').doc(uid);
   if (!(await ref.get()).exists) {
-    await ref.set({ nombre, telefono: telefono || null, email: (request.auth.token && request.auth.token.email) || null, estado: 'nuevo', solicitoAfiliacion: false, creadoEn: FV() });
+    await ref.set({ nombre, telefono, dni: dniDigitos, email: (request.auth.token && request.auth.token.email) || null, estado: 'nuevo', solicitoAfiliacion: false, creadoEn: FV() });
     logger.info('[registrarProspecto] alta de prospecto', { uid });
   }
   return { ok: true };

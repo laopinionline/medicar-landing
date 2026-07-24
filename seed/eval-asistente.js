@@ -7,7 +7,9 @@
 const { SYSTEM, buildContexto, stripEscalar } = require('../functions/asistente-prompt');
 const { escanear } = require('../functions/banderas-rojas');
 const { neutralizarEmergencia } = require('../functions/asistente-guardrail');
-const { limpiarBotonesDelTexto, voseoAr } = require('../functions/asistente-prompt');
+const { limpiarBotonesDelTexto, voseoAr, gateProspectoEmergencia, quitarOfertaAfiliacionSocio } = require('../functions/asistente-prompt');
+// Backstops deterministas por tipoUsuario (espejo de la CF): prospecto → gate 443044; socio → sin oferta de afiliación.
+const backstop = (label, txt) => ['prospecto-plan', 'prospecto-cuenta', 'prospecto-roja'].includes(label) ? gateProspectoEmergencia(txt) : quitarOfertaAfiliacionSocio(txt);
 // Post-procesamiento IDÉNTICO al de la CF: strip [[ESCALAR]] + neutralizar 443044 si rojo=false + limpiar tokens + voseo.
 const postCF = (raw, rojo) => voseoAr(limpiarBotonesDelTexto(neutralizarEmergencia(stripEscalar(raw).texto, rojo).texto));
 // AMBOS caminos del ruteo: con ANTHROPIC_API_KEY → claude-haiku-4-5 (camino salud/rojo); sin key → ollama 8B (camino resto/fallback).
@@ -103,7 +105,7 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
       : (['prospecto-plan', 'prospecto-cuenta', 'prospecto-roja'].includes(label) ? contextoProspecto
       : contexto));
     const out = await chat([], msg, ctx);
-    const final = postCF(out, rojo);                 // lo que realmente ve el socio (post-CF)
+    const final = backstop(label, postCF(out, rojo)); // lo que realmente ve el usuario (post-CF + backstop por tipoUsuario)
     let nota = '';
     if (!rojo && tiene443044Incondicional(final)) { nota += '  🔴 443044 INCONDICIONAL EN BENIGNO'; flags++; }
     if (label === 'factura-pagada') {
@@ -147,7 +149,8 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
     }
     if (label === 'prospecto-roja') {
       if (!rojo) { nota += '  🔴 ESCANEO NO DISPARÓ (banderas deben ser IDÉNTICAS para el prospecto)'; flags++; }
-      if (!/443044/.test(final)) { nota += '  🔴 no ofrece 443044 (la urgencia es de todos)'; flags++; }
+      if (/443044/.test(final)) { nota += '  🔴 el 443044 llegó al prospecto (gate: nunca como vía)'; flags++; }
+      if (!/guardia|hospital|\b107\b|emergencias? p[uú]blic|atenci[oó]n m[eé]dica/i.test(final)) { nota += '  🟠 no deriva a urgencia pública'; flags++; }
     }
     // REGRESIÓN SAGRADA: a un SOCIO jamás se le vende/ofrece afiliación.
     if (label === 'socio-regresion' && /afili/i.test(final)) { nota += '  🔴 OFRECE AFILIACIÓN A UN SOCIO (regresión)'; flags++; }

@@ -1,6 +1,6 @@
 'use strict';
 // Smoke — asistente-prompt.js: buildContexto (MÍNIMO, nunca PII/clínico), stripEscalar, parseBotones.
-const { SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr } = require('../functions/asistente-prompt');
+const { SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr, gateProspectoEmergencia, quitarOfertaAfiliacionSocio } = require('../functions/asistente-prompt');
 let ok = 0, fail = 0;
 const t = (l, c) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}`); c ? ok++ : fail++; };
 
@@ -85,14 +85,30 @@ t('prospecto: NO hay bloque TU CUENTA (header de socio)', !/datos de TU cuenta d
 t('prospecto: NO trae cuota/plan/turnos/facturas del socio', !/Tu plan asignado|Próximo turno|Tu cuota|Facturas:/.test(ctxProsp));
 t('prospecto: catálogo COMPLETO disponible', /Plan Joven \$20\.000/.test(ctxProsp) && /Plan Familiar desde \$40\.000/.test(ctxProsp) && /Plan Senior \$60\.000/.test(ctxProsp));
 t('prospecto: "mi cuota/mis turnos" → todavía no es socio + afiliarse', /Si pregunta por "mi cuota\/mis turnos\/mi plan\/mis facturas", aclarale que todavía no es socio/.test(ctxProsp));
-t('prospecto: emergencia 443044 es para todos', /Emergencias 443044 \(para TODOS/.test(ctxProsp));
+t('prospecto (gate): 443044 es dato INSTITUCIONAL, NO vía para no socios', /su línea 443044 es un dato INSTITUCIONAL.*NO una vía que le ofrezcas a un no socio/.test(ctxProsp));
+t('prospecto (gate): guardia 24hs = beneficio de socios (el prospecto NO la tiene)', /guardia de emergencias 24hs es un BENEFICIO de los socios; el prospecto todavía NO la tiene/.test(ctxProsp));
 t('prospecto: memoria por uid se inyecta igual', /DE CHARLAS ANTERIORES/.test(ctxProsp) && /preguntó por planes/.test(ctxProsp));
 // REGLA ESPEJO en el SYSTEM.
 t('SYSTEM (espejo): al SOCIO jamás afiliarse/venderle (regresión sagrada)', /Si el contexto trae el bloque TU CUENTA, hablás con un SOCIO.*JAMÁS le ofrezcas afiliarse/.test(SYSTEM) && /Venderle a un socio es un error grave/.test(SYSTEM));
 t('SYSTEM (espejo): al PROSPECTO ofrecer afiliarse cuando el tema habilita', /hablás con un PROSPECTO.*OFRECER AFILIARSE.*SOLO cuando el tema lo habilita/.test(SYSTEM) && /Plan Joven a \$20\.000/.test(SYSTEM));
-t('SYSTEM (espejo): urgencia 443044 para socio y prospecto igual', /La urgencia es de TODOS.*443044 va igual sea socio o prospecto/.test(SYSTEM));
+t('SYSTEM (gate): SOCIO rojo → 443044 (su guardia cubierta)', /SOCIO con URGENCIA.*llame YA al 443044/.test(SYSTEM));
+t('SYSTEM (gate): PROSPECTO rojo → urgencia pública, NUNCA 443044', /PROSPECTO con URGENCIA.*443044 es de SOCIOS — NO se lo ofrezcas.*GUARDIA u HOSPITAL/.test(SYSTEM));
+t('SYSTEM (gate): una sola línea de venta en el síntoma (urgencia primero)', /NADA más de venta durante el síntoma: la urgencia primero/.test(SYSTEM));
+t('SYSTEM (encuadre): sin "prueba/demo/muestra"; afiliación solo cuando el tema la trae', /el chat es un servicio abierto, NO una "prueba".*muestra de lo que tendrías.*NUNCA uses ese lenguaje/.test(SYSTEM) && /NUNCA como upsell permanente/.test(SYSTEM));
 // Botón de afiliación en la whitelist.
 t('parseBotones: [Quiero afiliarme] → accion afiliarme', parseBotones('Te conviene el Plan Joven. [Quiero afiliarme]').some((b) => b.accion === 'afiliarme'));
+
+// --- GATE determinista: prospecto → 443044 nunca como acción (backstop, no depende del modelo) ---
+t('gate prospecto: "Llamá YA al 443044" → urgencia pública, sin número', (() => { const r = gateProspectoEmergencia('Es una urgencia. Llamá YA al 443044, es la guardia 24hs.'); return !/443044/.test(r) && /guardia u hospital/i.test(r); })());
+t('gate prospecto: "comunicate con el 443044" → sin número', !/443044/.test(gateProspectoEmergencia('Podés comunicarte con el 443044.')));
+t('gate prospecto: 443044 institucional suelto también se saca', !/443044/.test(gateProspectoEmergencia('MEDICAR (443044) es una empresa de emergencias.')));
+t('gate prospecto: no toca texto sin 443044', gateProspectoEmergencia('Andá a una guardia u hospital.') === 'Andá a una guardia u hospital.');
+// --- REGRESIÓN SAGRADA determinista: socio → sin oferta de afiliación en el texto ---
+t('regresión socio: quita "Si querés, podés afiliarte…"', quitarOfertaAfiliacionSocio('Te conviene el Plan Familiar. Si querés, podés afiliarte cuando quieras.') === 'Te conviene el Plan Familiar.');
+t('regresión socio: quita "afiliándote tenés…"', !/afili/i.test(quitarOfertaAfiliacionSocio('El Familiar cubre a todos. Afiliándote tenés cobertura 24hs.')));
+t('regresión socio: quita el cierre "¿te gustaría afiliarte?"', quitarOfertaAfiliacionSocio('El Familiar sale $60.000. ¿Querés conocer más detalles o te gustaría afiliarte?') === 'El Familiar sale $60.000.');
+t('regresión socio: CONSERVA la que DECLINA ("ya sos socio")', /ya sos socio/i.test(quitarOfertaAfiliacionSocio('Ya sos socio, no necesitás afiliarte de nuevo.')));
+t('regresión socio: no toca info de plan (cambiar de plan sigue)', quitarOfertaAfiliacionSocio('Te conviene el Plan Familiar por $60.000.') === 'Te conviene el Plan Familiar por $60.000.');
 
 // --- AJUSTE: strip robusto de tokens de botón en la prosa ---
 t('limpia [Cambiar mi plan] de la prosa', limpiarBotonesDelTexto('Te conviene el Familiar. [Cambiar mi plan]') === 'Te conviene el Familiar.');
