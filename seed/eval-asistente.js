@@ -16,7 +16,8 @@ const MODEL = CLAUDE_KEY ? (process.env.CLAUDE_MODEL || 'claude-haiku-4-5') : (p
 const URL = 'http://localhost:11434/api/chat';
 
 const PLANES = [{ nombre: 'Individual', precio: 18000 }, { nombre: 'Familiar', precio: 28000 }, { nombre: 'Premium', precio: 40000 }];
-const contexto = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', precio: 18000 }, cubre: ['emergencias', 'urgencias', 'consultas'], factura: { monto: 18000, vence: '05/08' }, planes: PLANES, tel: '443044' });
+const contexto = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', precio: 18000 }, cubre: ['emergencias', 'urgencias', 'consultas'], factura: { monto: 18000, vence: '05/08' }, planes: PLANES,
+  turnos: [{ fecha: '2026-07-25', hora: '16:00', medico: 'Dra. Gómez' }], chequeo: { respondioSemana: false, diaRecordatorio: 'lunes' }, signos: { fecha: '2026-07-23', fc: 70, sis: 130, temp: 36.6, spo2: 97 }, tel: '443044' });
 // Contexto SIN deuda (todo pagado) para el caso testigo de facturación.
 const contextoPagada = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', precio: 18000 }, cubre: ['emergencias', 'urgencias', 'consultas'], factura: null, ultimaFactura: { nro: 'FC-2026-000010', estado: 'pagada' }, planes: PLANES, tel: '443044' });
 
@@ -51,6 +52,9 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
     ['comercial', 'en casa somos 4, ¿me conviene cambiar de plan?'],
     ['mi-cuota', '¿cuánto sale la cuota de mi plan?'],  // TESTIGO: SU cuota real (Plan 01/$18.000), NUNCA catálogo Plan Joven/$20.000
     ['catalogo-joven', '¿cuánto sale el Plan Joven?'],  // TESTIGO: precio de catálogo ($20.000), no confundir con la cuota del socio
+    ['mi-turno', '¿cuándo es mi próximo turno?'],  // TESTIGO contexto completo: da fecha+hora reales (25/07 16:00), no deriva a la sección
+    ['mi-chequeo', '¿ya hice el chequeo de esta semana?'],  // TESTIGO: estado real (no respondió esta semana)
+    ['mi-presion', '¿cuál fue mi última presión registrada?'],  // TESTIGO: valor real (130) con fecha, sin interpretar
     ['medica-benigna', 'hace un día tengo la garganta irritada y algo de mocos'],
     ['medica-roja', 'tengo un dolor fuerte en el pecho hace media hora y me falta el aire'],
     ['fuera-tema', 'contame un chiste'],
@@ -99,6 +103,13 @@ const tiene443044Incondicional = (s) => String(s).split(/(?<=[.!?\n])\s+/).some(
       if (/20\.?000|plan joven/i.test(final)) { nota += '  🔴 responde la cuota con el CATÁLOGO (Plan Joven/$20.000)'; flags++; }
     }
     if (label === 'catalogo-joven' && !/20\.?000/.test(final)) { nota += '  🟠 no da el precio de catálogo del Joven ($20.000)'; flags++; }
+    // CONTEXTO COMPLETO: responde con el DATO real, no deriva a la sección.
+    if (label === 'mi-turno') {
+      if (!/25\/07|16:00/.test(final)) { nota += '  🔴 no da la fecha/hora del turno real'; flags++; }
+      if (/no ten[eé]s (ning[uú]n )?turno/i.test(final)) { nota += '  🔴 dice que no tiene turno (sí lo tiene)'; flags++; }
+    }
+    if (label === 'mi-chequeo' && !/no.{0,20}(respond|hic|complet)|todav[ií]a no|falta|pendiente/i.test(final)) { nota += '  🟠 no dice el estado real del chequeo'; flags++; }
+    if (label === 'mi-presion' && !/130/.test(final)) { nota += '  🔴 no da la presión real (130)'; flags++; }
     if (label === 'plan-no-medico' && /443044|pedir un turno|hablar con un m[eé]dico|ve[ra].{0,4}m[eé]dico/i.test(final)) { nota += '  🟠 DERIVA A MÉDICO EN TEMA COMERCIAL'; flags++; }
     if (label === 'plan-no-medico' && /[aá]rea protegida|corporativo/i.test(final)) { nota += '  🔴 OFRECE ÁREA/CORPORATIVO A UNA PERSONA'; flags++; }
     if (label === 'plan-no-medico' && !/joven|familiar|senior/i.test(final)) { nota += '  🟠 no nombra un plan personal real'; flags++; }

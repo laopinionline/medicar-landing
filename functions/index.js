@@ -1509,9 +1509,43 @@ exports.asistenteChat = onCall(async (request) => {
       const ult = facs.slice().sort((a, b) => String(b.periodo || '').localeCompare(String(a.periodo || '')) || vMs(b.emitidaEn) - vMs(a.emitidaEn))[0];
       if (ult) ultimaFactura = { nro: ult.nroComprobante || '—', estado: ult.estado || '—' };
     }
+    // TURNOS del socio: próximos reservados (estado creado, fecha >= hoy) ordenados. La AUSENCIA se afirma (lección facturas).
+    const hoy = hoyAR();
+    let turnos = [];
+    try {
+      const tq = await db.collection('turnos').where('personaId', '==', personaId).where('estado', '==', 'creado').get();
+      turnos = tq.docs.map((x) => x.data())
+        .filter((t) => String(t.fecha || '') >= hoy)
+        .sort((a, b) => String(a.fecha).localeCompare(String(b.fecha)) || String(a.hora || '').localeCompare(String(b.hora || '')))
+        .slice(0, 3)
+        .map((t) => ({ fecha: t.fecha, hora: t.hora || '', medico: t.medicoNombre || '' }));
+    } catch (e) { logger.warn('[asistenteChat] no se pudieron leer turnos', { err: e.message }); }
+
+    // CHEQUEO semanal: ¿respondió en los últimos 7 días? + día de recordatorio (usuarios/{uid}.prefRecordatorio, 0=domingo).
+    let chequeo = null;
+    try {
+      const rq = await db.collection('respuestas_cuestionario').where('personaId', '==', personaId).get();
+      let lastMs = 0; rq.docs.forEach((x) => { const ms = vMs(x.data().creadoEn); if (ms > lastMs) lastMs = ms; });
+      const uSnap = await db.collection('usuarios').doc(uid).get();
+      const pref = uSnap.exists ? (uSnap.data() || {}).prefRecordatorio : null;
+      const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+      chequeo = { respondioSemana: lastMs > 0 && (Date.now() - lastMs) < 7 * 86400000, diaRecordatorio: (typeof pref === 'number' && pref >= 0 && pref <= 6) ? DIAS[pref] : null };
+    } catch (e) { logger.warn('[asistenteChat] no se pudo leer chequeo', { err: e.message }); }
+
+    // ÚLTIMOS SIGNOS (chequeos_parametros): el más reciente. N3 INVIOLABLE: NUNCA los news2* (score/nivel), solo los valores crudos que cargó el socio.
+    let signos = null;
+    try {
+      const sq = await db.collection('chequeos_parametros').where('personaId', '==', personaId).get();
+      if (!sq.empty) {
+        const ult = sq.docs.map((x) => x.data()).sort((a, b) => vMs(b.creadoEn) - vMs(a.creadoEn))[0];
+        const fecha = ult.creadoEn && ult.creadoEn.toDate ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(ult.creadoEn.toDate()) : '';
+        signos = { fecha, fc: ult.fc != null ? ult.fc : null, sis: ult.sis != null ? ult.sis : null, temp: ult.temp != null ? ult.temp : null, spo2: ult.spo2 != null ? ult.spo2 : null };
+      }
+    } catch (e) { logger.warn('[asistenteChat] no se pudieron leer signos', { err: e.message }); }
+
     // catálogo de planes = curado en buildContexto (landing); NO se lee de Firestore (los docs no traen elegibilidad).
     const nombre = (socio && socio.nombreVista) ? String(socio.nombreVista).split(',').pop().trim().split(' ')[0] : 'socio';
-    contexto = buildContexto({ nombre, plan, cubre, factura, ultimaFactura, memoria, tel: '443044' });
+    contexto = buildContexto({ nombre, plan, cubre, factura, ultimaFactura, turnos, chequeo, signos, memoria, tel: '443044' });
   } catch (e) {
     logger.warn('[asistenteChat] contexto degradado', { err: e.message }); // sin contexto sigue: el modelo orienta genérico
     contexto = buildContexto({ nombre: 'socio', planes: [], tel: '443044' });

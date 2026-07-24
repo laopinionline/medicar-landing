@@ -12,7 +12,7 @@ QUÉ HACÉS (sé ÚTIL):
 3) ORIENTÁS Y CERRÁS. Si no hay señal de alarma, orientá con criterio y CERRÁ la respuesta. NO mandes al médico en cada mensaje: derivá cuando de verdad hace falta (algo que necesita que lo examinen, que no mejora, o una señal de alarma). Una molestia leve se orienta y se cierra.
    INTERACCIONES PRIMERO: si el socio menciona una condición o una medicación que YA toma y pregunta por otro remedio, pensá ANTES las interacciones conocidas. Si ese fármaco suele evitarse en esa condición/medicación, decilo DE ENTRADA (ej.: con hipertensión o tomando enalapril se suele preferir paracetamol antes que un antiinflamatorio como el ibuprofeno). NUNCA digas "sí, podés" para corregirlo después.
    ENSEÑÁ EL UMBRAL: ante valores o síntomas de nivel URGENCIA —aunque la pregunta sea hipotética o general— enseñá el criterio real: decí que con eso se busca atención inmediata / se llama al 443044, NO "pedí un turno" (ej.: una presión 19/11 con dolor de cabeza es una urgencia, no un turno).
-4) CUENTA DEL SOCIO: respondés sobre SU plan y SUS facturas con el CONTEXTO de abajo. Si el dato ESTÁ en el contexto, respondelo directo con el número; si NO está, orientá dónde verlo en la app. NUNCA afirmes deudas ni importes que el contexto no traiga TEXTUALMENTE: si el contexto dice que no hay factura pendiente, decí con claridad que NO debe nada; la cuota mensual del plan NO es una deuda. No inventes datos de la cuenta.
+4) CUENTA DEL SOCIO: respondés sobre SU plan, SUS facturas, SUS TURNOS, el CHEQUEO semanal y SUS últimos SIGNOS con el CONTEXTO de abajo (bloque TU CUENTA). Si el dato ESTÁ en el contexto, respondelo DIRECTO con el dato concreto (la fecha y hora del turno, el valor del signo, el estado del chequeo) — NUNCA mandes a "ver la sección" ni "mirá el bloque" cuando el dato YA lo tenés; si NO está, orientá dónde verlo en la app. NUNCA afirmes deudas ni importes que el contexto no traiga TEXTUALMENTE: si el contexto dice que no hay factura pendiente, decí con claridad que NO debe nada; la cuota mensual del plan NO es una deuda. No inventes datos de la cuenta.
    FUENTE DE LA CUOTA: para "cuánto sale/pago mi cuota", "mi plan" o "cuánto pago", respondé SIEMPRE con el bloque TU CUENTA (tu plan asignado y tu cuota REAL), NUNCA con el precio de lista del CATÁLOGO. Si tu plan asignado NO figura en el catálogo (plan interno, ej. "Plan 01"), dá tu cuota real tal cual, sin "traducirlo" a un plan comercial: no digas que tenés Joven/Familiar/Senior si ese no es tu plan asignado.
 5) PLANES: los precios del CATÁLOGO (Joven/Familiar/Senior) son de LISTA, para COMPARAR o evaluar un cambio — NO son la cuota que paga el socio (esa está en TU CUENTA). Si le conviene otro, sugerilo con el motivo (edad, tamaño del grupo) y cerrá con [Cambiar mi plan]. A un socio-PERSONA ofrecé SOLO Plan Joven / Familiar / Senior según su caso. Área Protegida (por local comercial) y Corporativo (empresas) NO son planes personales: describilos solo si preguntan y derivá a contacto comercial — NUNCA los recomiendes como plan de una persona. Cambiar o elegir un plan es un tema COMERCIAL/administrativo: NUNCA lo derives a un médico ni a emergencias. Orientás, no ejecutás.
 
@@ -48,13 +48,18 @@ TONO Y LENGUAJE:
 - VOSEO rioplatense SIEMPRE: querés/podés/tenés/fijate/mirá; NUNCA formas peninsulares ("quieres/puedes/tienes"). "¿Querés que te cuente?", no "¿Quieres saber?".
 - LÉXICO CORRECTO: usá los nombres reales de aparatos y términos (es "tensiómetro", no "termómetro de presión"). Si dudás del nombre de un aparato, no lo nombres.
 - CIERRE SIN PREGUNTA OBLIGADA: hacé una pregunta final SOLO si hay una continuación natural; si la respuesta ya está completa, cerrá sin "¿querés saber algo más?".
+- REGISTRO PROFESIONAL: cálido pero serio — es una empresa de salud. NADA de muletillas informales o "playeras" ("qué onda", "posta", "tranqui", "buena onda"). Cercano y claro, nunca canchero.
+- SIN MEMORIA PREVIA: si te preguntan por charlas anteriores y NO hay un bloque "DE CHARLAS ANTERIORES" en el contexto, decí simplemente "no tengo registro de charlas anteriores, contame de nuevo". NUNCA digas que sos "un asistente nuevo", que "recién empezás en este rol" ni nada parecido: no hablás de vos.
 
 FORMATO OBLIGATORIO DE LA ETIQUETA: si en tu respuesta recomendaste ver a un médico por una SEÑAL DE ALARMA, la ÚLTIMA línea debe ser EXACTAMENTE esta, sola y sin nada después:
 [[ESCALAR]]
 Si no hubo señal de alarma, NO la pongas (una molestia leve o una duda no llevan etiqueta).`;
 
-// Arma el bloque CONTEXTO server-side. MÍNIMO por diseño. `d` = { nombre, plan, cubre[], factura, planes[], tel }.
-// NUNCA incluye: DNI, historial clínico, datos de terceros, nº de pago. La CF es responsable de pasar solo esto.
+// Formatea 'YYYY-MM-DD' → 'DD/MM' (para turnos/signos). Si no matchea, devuelve el original tal cual.
+const ddmm = (f) => { const p = String(f || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] : String(f || ''); };
+
+// Arma el bloque CONTEXTO server-side. MÍNIMO por diseño. `d` = { nombre, plan, cubre[], factura, turnos[], chequeo,
+// signos, memoria, tel }. NUNCA incluye: DNI, historial clínico, datos de terceros, nº de pago, scores/NEWS2 (N3).
 function buildContexto(d) {
   const L = [];
   // BLOQUE "TU CUENTA" — fuente CONTABLE (cuenta corriente/afiliado). Es LA fuente para "mi plan/mi cuota/cuánto pago".
@@ -68,6 +73,30 @@ function buildContexto(d) {
   else {
     const est = d.ultimaFactura ? (' Tu última factura (' + d.ultimaFactura.nro + ') figura ' + (d.ultimaFactura.estado === 'pagada' ? 'PAGADA' : String(d.ultimaFactura.estado || '')) + '.') : ' No hay facturas registradas todavía.';
     L.push('- Facturas: NO tenés ninguna factura pendiente. NO debés nada.' + est);
+  }
+  // TURNOS: próximo (y siguientes) o AUSENCIA afirmada (nunca callar la ausencia — lección facturas). La videollamada es por WhatsApp.
+  if (Array.isArray(d.turnos)) {
+    if (d.turnos.length) {
+      const t0 = d.turnos[0];
+      L.push('- Próximo turno: ' + ddmm(t0.fecha) + (t0.hora ? ' a las ' + t0.hora : '') + (t0.medico ? ' con ' + t0.medico : '') + '. La videollamada es por WhatsApp.');
+      const resto = d.turnos.slice(1);
+      if (resto.length) L.push('- Siguientes turnos: ' + resto.map((t) => ddmm(t.fecha) + (t.hora ? ' a las ' + t.hora : '')).join('; ') + '.');
+    } else {
+      L.push('- Turnos: no tenés ningún turno reservado.');
+    }
+  }
+  // CHEQUEO semanal: estado real (respondido o no esta semana) + día de recordatorio configurado.
+  if (d.chequeo) {
+    L.push('- Chequeo semanal: ' + (d.chequeo.respondioSemana ? 'ya lo respondiste esta semana.' : 'todavía no lo respondiste esta semana.') + (d.chequeo.diaRecordatorio ? ' Tu recordatorio está configurado los ' + d.chequeo.diaRecordatorio + '.' : ''));
+  }
+  // ÚLTIMOS SIGNOS: los valores CRUDOS que cargó el socio (N3: sin interpretación ni clasificación).
+  if (d.signos) {
+    const s = d.signos, v = [];
+    if (s.fc != null) v.push('pulso ' + s.fc + ' lpm');
+    if (s.sis != null) v.push('presión (sistólica) ' + s.sis + ' mmHg');
+    if (s.temp != null) v.push('temperatura ' + s.temp + ' °C');
+    if (s.spo2 != null) v.push('oxígeno ' + s.spo2 + '%');
+    if (v.length) L.push('- Últimos signos que registraste' + (s.fecha ? ' (' + ddmm(s.fecha) + ')' : '') + ': ' + v.join(', ') + '. Son los valores que cargaste vos, sin interpretación.');
   }
   // MEMORIA de charlas anteriores (subordinada a TU CUENTA). Se retoma con naturalidad; si contradice el dato de
   // cuenta de arriba, MANDA TU CUENTA. Solo lo que el socio dijo/consultó — nunca scores ni clasificaciones (N3).

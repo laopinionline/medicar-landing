@@ -76,12 +76,13 @@ Estructura EXACTA (solo estas claves; arrays; cada texto corto y en 3ª persona 
 {
  "temas":        [{"t":"tema que consultó","fecha":"AAAA-MM-DD"}],
  "seguimientos": [{"t":"algo de salud abierto a seguir","desde":"AAAA-MM-DD"}],
- "pendientes":   [{"t":"trámite/pedido administrativo pendiente","desde":"AAAA-MM-DD"}],
- "preferencias": [{"t":"preferencia explícita del socio"}]
+ "pendientes":   [{"t":"trámite/pedido/deseo administrativo pendiente","desde":"AAAA-MM-DD"}],
+ "preferencias": [{"t":"preferencia de TRATO o comunicación (ej. prefiere que le hablen de usted)"}]
 }
 
 REGLAS:
 - Guardá SOLO lo que el socio DIJO o CONSULTÓ (síntomas que contó, trámites que pidió, preferencias que expresó). Memoria COMPLETA: administrativa Y de salud.
+- "preferencias" es SOLO para preferencias de TRATO/COMUNICACIÓN (cómo quiere que le hablen). Un DESEO o TRÁMITE (ej. "quiere pasar al plan Familiar") va en "pendientes", NUNCA en "preferencias". No dupliques el mismo ítem en dos campos.
 - FUSIONÁ con la memoria previa: conservá lo que sigue abierto, sacá lo ya resuelto, no dupliques.
 - Textos BREVES y concretos (una línea). Usá la fecha de hoy que te paso para lo nuevo.
 - PROHIBIDO: diagnósticos, niveles de gravedad, scores, clasificaciones internas, datos de terceros, números de factura/DNI. Nada de eso va a la memoria.
