@@ -60,5 +60,10 @@
       .catch(function () { CALLES = []; return CALLES; });
     return cargaP;
   }
-  global.Callejero = { cargar: cargar, resolver: resolver, opciones: function () { return CALLES.slice(); }, cargado: function () { return CALLES.length > 0; } };
+  // Inyector SÍNCRONO (aditivo): setea las calles en memoria sin fetch. El browser sigue usando cargar(); esto lo usan
+  // los entornos sin fetch (el smoke de paridad en node) para driver el MISMO núcleo con el JSON en mano.
+  function cargarDesde(arr) { CALLES = Array.isArray(arr) ? arr : []; IDX = null; return CALLES; }
+  var API = { cargar: cargar, cargarDesde: cargarDesde, resolver: resolver, opciones: function () { return CALLES.slice(); }, cargado: function () { return CALLES.length > 0; } };
+  global.Callejero = API;
+  if (typeof module !== 'undefined' && module.exports) module.exports = API; // CommonJS (node/smoke); no afecta al browser
 })(typeof window !== 'undefined' ? window : globalThis);
