@@ -36,6 +36,9 @@ const { agruparFacturas, facturaDoc, fmtComprobante, vencimientoISO } = require(
 const { crearPreferencia, verificarWebhook } = require('./pasarela-adapter'); // Pasarela: adaptador del proveedor (SIM completo, real stub)
 const { reciboPublico } = require('./recibo'); // Recibo del socio: proyección pública de un pago (campos limpios)
 const { cargoDeEpisodio, fmtIncidente } = require('./cargos-nucleo'); // Facturación: núcleo puro de cargos + formato INC (F4: traza del área)
+const CallejeroCore = require('./callejero-core'); // Callejero canónico server-side (calco de callejero.js; paridad por smoke). Re-resuelve el domicilio del checkout.
+const { resolverDomCheckout } = require('./checkout-dom'); // Checkout: resolución pura del domicilio (recompute-and-use), testeable
+try { CallejeroCore.cargarDesde(require('./calles-pergamino.json')); } catch (e) { logger.error('[callejero-core] no se pudo cargar calles-pergamino.json', { err: e && e.message }); }
 const { RESULTADOS, puedeMarcar, debeBarrer } = require('./asistencia'); // Turnos Fase B: transiciones atendido/ausente + barrido
 const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: escaneo determinista de banderas rojas (server-side)
 const guardrailAsistente = require('./asistente-guardrail').revisar; // MEDICAR IA: guardrail de salida
@@ -1734,9 +1737,15 @@ exports.gestionarProspecto = onCall(async (request) => {
 const PLANES_CHECKOUT = { joven: { nombre: 'Plan Joven', base: 20000, maxEdad: 30 }, familiar: { nombre: 'Plan Familiar', base: 40000, adicional: 10000, baseIntegrantes: 2 }, senior: { nombre: 'Plan Senior', base: 60000 } };
 const edadDeISO = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '')); if (!m) return null; const h = new Date(); let e = h.getFullYear() - (+m[1]); if (((h.getMonth() + 1) * 100 + h.getDate()) < ((+m[2]) * 100 + (+m[3]))) e--; return e; };
 const ISO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
-// Domicilio de despacho: exige calleId (canónico del callejero) + altura>0 + texto. NO re-resuelve el callejero server-side
-// (vive en el cliente); valida PRESENCIA — sin domicilio válido NO hay pago. (Con pasarela REAL habrá que endurecer.)
-const domCanon = (o) => { o = o || {}; const texto = String(o.texto || '').trim().slice(0, 200); const calleId = String(o.calleId || '').trim().slice(0, 120); const altura = Number(o.altura) || 0; const pisoDepto = String(o.pisoDepto || '').trim().slice(0, 60); return (texto && calleId && altura > 0) ? { texto, calleId, altura, pisoDepto } : null; };
+// Domicilio del checkout — RE-RESUELTO server-side (endurecimiento pre-pasarela). El server no confía en el calleId del
+// cliente: re-resuelve desde `texto` con el MISMO núcleo del callejero (callejero-core, calco de callejero.js) y PERSISTE
+// lo del server (recompute-and-use). Rechaza (null) si cae FUERA del callejero (calleId null / rural / ambiguo / altura 0).
+// Si lo declarado por el cliente DIFIERE de lo recomputado → LOG de advertencia (flags, sin PII) y se persiste el del server.
+function resolverDomServer(o, etiqueta) {
+  const { dom, mismatch } = resolverDomCheckout(o, CallejeroCore.resolver);
+  if (dom && mismatch) logger.warn('[checkoutAfiliacion] domicilio declarado ≠ recomputado — persisto el del server', { etiqueta }); // solo la etiqueta, sin texto/calle/altura (sin PII)
+  return dom; // null = fuera del callejero (rechazo); si no, calleId/altura SIEMPRE del server
+}
 // Fecha de nacimiento PLAUSIBLE: ISO + año ≥1900 + no futura (a la fecha del checkout). Un año absurdo (5200) da edades
 // absurdas y rompe el enforcement Joven ≤30, que se calcula de esta fecha → se rechaza limpio.
 function fechaNacPlausible(iso) { if (!ISO_FECHA.test(String(iso || ''))) return false; const y = parseInt(String(iso).slice(0, 4), 10); return y >= 1900 && String(iso) <= new Date().toISOString().slice(0, 10); }
@@ -1748,6 +1757,9 @@ exports.checkoutAfiliacion = onCall(async (request) => {
   const ref = db.collection('prospectos').doc(request.auth.uid);
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError('failed-precondition', 'Solo para prospectos.');
+  // IDEMPOTENCIA DURA (pre-pasarela): un prospecto ya en 'afiliacion_en_proceso' NO re-checkoutea (doble lead / doble cobro
+  // con pago real). El gate client-side (abrirPuente) queda; este es el blindaje server. La activación real la hace el admin.
+  if ((snap.data() || {}).estado === 'afiliacion_en_proceso') throw new HttpsError('failed-precondition', 'Ya tenés una afiliación en proceso.');
   const d = request.data || {};
   const p = PLANES_CHECKOUT[String(d.planKey || '')];
   if (!p) throw new HttpsError('invalid-argument', 'Plan inválido.');
@@ -1757,8 +1769,8 @@ exports.checkoutAfiliacion = onCall(async (request) => {
   if (!fechaNacPlausible(fechaNacimiento)) throw new HttpsError('invalid-argument', 'Revisá la fecha de nacimiento del titular (año 1900 o posterior, y no futura).');
   const edad = edadDeISO(fechaNacimiento);
   if (d.planKey === 'joven' && edad != null && edad > p.maxEdad) throw new HttpsError('failed-precondition', 'El Plan Joven es hasta 30 años.');
-  // Domicilio del TITULAR (dato de despacho) — obligatorio y con calleId del callejero.
-  const domTitular = domCanon(d.domicilio);
+  // Domicilio del TITULAR (dato de despacho) — obligatorio y RE-RESUELTO server-side contra el callejero.
+  const domTitular = resolverDomServer(d.domicilio, 'titular');
   if (!domTitular) throw new HttpsError('invalid-argument', 'El domicilio del titular debe estar en el callejero de Pergamino.');
   const titDni = String((snap.data() || {}).dni || '').replace(/\D/g, '');
   // INTEGRANTES (Familiar): deben ser N-1, con datos completos, DNIs válidos/únicos/≠titular, domicilio propio si no comparte.
@@ -1781,7 +1793,7 @@ exports.checkoutAfiliacion = onCall(async (request) => {
       if (!fechaNacPlausible(fnac)) throw new HttpsError('invalid-argument', et + ': revisá la fecha de nacimiento (año 1900 o posterior, y no futura).');
       if (!vinculo) throw new HttpsError('invalid-argument', et + ': falta el vínculo.');
       const item = { nombre, dni, fechaNacimiento: fnac, vinculo, comparteDomicilio };
-      if (!comparteDomicilio) { const dm = domCanon(m.domicilio); if (!dm) throw new HttpsError('invalid-argument', et + ': el domicilio debe estar en el callejero de Pergamino.'); item.domicilio = dm; }
+      if (!comparteDomicilio) { const dm = resolverDomServer(m.domicilio, 'integrante'); if (!dm) throw new HttpsError('invalid-argument', et + ': el domicilio debe estar en el callejero de Pergamino.'); item.domicilio = dm; }
       integrantesOut.push(item);
     }
   }
