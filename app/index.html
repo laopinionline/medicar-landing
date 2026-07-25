@@ -1908,7 +1908,7 @@ function dspListaHTML(d){
 // Paciente elegido (numérico 1, alfabético 1, o clic en la lista): carga historial y va al form. Igual que hoy.
 async function dspIrAlPaciente(pac){
   const d=dspState();
-  d.paciente=pac; d.noEncontrado=false; d.hist=[]; d.resultados=null;
+  d.paciente=pac; d.noEncontrado=false; d.hist=[]; d.resultados=null; d.otroLugar=false; // arranca en modo AUTO (domiciliaria) si la ficha trae domicilio
   try{
     const hs=await db.collection('episodios').where('pacienteId','==',pac.id).limit(20).get();
     d.hist=hs.docs.map(x=>x.data()).sort((a,b)=>((b.creadoEn&&b.creadoEn.seconds)||0)-((a.creadoEn&&a.creadoEn.seconds)||0));
@@ -1936,8 +1936,18 @@ function dDespForm(d){
   </div>
   <div class="card">
     <div class="st">Ubicación de la atención</div>
+    ${(d.paciente&&d.paciente.direccion&&!d.otroLugar) ? `
+    ${/* AUTO: domicilio de la ficha intacto → tipo de lugar 'domiciliaria' automático, selector oculto. #dom readonly +
+         #tlugar hidden='domiciliaria' → dspCrear lee EXACTAMENTE el mismo dato (domicilio + tipoLugar) que el selector manual. */''}
+    <div class="field"><label>Domicilio</label><input id="dom" type="text" value="${esc(d.paciente.direccion)}" readonly style="background:var(--bg2,#f3f4f6);color:var(--ink2)"></div>
+    <input type="hidden" id="tlugar" value="domiciliaria">
+    <div style="font-size:.68rem;color:var(--ink3);margin:-.35rem 0 .5rem">📍 Domicilio de la ficha · tipo <b>Domiciliaria</b> (automático). No modifica la ficha.</div>
+    <button type="button" class="btn-o" style="width:auto;padding:.35rem .8rem" onclick="dspOtroLugar(true)">Otro domicilio / lugar</button>
+    <div id="dsp-area-banner" style="margin-top:.5rem"></div>
+    ` : `
+    ${/* MANUAL: sin ficha (siempre), o "Otro domicilio/lugar" activado → dirección editable + selector completo. */''}
     <div class="field"><label>Domicilio</label><input id="dom" list="calles-list" type="text" value="${d.paciente&&d.paciente.direccion?esc(d.paciente.direccion):''}" placeholder="Calle y número" autocomplete="off" oninput="dspDomChange()"><datalist id="calles-list">${afCallesOpts()}</datalist></div>
-    ${d.paciente&&d.paciente.direccion?`<div style="font-size:.62rem;color:var(--ink3);margin:-.35rem 0 .55rem">Precargado del domicilio de la ficha — editalo si la atención es en otro lugar (no modifica la ficha).</div>`:''}
+    ${(d.paciente&&d.paciente.direccion)?`<button type="button" class="btn-o" style="width:auto;padding:.3rem .7rem;margin:-.15rem 0 .5rem" onclick="dspOtroLugar(false)">← Volver al domicilio de la ficha</button>`:''}
     <div id="dsp-area-banner"></div>
     <div style="font-size:.62rem;color:var(--ink3);margin:-.35rem 0 .55rem">El callejero sugiere la calle; se admite texto libre (rural, calle nueva). La normalización canónica se resuelve al guardar.</div>
     <div class="field"><label>Tipo de lugar</label><select id="tlugar">
@@ -1949,6 +1959,7 @@ function dDespForm(d){
       <option value="instituto_educativo">Instituto educativo</option>
       <option value="base">Base</option>
     </select></div>
+    `}
   </div>
   <div id="dsperr" class="err" style="display:none;margin-bottom:.6rem"></div>
   <button class="btn-r" id="btnCrear" onclick="dspCrear()">Crear despacho</button>
@@ -2052,6 +2063,10 @@ function dspPickCodigo(btn,code){
     b.style.boxShadow=on?'0 0 0 3px rgba(0,0,0,.22) inset':'none';
   });
 }
+// FIX #2 — toggle "Otro domicilio/lugar": on=true abre dirección editable + selector completo; on=false vuelve al modo
+// AUTO (domicilio de la ficha, tipo 'domiciliaria'). Solo re-renderiza el form (nada tipeado que perder: en AUTO el
+// #dom es readonly). El dato persistido no cambia de forma — solo cuándo se pregunta el tipo de lugar.
+function dspOtroLugar(on){ dspState().otroLugar=!!on; render(); }
 
 // Normaliza para búsqueda: minúsculas + sin tildes + trim. Usado para apellidoNorm/nombreNorm.
 function normNombre(s){ return String(s==null?'':s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim(); }
