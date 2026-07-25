@@ -1277,6 +1277,14 @@ function prospectoView(){
 // afiliación en proceso (post-checkout) / asesor solicitado. En proceso o asesor → botón hecho, no re-clickeable.
 function afiliacionCTA(){
   const est = (S.prospecto && S.prospecto.estado) || 'nuevo';
+  if(est==='pendiente_pago'){
+    // El prospecto creó la preference pero el pago aún no está aprobado (rechazado / abandonado / vencido / en proceso).
+    // Sin sub-estados: mensaje + reintento. El reintento re-abre el puente → nueva preference sobre el mismo lead.
+    return `<div style="margin-top:.9rem;background:#fff8e6;border:1px solid #f3e2b0;border-radius:12px;padding:.9rem;text-align:center">
+      <div style="font-weight:800;color:#8a6d1f">Tu pago quedó pendiente</div>
+      <div style="font-size:.8rem;color:var(--gris);margin:.25rem 0 .6rem">Terminá el pago para activar tu afiliación. Si se rechazó o lo cancelaste, podés volver a intentarlo.</div>
+      <button class="btn-r" onclick="abrirPuente(null)" style="width:100%">Reintentar el pago</button></div>`;
+  }
   if(est==='afiliacion_en_proceso'){
     return `<div style="margin-top:.9rem;background:#eafaf0;border:1px solid #bfe6cd;border-radius:12px;padding:.9rem">
       <div style="font-weight:800;color:var(--verde,#2E8B57);text-align:center">Afiliación en proceso ✓</div>
@@ -2034,11 +2042,19 @@ async function puentePagar(){
     if(!m.comparte){ o.domicilio=puenteDomObj(m.calle,m.altura,m.pisoDepto); } return o; });
   const g=P.datos;
   try{
-    await fnsCall('checkoutAfiliacion', { planKey:P.planKey, integrantes:P.integrantes, fechaNacimiento:g.fechaNac,
+    const r=await fnsCall('checkoutAfiliacion', { planKey:P.planKey, integrantes:P.integrantes, fechaNacimiento:g.fechaNac,
       domicilio:puenteDomObj(g.calle,g.altura,g.pisoDepto), grupo });
-    if(S.prospecto) S.prospecto.estado='afiliacion_en_proceso'; // la home ya muestra "Afiliación en proceso ✓"
+    if(r && r.modo==='mercadopago' && r.initPoint){ window.location.href=r.initPoint; return; } // Checkout Pro: el lead quedó pendiente_pago; el webhook lo promueve al volver
+    if(S.prospecto) S.prospecto.estado='afiliacion_en_proceso'; // simulado: la home ya muestra "Afiliación en proceso ✓"
     P.step='ok'; P.busy=false; render();
   }catch(e){ P.busy=false; P.err=errCF(e,'No se pudo completar. Probá de nuevo.'); render(); }
+}
+// Lee el modo de pasarela (config, lectura permitida a autenticados) para adaptar el paso de pago. Lazy, una vez.
+async function puenteCargarModo(){
+  const P=S.puente; if(!P || P.modo!==undefined) return; P.modo=null; // null = cargando
+  try{ const c=await db.collection('configuracion').doc('pasarela').get(); P.modo=(c.exists && c.data().modo)?c.data().modo:'simulado'; }
+  catch(_){ P.modo='simulado'; }
+  render();
 }
 async function pedirAsesor(){
   const P=S.puente; if(P&&P.busy) return; if(P) P.busy=true; render();
@@ -2134,13 +2150,19 @@ function puenteView(){
     </div>`;
   }
   if(step==='pago'){
+    if(P.modo===undefined) puenteCargarModo();
+    const cargando=(P.modo===undefined||P.modo===null); const esMP=(P.modo==='mercadopago');
+    const banner=esMP
+      ? `<div style="background:#e7f0ff;border:1px solid #b9d3ff;border-radius:10px;padding:.6rem .8rem;font-size:.76rem;color:#1b4b8f;margin-bottom:.9rem;text-align:center">Pago seguro con <b>Mercado Pago</b>. Te llevamos al checkout para completar la afiliación.</div>`
+      : `<div style="background:#fff8e6;border:1px solid #f3e2b0;border-radius:10px;padding:.6rem .8rem;font-size:.76rem;color:#8a6d1f;margin-bottom:.9rem;text-align:center">SIMULACIÓN — no se realiza ningún cobro real.</div>`;
+    const btnTxt=P.busy?'Procesando…':(cargando?'Cargando…':(esMP?'Ir a pagar':'Pagar (simulado)'));
     return `<div class="home" style="padding:1rem">${top('Pago')}
       ${errBox}
-      <div style="background:#fff8e6;border:1px solid #f3e2b0;border-radius:10px;padding:.6rem .8rem;font-size:.76rem;color:#8a6d1f;margin-bottom:.9rem;text-align:center">SIMULACIÓN — no se realiza ningún cobro real.</div>
+      ${banner}
       <div class="card" style="padding:1.1rem 1rem;text-align:center">
         <div style="font-size:.8rem;color:var(--gris)">${esc(plan.nombre)}${P.planKey==='familiar'?(' · '+P.integrantes+' personas'):''}</div>
         <div style="font-size:1.8rem;font-weight:800;margin:.15rem 0 1rem">${money(calc.total)}<span style="font-size:.9rem;font-weight:600;color:var(--gris)">/mes</span></div>
-        <button class="btn-r" onclick="puentePagar()" ${P.busy?'disabled':''} style="width:100%;opacity:${P.busy?'.6':'1'}">${P.busy?'Procesando…':'Pagar (simulado)'}</button>
+        <button class="btn-r" onclick="puentePagar()" ${(P.busy||cargando)?'disabled':''} style="width:100%;opacity:${(P.busy||cargando)?'.6':'1'}">${btnTxt}</button>
       </div>
       <button class="linkish" onclick="puentePaso('datos')" style="margin-top:.8rem;background:none;border:none;color:var(--rojo);font-size:.8rem;text-decoration:underline;cursor:pointer;width:100%">Volver</button>
     </div>`;

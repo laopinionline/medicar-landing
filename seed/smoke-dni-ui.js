@@ -46,7 +46,7 @@ t('CF: clave validada (titular|int_N)', /\^\(titular\|int_\\d\{1,2\}\)\$/.test(f
 t('socio: SDK firebase-storage-compat cargado', /firebase-storage-compat\.js/.test(socio));
 t('socio: checklist conectado en "afiliación en proceso"', /\$\{dniChecklistHTML\(\)\}/.test(socio) && /subí el <b>DNI \(frente y dorso\)/.test(socio));
 t('socio: zxing local (vendor/zxing/reader.js + wasm local, sin CDN)', /\.\/vendor\/zxing\/reader\.js/.test(socio) && /\.\/vendor\/zxing\/zxing_reader\.wasm/.test(socio));
-t('socio: SW bumpeado a v37', /medicar-socio-v37/.test(fs.readFileSync(R('socio/sw.js'), 'utf8')));
+t('socio: SW bumpeado (≥ v37, el shell de DNI)', (() => { const m = /medicar-socio-v(\d+)/.exec(fs.readFileSync(R('socio/sw.js'), 'utf8')); return m && Number(m[1]) >= 37; })());
 t('vendor: reader.js + zxing_reader.wasm presentes en el repo', fs.existsSync(R('socio/vendor/zxing/reader.js')) && fs.existsSync(R('socio/vendor/zxing/zxing_reader.wasm')));
 t('panel: aviso-override + audit en Activar', /if\(!prospDniCompleto\(p\) \|\| !prospDniVerificadoTodo\(p\)\)/.test(app) && /audit\('prospecto_activado_dni_incompleto'/.test(app) && /confirm\(falta/.test(app));
 t('storage.rules: match DNI (dueño escribe, admin lee)', /match \/prospectos\/\{uid\}\/dni\/\{archivo=\*\*\}/.test(fs.readFileSync(R('storage.rules'), 'utf8')));
