@@ -40,6 +40,12 @@ const CallejeroCore = require('./callejero-core'); // Callejero canónico server
 const { resolverDomCheckout } = require('./checkout-dom'); // Checkout: resolución pura del domicilio (recompute-and-use), testeable
 const { parsePDF417, matchIntegrante } = require('./dni-pdf417'); // DNI: parse del PDF417 + cruce contra la ficha (server-side)
 const DNI_BUCKET = 'medicar-sistema.firebasestorage.app'; // bucket explícito (initializeApp() sin storageBucket)
+const MP = require('./mercadopago'); // Mercado Pago (Checkout Pro por redirect) — puente de afiliación
+const { defineSecret } = require('firebase-functions/params');
+const MP_ACCESS_TOKEN = defineSecret('MP_ACCESS_TOKEN');   // token de la cuenta MP de MEDICAR (TEST-… en sandbox / APP_USR-… en prod)
+const MP_WEBHOOK_SECRET = defineSecret('MP_WEBHOOK_SECRET'); // secret para validar la firma del webhook
+const MP_WEBHOOK_URL = 'https://southamerica-east1-medicar-sistema.cloudfunctions.net/webhookAfiliacionMP';
+const AFILIACION_BACK = 'https://medicaronline.ar/socio/?afiliacionPago=1'; // el prospecto vuelve a la PWA; lee el estado del lead
 try { CallejeroCore.cargarDesde(require('./calles-pergamino.json')); } catch (e) { logger.error('[callejero-core] no se pudo cargar calles-pergamino.json', { err: e && e.message }); }
 const { RESULTADOS, puedeMarcar, debeBarrer } = require('./asistencia'); // Turnos Fase B: transiciones atendido/ausente + barrido
 const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: escaneo determinista de banderas rojas (server-side)
@@ -1754,7 +1760,7 @@ function fechaNacPlausible(iso) { if (!ISO_FECHA.test(String(iso || ''))) return
 // Capitalización por palabra (con partículas comunes en minúscula salvo al inicio): "carlin calvo" → "Carlin Calvo".
 const PARTICULAS = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'da', 'do']);
 function capitalizarNombre(s) { return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase().split(' ').filter(Boolean).map((w, i) => (i > 0 && PARTICULAS.has(w)) ? w : (w.charAt(0).toUpperCase() + w.slice(1))).join(' ').slice(0, 80); }
-exports.checkoutAfiliacion = onCall(async (request) => {
+exports.checkoutAfiliacion = onCall({ secrets: [MP_ACCESS_TOKEN] }, async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
   const ref = db.collection('prospectos').doc(request.auth.uid);
   const snap = await ref.get();
@@ -1800,17 +1806,42 @@ exports.checkoutAfiliacion = onCall(async (request) => {
     }
   }
   const titNombre = capitalizarNombre((snap.data() || {}).nombre); // FIX 2: normaliza también el nombre del titular
-  await ref.set({
-    estado: 'afiliacion_en_proceso',
+  // Payload ENRIQUECIDO (idéntico en ambos modos). El estado depende del modo: simulado confirma ya; mercadopago espera el pago.
+  const base = {
     ...(titNombre ? { nombre: titNombre } : {}),
     planElegido: { key: d.planKey, nombre: p.nombre, integrantes, total },
     datosAlta: { fechaNacimiento, edad: edad != null ? edad : null, domicilio: domTitular },
-    integrantes: integrantesOut, // grupo del titular (vacío en Joven/Senior); cada uno con comparteDomicilio o su dirección {texto,calleId,altura}
-    pago: { modo: 'simulado', estado: 'aprobado' }, // fase simulada: enchufar pasarela real (Mercado Pago) sin rehacer el flujo
+    integrantes: integrantesOut, // grupo del titular (vacío en Joven/Senior); cada uno con comparteDomicilio o su dirección
     checkoutEn: FV(),
-  }, { merge: true });
-  logger.info('[checkoutAfiliacion] lead enriquecido', { uid: request.auth.uid, plan: d.planKey, integrantes, total, grupo: integrantesOut.length });
-  return { ok: true, total, integrantes };
+  };
+  const modo = await pasarelaModo();
+  if (modo === 'mercadopago') {
+    // MERCADO PAGO (Checkout Pro por redirect): NO se marca afiliacion_en_proceso todavía. Se crea la preference con el
+    // total del SERVER (jamás el del cliente) y el lead queda 'pendiente_pago'. El webhook (pago approved) lo promueve.
+    const intentId = db.collection('prospectos').doc().id; // id de tracking (external_reference = uid)
+    const expiraISO = new Date(Date.now() + 48 * 3600 * 1000).toISOString(); // preference vence en 48 h
+    let pref;
+    try {
+      pref = await MP.crearPreferencia({
+        accessToken: MP_ACCESS_TOKEN.value(), monto: total,
+        descripcion: 'MEDICAR — ' + p.nombre + ' (afiliación)',
+        externalReference: request.auth.uid, // el webhook resuelve el lead por acá
+        notificationUrl: MP_WEBHOOK_URL,
+        backUrls: { success: AFILIACION_BACK, pending: AFILIACION_BACK, failure: AFILIACION_BACK },
+        expiraISO,
+      });
+    } catch (e) { logger.error('[checkoutAfiliacion] MP preference falló', { err: e.message || String(e) }); throw new HttpsError('unavailable', 'No pudimos iniciar el pago. Probá de nuevo en un momento.'); }
+    await ref.set(Object.assign({}, base, {
+      estado: 'pendiente_pago',
+      pagoAfiliacion: { intentId, preferenciaId: pref.preferenciaId, monto: total, estado: 'pendiente', creadoEn: FV() },
+    }), { merge: true });
+    logger.info('[checkoutAfiliacion] MP preference creada', { uid: request.auth.uid, total, prefId: pref.preferenciaId });
+    return { ok: true, total, integrantes, modo: 'mercadopago', initPoint: pref.initPoint, intentId };
+  }
+  // SIMULADO (fallback, comportamiento intacto): confirma en el acto.
+  await ref.set(Object.assign({}, base, { estado: 'afiliacion_en_proceso', pago: { modo: 'simulado', estado: 'aprobado' } }), { merge: true });
+  logger.info('[checkoutAfiliacion] lead enriquecido (simulado)', { uid: request.auth.uid, plan: d.planKey, integrantes, total, grupo: integrantesOut.length });
+  return { ok: true, total, integrantes, modo: 'simulado' };
 });
 
 /* DNI — verificarDniIntegrante: el prospecto subió frente/dorso de un integrante a Storage (prospectos/{uid}/dni/{clave}/)
@@ -1855,6 +1886,45 @@ exports.verificarDniIntegrante = onCall(async (request) => {
   await ref.set(upd, { merge: true });
   logger.info('[verificarDniIntegrante]', { uid, clave, frente, dorso, decodificado: resultado.decodificado, verificado: resultado.verificado === true });
   return resultado;
+});
+
+/* Promueve el lead pendiente_pago → afiliacion_en_proceso cuando MP confirma el pago. IDEMPOTENTE: si ya está
+   afiliacion_en_proceso → no-op (segunda notificación no duplica). external_reference = uid del prospecto. */
+async function confirmarAfiliacionPago(uid, paymentId, monto) {
+  const ref = db.collection('prospectos').doc(uid);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return { ok: false, motivo: 'lead-inexistente' };
+    const lead = snap.data() || {};
+    const accion = MP.promocionAfiliacion(lead.estado); // pura + testeable: idempotencia + gate
+    if (accion === 'idempotente') return { ok: true, yaEstaba: true }; // segunda notificación → no-op
+    if (accion === 'ignorar') return { ok: false, motivo: 'estado-inesperado:' + lead.estado };
+    tx.set(ref, {
+      estado: 'afiliacion_en_proceso',
+      pagoAfiliacion: Object.assign({}, lead.pagoAfiliacion || {}, { estado: 'aprobado', mpPaymentId: String(paymentId || ''), montoPagado: Number(monto) || 0, confirmadoEn: FV() }),
+    }, { merge: true });
+    return { ok: true, yaEstaba: false };
+  });
+}
+
+/* webhookAfiliacionMP (HTTP) — notificación de Mercado Pago del puente de afiliación. NUNCA confía en el body:
+   1) valida la FIRMA (x-signature HMAC con MP_WEBHOOK_SECRET); 2) CONSULTA la API de MP por el estado real; 3) si
+   approved → confirmarAfiliacionPago (idempotente). Responde 200 SIEMPRE tras procesar (la idempotencia cubre el reintento). */
+exports.webhookAfiliacionMP = onRequest({ secrets: [MP_ACCESS_TOKEN, MP_WEBHOOK_SECRET] }, async (req, res) => {
+  try {
+    const dataId = MP.dataIdDeNotificacion(req.query, req.body);
+    if (!dataId) { logger.info('[webhookAfiliacionMP] sin data.id (ping/otro topic)'); res.status(200).send('ok'); return; }
+    const firmaOk = MP.validarFirma({ xSignature: req.get('x-signature'), xRequestId: req.get('x-request-id'), dataId, secret: MP_WEBHOOK_SECRET.value() });
+    if (!firmaOk) { logger.warn('[webhookAfiliacionMP] firma inválida', { dataId }); res.status(401).send('firma invalida'); return; }
+    const pago = await MP.consultarPago({ accessToken: MP_ACCESS_TOKEN.value(), paymentId: dataId }); // la VERDAD sale de la API
+    if (pago.status === 'approved' && pago.externalReference) {
+      const r = await confirmarAfiliacionPago(pago.externalReference, pago.paymentId, pago.monto);
+      logger.info('[webhookAfiliacionMP] approved', { uid: pago.externalReference, ok: r.ok, yaEstaba: r.yaEstaba || false, motivo: r.motivo || null });
+    } else {
+      logger.info('[webhookAfiliacionMP] no-approved (queda pendiente_pago, retry disponible)', { status: pago.status });
+    }
+    res.status(200).send('ok');
+  } catch (e) { logger.error('[webhookAfiliacionMP] error', { err: e.message || String(e) }); res.status(200).send('ok'); } // 200 igual → idempotencia cubre el reintento
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================
