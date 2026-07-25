@@ -1008,6 +1008,34 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // BITÁCORA operativa — bitacora/{id}: canal ASINCRÓNICO operativo→admin (novedades: "apellido mal cargado", etc.).
+    //  - create: operativo (chofer/medico/despachante; admin/superadmin también) reporta LO PROPIO — reportadoPorUid ==
+    //    uid, nace 'pendiente', SIN campos de resolución. Shape mínimo validado (texto no vacío; refTipo acotado).
+    //  - read: admin/superadmin ven TODO (la bandeja); el operativo lee SOLO lo propio (reportadoPorUid == uid).
+    //  - update: SOLO admin/superadmin y SOLO resolver (par estado→'resuelta' + resueltoPorUid==uid + resueltoEn);
+    //    texto/reportadoPor/refs INMUTABLES. delete: nadie (append-only; el superadmin tampoco por god-mode → EXCLUIDA).
+    match /bitacora/{id} {
+      allow create: if isSignedIn()
+                       && tieneRol(['chofer', 'medico', 'despachante', 'admin', 'superadmin'])
+                       && request.resource.data.reportadoPorUid == request.auth.uid
+                       && request.resource.data.estado == 'pendiente'
+                       && request.resource.data.rol is string
+                       && request.resource.data.texto is string
+                       && request.resource.data.texto.size() > 0
+                       && request.resource.data.texto.size() <= 2000
+                       && request.resource.data.creadoEn is timestamp
+                       && !request.resource.data.keys().hasAny(['resueltoPorUid', 'resueltoEn'])
+                       && ( !request.resource.data.keys().hasAny(['refTipo']) || request.resource.data.refTipo in ['afiliado', 'despacho'] );
+      allow read:   if isAdmin() || esSuperadmin() || ( isSignedIn() && resource.data.reportadoPorUid == request.auth.uid );
+      allow update: if (isAdmin() || esSuperadmin())
+                       && tocadas().hasOnly(['estado', 'resueltoPorUid', 'resueltoEn'])
+                       && resource.data.estado == 'pendiente'
+                       && request.resource.data.estado == 'resuelta'
+                       && request.resource.data.resueltoPorUid == request.auth.uid
+                       && request.resource.data.resueltoEn is timestamp;
+      allow delete: if false;
+    }
+
     // Resto del datastore: cerrado para todos, salvo superadmin. (Etapa 29 — INMUTABILIDAD REAL.)
     // Las reglas de Firestore son PERMISIVAS-ONLY: un 'allow: if false' NO bloquea lo que otro match
     // permite. El write total del catch-all contradecía la inmutabilidad de auditoria/respuestas/gestiones,
@@ -1026,7 +1054,7 @@ service cloud.firestore {
     match /{coleccion}/{resto=**} {
       allow read:  if esSuperadmin();
       allow write: if esSuperadmin()
-                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios', 'reportes_sintomas', 'chequeos_parametros', 'pagos', 'creditos', 'creditos_saldo']);
+                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios', 'reportes_sintomas', 'chequeos_parametros', 'pagos', 'creditos', 'creditos_saldo', 'bitacora']);
     }
   }
 }

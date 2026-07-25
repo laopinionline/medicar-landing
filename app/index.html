@@ -598,6 +598,7 @@ const TAB_DETACH = {
   facturacion:  ()=>{ facDetach();   S.fac=null;   },
   cobranza:     ()=>{ cobDetach();   S.cob=null;   },
   novedades:    ()=>{ novDetach();   S.nov=null;   }, // NO toca el badge
+  bitacora:     ()=>{ bitDetach();   S.bit=null;   }, // NO toca el badge (bitBadgeAttach es global, siempre-on para admins)
   marketing:    ()=>{ mktDetach();   S.mkt=null;   },
   auditoria:    ()=>{ audDetach();   S.aud=null;   },
   monitoreo:    ()=>{ monDetach();   S.mon=null;   }, // S.mon lo comparte el tab 'alertas' del médico → ambos lo detachan (unificado)
@@ -906,6 +907,7 @@ function shell(){
   </nav>
   <div style="text-align:center;padding:.4rem .75rem calc(.4rem + env(safe-area-inset-bottom));font-size:.6rem;color:var(--ink3);background:var(--bg);border-top:1px solid var(--border)">Sus datos son confidenciales y no serán compartidos con terceros. © 2026 Medicar S.R.L.</div>
   ${avisoModalHTML()}
+  ${bitReportModalHTML()}
 </div>`;
 }
 
@@ -923,7 +925,8 @@ const CAPS=[
   ['gestionar_guardias','Gestionar guardias'],
   ['gestionar_agenda_turnos','Agenda de turnos'],
   ['gestionar_personal','Gestionar personal'],
-  ['despachar_episodios','Despachar episodios']
+  ['despachar_episodios','Despachar episodios'],
+  ['gestionar_bitacora','Bitácora (novedades operativas)']
 ];
 function puede(cap){ return !!(S.user && (S.user.rol==='superadmin' || (S.user.permisos && S.user.permisos[cap]===true))); }
 // Tablero-Fase1: SIN bypass por rol. Toda cap se resuelve por permisos[cap] (superadmin ya cortocircuita en puede()).
@@ -944,11 +947,13 @@ function getTabs(rol){
   const cobTab = puedeCobrar() ? [{id:'cobranza',icon:'register',lbl:'Cobranza'}] : [];
   const puedeNov = puede('curar_novedades'); if(puedeNov) novBadgeAttach();
   const novTab = puedeNov ? [{id:'novedades',icon:'history',lbl:'Novedades'+(S.novPendCount?(' ('+S.novPendCount+')'):'')}] : [];
+  const puedeBit = puede('gestionar_bitacora'); if(puedeBit) bitBadgeAttach();
+  const bitTab = puedeBit ? [{id:'bitacora',icon:'register',lbl:'Bitácora'+(S.bitPendCount?(' ('+S.bitPendCount+')'):'')}] : [];
   const mktTab = puede('marketing') ? [{id:'marketing',icon:'users',lbl:'Marketing'}] : [];
   const audTab = puedeConfig() ? [{id:'auditoria',icon:'history',lbl:'Auditoría'}] : [];
   const estTab = puedeConfig() ? [{id:'estadisticas',icon:'chart',lbl:'Estadísticas'}] : [];
   const monTab = puede('clinico') ? [{id:'monitoreo',icon:'register',lbl:'Monitoreo'}] : [];
-  const capTabs = [...afTab,...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...cobTab,...novTab,...mktTab,...audTab,...estTab,...monTab];
+  const capTabs = [...afTab,...movTab,...cronoTab,...agendaTab,...catTab,...factTab,...cobTab,...novTab,...bitTab,...mktTab,...audTab,...estTab,...monTab];
   const perfil = {id:'perfil',icon:'user',lbl:'Perfil'};
   const home = {id:'home',icon:'home',lbl:'Inicio'};
   if(rol==='afiliado')return[perfil]; // el afiliado se atiende en el PWA; inalcanzable (redirigido antes)
@@ -972,7 +977,7 @@ function pg(){
   if(t==='perfil') return miPerfil();
   // CAP-DRIVEN: router COMPARTIDO de cap-tabs. La tab solo existe si la cap está (getTabs); el panel + las reglas
   // enforcen. Sirve para CUALQUIER rol → un contable con gestionar_moviles rutea Móviles. (afiliados por cap.)
-  const capRoute={moviles:movPanel,cronograma:cronoPanel,agendaturnos:agendaTurnosPanel,catalogo:catPanel,afiliados:afPanel,facturacion:facPanel,cobranza:cobPanel,novedades:novPanel,marketing:mktPanel,auditoria:audPanel,estadisticas:estPanel,monitoreo:monPanel};
+  const capRoute={moviles:movPanel,cronograma:cronoPanel,agendaturnos:agendaTurnosPanel,catalogo:catPanel,afiliados:afPanel,facturacion:facPanel,cobranza:cobPanel,novedades:novPanel,bitacora:bitPanel,marketing:mktPanel,auditoria:audPanel,estadisticas:estPanel,monitoreo:monPanel};
   if(capRoute[t]) return capRoute[t]();
   // estructurales del rol (lo que no es cap-tab):
   if(r==='afiliado') return ''; // PWA; inalcanzable (redirigido antes)
@@ -994,7 +999,8 @@ function choferHome(){
   if(!c){ chLoad(); return `<div class="card">Cargando tu despacho…</div>`; }
   if(c.loading) return `<div class="card">Cargando tu despacho…</div>`;
   if(c.err) return `<div class="card">No se pudo cargar tu despacho: ${esc(c.err)}<br><button class="btn-o" onclick="chReload()" style="margin-top:.6rem">Reintentar</button></div>`;
-  return c.ep ? chDespachoCard(c.ep) : chVacio();
+  const body = c.ep ? chDespachoCard(c.ep) : chVacio();
+  return body + bitReportBtn(c.ep?'despacho':'', c.ep?c.ep.id:''); // chofer con despacho → prefila el vínculo a ESE despacho
 }
 function chReload(){ S.chofer=null; render(); }
 
@@ -1283,7 +1289,8 @@ function mHome(){
   </div>
   ${turnosCard}
   ${despachoCard}
-  ${ultimasCard}`;
+  ${ultimasCard}
+  ${bitReportBtn(da?'despacho':'', da?da.id:'')}`;
 }
 
 function desp(){
@@ -2304,7 +2311,7 @@ function bandeja(){
   const b=S.bandeja;
   if(b.loading) return banSkeleton();
   if(b.err) return `<div class="card">No se pudo cargar la bandeja: ${esc(b.err)}<br><button class="btn-o" onclick="banReload()" style="margin-top:.6rem">Reintentar</button></div>`;
-  return banView(b.items);
+  return banView(b.items) + bitReportBtn('', ''); // Bandeja (despachante / episodios del médico) → reportar novedad sin vínculo por defecto
 }
 function banSkeleton(){ return `<div class="card">Cargando episodios…</div>`; }
 function banReload(){ S.bandeja=null; render(); } // fuerza re-suscripción fresca vía bandeja()
@@ -3328,7 +3335,7 @@ async function migrarStaff(){
    Cada sección con onSnapshot tiene su detach al salir de la sección y en logout. */
 
 // [id, label, activa]
-const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['cobranza','Cobranza',true],['novedades','Novedades',true],['marketing','Marketing',true],['estadisticas','Estadísticas',true],['auditoria','Auditoría',true],['monitoreo','Monitoreo',true]];
+const SUPER_SECS=[['dashboard','Dashboard',true],['personal','Personal',true],['moviles','Móviles',true],['cronograma','Cronograma',true],['catalogo','Catálogo',true],['afiliados','Afiliados',true],['facturacion','Facturación',true],['cobranza','Cobranza',true],['novedades','Novedades',true],['bitacora','Bitácora',true],['marketing','Marketing',true],['estadisticas','Estadísticas',true],['auditoria','Auditoría',true],['monitoreo','Monitoreo',true]];
 
 function superMenu(sec){
   const items=SUPER_SECS.map(([id,lbl,on])=>{
@@ -3354,6 +3361,7 @@ function superView(){
   else if(sec==='facturacion') body=facPanel();
   else if(sec==='cobranza') body=cobPanel();
   else if(sec==='novedades') body=novPanel();
+  else if(sec==='bitacora') body=bitPanel();
   else if(sec==='marketing') body=mktPanel();
   else if(sec==='auditoria') body=audPanel();
   else if(sec==='estadisticas') body=estPanel();
@@ -3373,6 +3381,7 @@ function superNav(sec){
   if(S.superSec==='facturacion'){ facDetach(); S.fac=null; }
   if(S.superSec==='cobranza'){ cobDetach(); S.cob=null; }
   if(S.superSec==='novedades'){ novDetach(); S.nov=null; }
+  if(S.superSec==='bitacora'){ bitDetach(); S.bit=null; }
   if(S.superSec==='marketing'){ mktDetach(); S.mkt=null; }
   if(S.superSec==='auditoria'){ audDetach(); S.aud=null; }
   if(S.superSec==='estadisticas'){ S.est=null; } // on-demand, sin listeners
@@ -5147,6 +5156,101 @@ function cobReintegroPrompt(personaId, saldo){
   fnsCall('reintegroCF',{personaId, monto, motivo:m})
     .then(()=>{ audit('credito_reintegrado','credito',personaId, facMoney(monto)+' · '+m); render(); })
     .catch(e=>{ cobErr('No se pudo reintegrar: '+(e.message||e)); });
+}
+
+/* ===================== BITÁCORA OPERATIVA (novedades operativo→admin) =====================
+   Canal ASINCRÓNICO (no chat): chofer/médico/despachante reportan una novedad ("apellido mal cargado del afiliado X");
+   el admin la resuelve desde su bandeja. Colección `bitacora` (≠ feed_posts de Novedades). Reglas: create propio,
+   read admin-todo/operativo-propio, update solo-admin-resolver, delete nadie. Badge de pendientes = listener global. */
+const BIT_ROL_LBL={ chofer:'Chofer', medico:'Médico', despachante:'Despachante', admin:'Admin', superadmin:'Superadmin', contable:'Contable' };
+function bitFechaLbl(f){ const t=f&&f.toDate?f.toDate():(f&&f.seconds?new Date(f.seconds*1000):null); if(!t) return '—'; return t.toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Buenos_Aires'}); } // hora AR
+
+// ---- Reportar (las 3 superficies: choferHome / mHome / Bandeja). El modal vive en el shell (bitReportModalHTML). ----
+function bitReportBtn(refTipo, refId){ return `<button class="btn-o" style="width:100%;margin-top:.8rem" onclick="bitReportAbrir('${refTipo||''}','${refId||''}')">✍️ Reportar una novedad al equipo</button>`; }
+function bitReportAbrir(refTipo, refId){ S.bitReport={ refTipo:refTipo||'', refId:refId||'', busy:false, sent:false, err:'' }; render(); }
+function bitReportCerrar(){ S.bitReport=null; render(); }
+async function bitReportEnviar(){
+  if(!S.bitReport || S.bitReport.busy) return;
+  const texto=(document.getElementById('bit-texto')?.value||'').trim();
+  const refTipo=(document.getElementById('bit-reftipo')?.value||'');
+  const refId=(document.getElementById('bit-refid')?.value||'').trim();
+  if(!texto){ S.bitReport.err='Escribí la novedad.'; render(); return; }
+  S.bitReport.busy=true; S.bitReport.err=''; render();
+  try{
+    const doc={ reportadoPorUid:S.user.uid, rol:S.user.rol, reportadoPorNombre:S.user.nombre||'', texto:texto.slice(0,2000), estado:'pendiente', creadoEn:FV() };
+    if(refTipo==='afiliado'||refTipo==='despacho'){ doc.refTipo=refTipo; if(refId) doc.refId=refId; } // 'ninguno' → sin refTipo (regla lo exige acotado o ausente)
+    await db.collection('bitacora').add(doc);
+    S.bitReport={ sent:true }; render();
+  }catch(e){ if(S.bitReport){ S.bitReport.busy=false; S.bitReport.err='No se pudo enviar: '+(e.message||e); render(); } }
+}
+function bitReportModalHTML(){
+  if(!S.bitReport) return '';
+  const r=S.bitReport;
+  const box=(inner)=>`<div style="position:fixed;inset:0;z-index:500;background:rgba(20,22,25,.5);display:flex;align-items:center;justify-content:center;padding:1.5rem" onclick="bitReportCerrar()"><div style="background:var(--blanco);border-radius:16px;padding:1.4rem;max-width:380px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.25)" onclick="event.stopPropagation()">${inner}</div></div>`;
+  if(r.sent) return box(`<div style="font-weight:800;color:var(--ink);font-size:1rem;margin-bottom:.4rem">✓ Novedad enviada</div><div style="font-size:.85rem;color:var(--ink2);margin-bottom:1.1rem;line-height:1.45">El equipo la va a ver en la Bitácora y la resuelve.</div><button class="btn-r" onclick="bitReportCerrar()">Cerrar</button>`);
+  const sel=(v,l)=>`<option value="${v}" ${r.refTipo===v?'selected':''}>${l}</option>`;
+  return box(`
+    <div style="font-weight:800;color:var(--ink);font-size:1rem;margin-bottom:.2rem">Reportar una novedad</div>
+    <div style="font-size:.78rem;color:var(--ink3);margin-bottom:.8rem;line-height:1.4">Algo para que el administrador corrija o revise (no es una urgencia médica).</div>
+    <div class="field"><label>¿Qué pasó?</label><textarea id="bit-texto" rows="4" placeholder="Ej: el apellido del afiliado 20015 está mal cargado."></textarea></div>
+    <div class="field"><label>Vincular a (opcional)</label><select id="bit-reftipo">${sel('','Sin vínculo')}${sel('afiliado','Afiliado')}${sel('despacho','Despacho')}</select></div>
+    <div class="field"><label>N° de afiliado o de incidente (opcional)</label><input id="bit-refid" value="${esc(r.refId||'')}" placeholder="opcional"></div>
+    ${r.err?`<div class="err" style="display:block;margin-bottom:.5rem">${esc(r.err)}</div>`:''}
+    <button class="btn-r" ${r.busy?'disabled':''} onclick="bitReportEnviar()">${r.busy?'Enviando…':'Enviar'}</button>
+    <button class="btn-o" style="margin-top:.5rem" onclick="bitReportCerrar()">Cancelar</button>`);
+}
+
+// ---- Badge global de pendientes (siempre-on para admins con la cap; calco de novBadgeAttach) ----
+function curandoBitacora(){ return !!document.getElementById('bit-pend-list'); }
+function bitBadgeAttach(){
+  if(S.bitBadgeUnsub) return;
+  S.bitBadgeUnsub = db.collection('bitacora').where('estado','==','pendiente').onSnapshot(
+    s=>{ if(s.size!==S.bitPendCount){ S.bitPendCount=s.size; if(!curandoBitacora()) render(); } }, ()=>{ S.bitPendCount=0; });
+}
+// ---- Bandeja del admin: lista + filtro + resolver ----
+function bitEsAdmin(){ return puede('gestionar_bitacora'); }
+function bitAttach(){
+  if(S.bitUnsub) return;
+  S.bitUnsub = db.collection('bitacora').onSnapshot(
+    s=>{ if(!S.bit) return; S.bit.items=s.docs.map(d=>({id:d.id,...d.data()})); render(); },
+    e=>{ if(S.bit){ S.bit.err=(e.message||String(e)); render(); } });
+}
+function bitDetach(){ if(S.bitUnsub){ try{ S.bitUnsub(); }catch(_){} S.bitUnsub=null; } }
+function bitFiltrar(f){ if(!S.bit) return; S.bit.filtro=f; render(); }
+function bitFiltroBtn(f,lbl){ const on=(S.bit&&S.bit.filtro===f); return `<button class="btn-o" style="width:auto;padding:.3rem .7rem;margin:0;${on?'border-color:var(--r);color:var(--r);font-weight:700':''}" onclick="bitFiltrar('${f}')">${lbl}</button>`; }
+function bitRefChip(x){ if(!x.refTipo) return ''; const lbl=x.refTipo==='afiliado'?'Afiliado':'Despacho'; return `<span style="font-size:.6rem;font-weight:700;padding:.05rem .4rem;border-radius:6px;background:var(--ink,#333);color:#fff">${lbl}${x.refId?(' '+esc(x.refId)):''}</span>`; }
+function bitCard(x){
+  const pend=x.estado==='pendiente';
+  return `<div class="card" style="margin-bottom:.6rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.35rem">
+      <span style="font-size:.7rem;color:var(--ink3);font-weight:700">${esc(BIT_ROL_LBL[x.rol]||x.rol||'—')}${x.reportadoPorNombre?(' · '+esc(x.reportadoPorNombre)):''}</span>
+      <span style="font-size:.62rem;color:var(--ink3)">${bitFechaLbl(x.creadoEn)}</span>
+    </div>
+    <div style="font-size:.86rem;color:var(--ink);line-height:1.4;white-space:pre-wrap">${esc(x.texto||'')}</div>
+    ${x.refTipo?`<div style="margin-top:.4rem">${bitRefChip(x)}</div>`:''}
+    <div style="margin-top:.5rem;display:flex;justify-content:space-between;align-items:center;gap:.5rem">
+      ${pend
+        ? `<span class="badge br">Pendiente</span><button class="btn-r" style="width:auto;padding:.35rem .8rem;margin:0" onclick="bitResolver('${x.id}')">Marcar resuelta</button>`
+        : `<span class="badge bg">Resuelta ✓</span><span style="font-size:.62rem;color:var(--ink3)">${x.resueltoEn?('el '+bitFechaLbl(x.resueltoEn)):''}</span>`}
+    </div>
+  </div>`;
+}
+async function bitResolver(id){
+  if(!S.bit) return;
+  try{ await db.collection('bitacora').doc(id).set({ estado:'resuelta', resueltoPorUid:S.user.uid, resueltoEn:FV() },{merge:true}); }
+  catch(e){ S.bit.err='No se pudo resolver: '+(e.message||e); render(); }
+}
+function bitPanel(){
+  if(!bitEsAdmin()) return `<div class="card"><div class="ch">Bitácora</div><div style="font-size:.8rem;color:var(--ink3)">Solo para administradores.</div></div>`;
+  if(!S.bit){ S.bit={ items:null, filtro:'pendiente', err:'' }; bitAttach(); }
+  if(S.bit.err) return `<div class="card">No se pudo cargar la bitácora: ${esc(S.bit.err)}</div>`;
+  const head=`<div class="panel-h"><b>Bitácora operativa</b><span class="live-tag">en vivo</span></div>`;
+  const filtros=`<div style="display:flex;gap:.4rem;margin-bottom:.7rem">${bitFiltroBtn('pendiente','Pendientes')}${bitFiltroBtn('resuelta','Resueltas')}${bitFiltroBtn('todas','Todas')}</div>`;
+  if(S.bit.items===null) return head+filtros+`<div class="card">Cargando…</div>`;
+  const f=S.bit.filtro;
+  const list=S.bit.items.filter(x=> f==='todas'?true:x.estado===f).sort((a,b)=>(tms(b.creadoEn)||0)-(tms(a.creadoEn)||0));
+  const body=list.length ? list.map(bitCard).join('') : `<div class="card"><div style="font-size:.82rem;color:var(--ink3);padding:.4rem">${f==='pendiente'?'No hay novedades pendientes. ✓':'Nada por acá.'}</div></div>`;
+  return head+filtros+`<div id="bit-pend-list">${body}</div>`;
 }
 
 /* ===================== NOVEDADES (PWA-2a — curaduría del feed "Para vos") =====================
