@@ -18,6 +18,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 
 <style>
 :root{
@@ -1277,9 +1278,11 @@ function prospectoView(){
 function afiliacionCTA(){
   const est = (S.prospecto && S.prospecto.estado) || 'nuevo';
   if(est==='afiliacion_en_proceso'){
-    return `<div style="margin-top:.9rem;background:#eafaf0;border:1px solid #bfe6cd;border-radius:12px;padding:.9rem;text-align:center">
-      <div style="font-weight:800;color:var(--verde,#2E8B57)">Afiliación en proceso ✓</div>
-      <div style="font-size:.8rem;color:var(--gris);margin-top:.25rem">Estamos activando tu cobertura — te contactamos para los últimos pasos.</div></div>`;
+    return `<div style="margin-top:.9rem;background:#eafaf0;border:1px solid #bfe6cd;border-radius:12px;padding:.9rem">
+      <div style="font-weight:800;color:var(--verde,#2E8B57);text-align:center">Afiliación en proceso ✓</div>
+      <div style="font-size:.8rem;color:var(--gris);margin:.25rem 0 .3rem;text-align:center">Para activar tu cobertura, subí el <b>DNI (frente y dorso)</b> de cada integrante.</div>
+      ${dniChecklistHTML()}
+      <div style="font-size:.72rem;color:var(--gris);margin-top:.7rem;text-align:center">Cuando estén todas, te contactamos para los últimos pasos.</div></div>`;
   }
   if(est==='solicito_afiliacion'){
     // La confirmación del asesor NO reemplaza el CTA de compra: el prospecto puede autocomprar online igual.
@@ -1289,6 +1292,75 @@ function afiliacionCTA(){
     <button class="btn-r" onclick="abrirPuente(null)" style="margin-top:.7rem;width:100%">O afiliate ahora online</button>`;
   }
   return `<button class="btn-r" onclick="abrirPuente(null)" style="margin-top:.9rem;width:100%">✚ Quiero afiliarme a MEDICAR</button>`;
+}
+
+/* ---------- DNI (afiliación en proceso): frente+dorso por integrante → Storage + decode PDF417 local + verificación server.
+   Degradación: si el lector WASM no carga/decodifica, la foto igual sube; identidadVerificada queda pendiente (Plan B). ---------- */
+function dniIntegrantes(){ const p=S.prospecto||{}; const out=[{clave:'titular', nombre:p.nombre||'Titular'}]; (p.integrantes||[]).forEach((m,i)=>out.push({clave:'int_'+(i+2), nombre:m.nombre||('Integrante '+(i+2))})); return out; }
+function dniFotoEstado(clave){ const f=((S.prospecto||{}).fotos||{})[clave]||{}; return { frente:!!f.frente, dorso:!!f.dorso }; }
+function dniVerif(clave){ return (((S.prospecto||{}).identidadVerificada||{})[clave])===true; }
+let _zxingP=null;
+function cargarZxing(){
+  if(_zxingP) return _zxingP;
+  _zxingP=new Promise((resolve,reject)=>{
+    if(window.ZXingWASM){ resolve(window.ZXingWASM); return; }
+    const s=document.createElement('script'); s.src='./vendor/zxing/reader.js';
+    s.onload=()=>{ try{ window.ZXingWASM.setZXingModuleOverrides({ locateFile:(path,prefix)=> String(path).endsWith('.wasm') ? './vendor/zxing/zxing_reader.wasm' : ((prefix||'')+path) }); resolve(window.ZXingWASM); }catch(e){ reject(e); } };
+    s.onerror=()=>reject(new Error('no se pudo cargar el lector')); document.head.appendChild(s);
+  });
+  return _zxingP;
+}
+async function dniDecode(blob){
+  try{ const Z=await cargarZxing(); const res=await Z.readBarcodes(blob,{ formats:['PDF417'], tryHarder:true });
+    if(Array.isArray(res)) for(const r of res){ if(r&&r.text&&r.text.indexOf('@')>=0) return r.text; }
+    return null;
+  }catch(e){ console.warn('[dni] decode falló (Plan B, la foto igual sube):',e); return null; }
+}
+function dniComprimir(file){
+  return new Promise((resolve)=>{
+    try{
+      const img=new Image(); const url=URL.createObjectURL(file);
+      img.onload=()=>{ try{ const max=1600; let w=img.width,h=img.height; const sc=Math.min(1,max/Math.max(w,h)); w=Math.round(w*sc); h=Math.round(h*sc);
+        const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(img,0,0,w,h);
+        c.toBlob(b=>{ URL.revokeObjectURL(url); resolve(b||file); },'image/jpeg',0.82); }catch(e){ URL.revokeObjectURL(url); resolve(file); } };
+      img.onerror=()=>{ URL.revokeObjectURL(url); resolve(file); }; img.src=url;
+    }catch(e){ resolve(file); }
+  });
+}
+async function dniSubir(clave, which, input){
+  const file=input && input.files && input.files[0]; if(!file) return;
+  const uid=auth.currentUser && auth.currentUser.uid; if(!uid) return;
+  if(!firebase.storage){ S.dniUp={ clave, which, err:'No se pudo iniciar la carga. Reintentá.' }; render(); return; }
+  S.dniUp={ clave, which, msg:'Subiendo…' }; render();
+  try{
+    const blob=await dniComprimir(file);
+    await firebase.storage().ref('prospectos/'+uid+'/dni/'+clave+'/'+which+'.jpg').put(blob,{ contentType:'image/jpeg' });
+    let pdf417=null;
+    if(which==='dorso'){ if(S.dniUp){ S.dniUp.msg='Leyendo el código…'; render(); } pdf417=await dniDecode(blob); }
+    if(S.dniUp){ S.dniUp.msg='Verificando…'; render(); }
+    await fnsCall('verificarDniIntegrante', pdf417?{ clave, pdf417 }:{ clave });
+    try{ const snap=await db.collection('prospectos').doc(uid).get(); if(snap.exists) S.prospecto=Object.assign({},S.prospecto,snap.data()); }catch(_){}
+    S.dniUp=null; render();
+  }catch(e){ S.dniUp={ clave, which, err:(e&&e.message)||'No se pudo subir la foto.' }; render(); }
+}
+function dniChecklistHTML(){
+  const up=S.dniUp||{};
+  return dniIntegrantes().map(person=>{
+    const est=dniFotoEstado(person.clave), verif=dniVerif(person.clave);
+    const slot=(which,lbl)=>{ const hecho=est[which]; const busy=(up.clave===person.clave&&up.which===which); const id='dni-'+person.clave+'-'+which;
+      return `<label for="${id}" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:.15rem;border:1.5px dashed ${hecho?'var(--verde,#2E8B57)':'var(--linea)'};border-radius:10px;padding:.5rem;cursor:pointer;background:${hecho?'#f2fbf5':'#fff'}">
+        <span style="font-size:1.15rem">${hecho?'✅':'📷'}</span>
+        <span style="font-size:.72rem;font-weight:700;color:${hecho?'var(--verde,#2E8B57)':'var(--tinta)'}">${lbl}${hecho?' ✓':''}</span>
+        <span style="font-size:.6rem;color:var(--gris)">${busy?esc(up.msg||'…'):(hecho?'Cambiar':'Tomar / subir')}</span>
+        <input id="${id}" type="file" accept="image/*" style="display:none" onchange="dniSubir('${person.clave}','${which}',this)">
+      </label>`; };
+    const badge=verif?`<span style="font-size:.58rem;font-weight:800;color:#fff;background:var(--verde,#2E8B57);border-radius:6px;padding:.05rem .4rem">DNI verificado ✓</span>`:((est.frente&&est.dorso)?`<span style="font-size:.58rem;color:var(--gris)">en revisión</span>`:'');
+    return `<div style="border-top:1px solid var(--linea);padding-top:.6rem;margin-top:.6rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.35rem"><span style="font-weight:700;font-size:.82rem">${esc(person.nombre)}</span>${badge}</div>
+      <div style="display:flex;gap:.5rem">${slot('frente','Frente')}${slot('dorso','Dorso')}</div>
+      ${(up.clave===person.clave&&up.err)?`<div style="font-size:.66rem;color:var(--rojo);margin-top:.3rem">${esc(up.err)}</div>`:''}
+    </div>`;
+  }).join('');
 }
 
 function bootView(){ return `<div class="center"><svg class="chev chev-load" width="30" height="37" viewBox="0 0 1794 2190"><use href="#cm"/></svg><p style="margin-top:1rem;color:var(--gris)">Cargando tu credencial…</p></div>`; }

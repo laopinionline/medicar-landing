@@ -34,6 +34,20 @@ service firebase.storage {
       allow delete: if request.auth != null && request.auth.uid == uid;
     }
 
+    // DNI del prospecto (afiliación online): fotos frente/dorso por integrante — prospectos/{uid}/dni/{clave}/...
+    // PII SENSIBLE (documento de identidad). Más estricto que perfiles/:
+    //  - write/delete: SOLO el dueño (su propio uid), imagen, < 5 MB. Re-tomar = overwrite del mismo path.
+    //  - read: SOLO admin/superadmin (las mira el staff en el panel Prospectos). NO público, y el dueño NO las re-lee
+    //    (el estado de carga/verificación lo lleva Firestore prospectos/{uid}, no Storage). Marketing ve el BADGE, no la foto.
+    match /prospectos/{uid}/dni/{archivo=**} {
+      allow write:  if request.auth != null
+                       && request.auth.uid == uid
+                       && request.resource.size < 5 * 1024 * 1024
+                       && request.resource.contentType.matches('image/.*');
+      allow read:   if esAdminStorage();
+      allow delete: if esAdminStorage() || (request.auth != null && request.auth.uid == uid);
+    }
+
     // Todo lo demas: cerrado.
     match /{allPaths=**} {
       allow read, write: if false;
