@@ -6485,7 +6485,7 @@ function mktProspFicha(id){
   const domTxt=dom.texto?(esc(dom.texto)+(dom.pisoDepto?(' — '+esc(dom.pisoDepto)):'')+(dom.calleId?` <span style="color:var(--ink3);font-size:.68rem">[${esc(dom.calleId)}]</span>`:'')):'';
   const integ=(p.integrantes||[]).map((m,i)=>{
     const md=m.comparteDomicilio?'comparte domicilio del titular':(m.domicilio?(esc(m.domicilio.texto||'')+(m.domicilio.pisoDepto?(' — '+esc(m.domicilio.pisoDepto)):'')):'—');
-    return `<div class="card" style="background:var(--bg);margin-top:.4rem"><div style="font-weight:700;font-size:.8rem">Integrante ${i+2} · ${esc(m.vinculo||'')}</div><div style="font-size:.76rem;color:var(--ink2)">${esc(m.nombre||'—')} · DNI ${esc(m.dni||'—')} · nac ${prospFechaCorta(m.fechaNacimiento)}</div><div style="font-size:.72rem;color:var(--ink3)">${md}</div></div>`;
+    return `<div class="card" style="background:var(--bg);margin-top:.4rem"><div style="display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700;font-size:.8rem">Integrante ${i+2} · ${esc(m.vinculo||'')}</div>${prospDniBadge(p,'int_'+(i+2))}</div><div style="font-size:.76rem;color:var(--ink2)">${esc(m.nombre||'—')} · DNI ${esc(m.dni||'—')} · nac ${prospFechaCorta(m.fechaNacimiento)}</div><div style="font-size:.72rem;color:var(--ink3)">${md}</div></div>`;
   }).join('');
   const contactadoBox=g.contactado
     ? `<div style="background:var(--g,#1D9E75);color:#fff;border-radius:8px;padding:.5rem .65rem;font-size:.76rem;font-weight:600">✓ Contactado ${g.contactadoPor?('por '+esc(g.contactadoPor)):''} · ${prospFecha(g.contactadoEn)} <button class="btn-o" style="width:auto;padding:.2rem .5rem;margin:.35rem 0 0" onclick="mktProspAccion('${p.id}','descontactar')">Deshacer</button></div>`
@@ -6497,7 +6497,7 @@ function mktProspFicha(id){
   return `<button class="btn-o" onclick="mktProspVolver()" style="width:auto;padding:.3rem .6rem;margin-bottom:.6rem">← Volver</button>
     <div id="mkt-err" class="err" style="display:none;margin-bottom:.5rem"></div>
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start"><div class="ch" style="margin:0">${esc(p.nombre||'—')}</div>${prospEstBadge(p.estado)}</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start"><div class="ch" style="margin:0">${esc(p.nombre||'—')} ${p.estado==='afiliacion_en_proceso'?prospDniBadge(p,'titular'):''}</div>${prospEstBadge(p.estado)}</div>
       <div style="font-size:.72rem;color:var(--ink3);margin:.2rem 0 .6rem">Registrado ${prospFecha(p.creadoEn)}${p.solicitadoEn?(' · pidió asesor '+prospFecha(p.solicitadoEn)):''}${p.checkoutEn?(' · checkout '+prospFecha(p.checkoutEn)):''}</div>
       ${row('Teléfono',telLink)}${row('Email',mailLink)}${row('DNI',esc(p.dni||''))}${row('Fecha de nacimiento',da.fechaNacimiento?(prospFechaCorta(da.fechaNacimiento)+(da.edad!=null?(' ('+da.edad+' años)'):'')):'')}${row('Domicilio',domTxt)}
       ${pe.key?`<div class="lr"><div class="lrb"><div class="lrs">Plan elegido</div><div class="lrn" style="font-size:.85rem">${esc(pe.nombre||'')} · ${pe.integrantes||1} ${(pe.integrantes||1)>1?'personas':'persona'} · <b>${prospMoney(pe.total)}</b>/mes</div></div></div>`:''}
@@ -6507,10 +6507,29 @@ function mktProspFicha(id){
 }
 async function mktProspAccion(id,accion){ if(!puede('marketing')) return; mktErr(''); try{ await fnsCall('gestionarProspecto',{prospectoId:id,accion}); }catch(e){ mktErr((e&&e.message)||'No se pudo.'); } }
 async function mktProspDescartar(id){ if(!puede('marketing')) return; const motivo=(document.getElementById('mkt-p-desc')?.value||'').trim(); if(!motivo){ mktErr('Ingresá el motivo del descarte.'); return; } try{ await fnsCall('gestionarProspecto',{prospectoId:id,accion:'descartar',motivo}); }catch(e){ mktErr((e&&e.message)||'No se pudo.'); } }
+// DNI (afiliación online): badge de verificación por integrante + completitud de fotos (para el aviso-override de Activar).
+// Marketing ve el BADGE (dato en Firestore); las FOTOS solo admin/superadmin (Storage rules) — acá no se muestran imágenes.
+function prospDniClaves(p){ return ['titular'].concat(((p.integrantes||[])).map((m,i)=>'int_'+(i+2))); }
+function prospDniBadge(p,clave){
+  const v=((p.identidadVerificada||{})[clave])===true; const f=((p.fotos||{})[clave])||{};
+  const chip=(bg,txt)=>`<span style="font-size:.58rem;font-weight:800;padding:.05rem .4rem;border-radius:6px;background:${bg};color:#fff">${txt}</span>`;
+  if(v) return chip('#0F6E56','DNI verificado ✓');
+  if(f.frente&&f.dorso) return chip('#B45309','fotos sin verificar');
+  if(f.frente||f.dorso) return chip('#9CA3AF','fotos incompletas');
+  return chip('#DC2626','sin fotos');
+}
+function prospDniCompleto(p){ return prospDniClaves(p).every(c=>{ const f=((p.fotos||{})[c])||{}; return f.frente&&f.dorso; }); }
+function prospDniVerificadoTodo(p){ return prospDniClaves(p).every(c=>((p.identidadVerificada||{})[c])===true); }
 // "Activar" (barato): reusa el prefill del alta (convPrefill/convOpenAlta), sin marcar convertido (auto-link = follow-up).
 function mktActivarProspecto(id){
   if(!puede('marketing')) return;
   const p=((S.mkt&&S.mkt.prospectos)||[]).find(x=>x.id===id); if(!p) return;
+  // AVISO-OVERRIDE (decisión Lucas): si faltan fotos o verificación de DNI, avisa pero NO bloquea. Trazable por audit.
+  if(!prospDniCompleto(p) || !prospDniVerificadoTodo(p)){
+    const falta=!prospDniCompleto(p)?'Faltan fotos de DNI (frente y dorso) de algún integrante.':'Las fotos están pero la verificación de identidad quedó pendiente.';
+    if(!confirm(falta+'\n\n¿Activás igual?')) return;
+    audit('prospecto_activado_dni_incompleto','prospecto',id,(p.nombre||'')+(prospDniCompleto(p)?' · sin verificar':' · sin fotos completas'));
+  }
   S.convLeadId=null; S.convPrefill={ nombre:p.nombre||'', telefono:p.telefono||'', email:p.email||'' }; S.convOpenAlta=true;
   const enAfil=(S.user&&S.user.rol==='superadmin')?(S.superSec==='afiliados'):(S.tab==='afiliados');
   if(enAfil&&S.af){ S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.convOpenAlta=false; render(); return; }

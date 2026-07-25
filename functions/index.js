@@ -38,6 +38,8 @@ const { reciboPublico } = require('./recibo'); // Recibo del socio: proyección 
 const { cargoDeEpisodio, fmtIncidente } = require('./cargos-nucleo'); // Facturación: núcleo puro de cargos + formato INC (F4: traza del área)
 const CallejeroCore = require('./callejero-core'); // Callejero canónico server-side (calco de callejero.js; paridad por smoke). Re-resuelve el domicilio del checkout.
 const { resolverDomCheckout } = require('./checkout-dom'); // Checkout: resolución pura del domicilio (recompute-and-use), testeable
+const { parsePDF417, matchIntegrante } = require('./dni-pdf417'); // DNI: parse del PDF417 + cruce contra la ficha (server-side)
+const DNI_BUCKET = 'medicar-sistema.firebasestorage.app'; // bucket explícito (initializeApp() sin storageBucket)
 try { CallejeroCore.cargarDesde(require('./calles-pergamino.json')); } catch (e) { logger.error('[callejero-core] no se pudo cargar calles-pergamino.json', { err: e && e.message }); }
 const { RESULTADOS, puedeMarcar, debeBarrer } = require('./asistencia'); // Turnos Fase B: transiciones atendido/ausente + barrido
 const escanearBanderas = require('./banderas-rojas').escanear; // MEDICAR IA: escaneo determinista de banderas rojas (server-side)
@@ -1809,6 +1811,50 @@ exports.checkoutAfiliacion = onCall(async (request) => {
   }, { merge: true });
   logger.info('[checkoutAfiliacion] lead enriquecido', { uid: request.auth.uid, plan: d.planKey, integrantes, total, grupo: integrantesOut.length });
   return { ok: true, total, integrantes };
+});
+
+/* DNI — verificarDniIntegrante: el prospecto subió frente/dorso de un integrante a Storage (prospectos/{uid}/dni/{clave}/)
+   y (si el WASM decodificó) manda la cadena del PDF417. La CF:
+   1) CONSTATA las fotos LEYENDO Storage (no confía en el cliente) → registra fotos[clave].
+   2) Si vino la cadena, PARSEA+CRUZA server-side contra la ficha del integrante (DNI + nombre + fecha) → identidadVerificada[clave].
+   El cliente NO auto-certifica. Degradación: sin cadena, solo quedan las fotos (identidadVerificada intacta = pendiente).
+   ⚠️ El decode es una CONVENIENCIA (un cliente podría forjar la cadena con sus propios datos); el control REAL es el
+   admin mirando las fotos en el panel. Por eso la activación avisa pero no bloquea (override, decisión Lucas). */
+exports.verificarDniIntegrante = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const ref = db.collection('prospectos').doc(uid);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('failed-precondition', 'Solo para prospectos.');
+  const lead = snap.data() || {};
+  const d = request.data || {};
+  const clave = String(d.clave || '').trim();
+  if (!/^(titular|int_\d{1,2})$/.test(clave)) throw new HttpsError('invalid-argument', 'clave inválida.');
+  // Ficha del integrante según la clave (titular en top-level; int_N = integrantes[N-2]).
+  let ficha;
+  if (clave === 'titular') ficha = { nombre: lead.nombre || '', dni: lead.dni || '', fechaNacimiento: (lead.datosAlta && lead.datosAlta.fechaNacimiento) || '' };
+  else { const idx = parseInt(clave.slice(4), 10) - 2; const m = (lead.integrantes || [])[idx]; if (!m) throw new HttpsError('not-found', 'Integrante inexistente.'); ficha = { nombre: m.nombre || '', dni: m.dni || '', fechaNacimiento: m.fechaNacimiento || '' }; }
+  // 1) CONSTATAR fotos leyendo Storage (Admin SDK) — no se confía en el cliente.
+  const bucket = admin.storage().bucket(DNI_BUCKET);
+  const base = 'prospectos/' + uid + '/dni/' + clave + '/';
+  const existe = async (n) => { try { const [e] = await bucket.file(base + n).exists(); return e; } catch (_) { return false; } };
+  const frente = await existe('frente.jpg');
+  const dorso = await existe('dorso.jpg');
+  const fotos = Object.assign({}, lead.fotos || {}); fotos[clave] = { frente, dorso, actualizadoEn: FV() };
+  const upd = { fotos };
+  // 2) Verificación (solo si vino la cadena decodificada por el WASM del cliente).
+  let resultado = { decodificado: false, frente, dorso };
+  const pdf417 = String(d.pdf417 || '').trim().slice(0, 2000);
+  if (pdf417) {
+    const parsed = parsePDF417(pdf417);
+    const mt = parsed ? matchIntegrante(parsed, ficha) : { dniOk: false, nombreOk: false, fechaOk: false, verificado: false };
+    upd.identidadVerificada = Object.assign({}, lead.identidadVerificada || {}, { [clave]: mt.verificado });
+    upd.verificacionDetalle = Object.assign({}, lead.verificacionDetalle || {}, { [clave]: { dniOk: mt.dniOk, nombreOk: mt.nombreOk, fechaOk: mt.fechaOk, verificado: mt.verificado, en: FV() } });
+    resultado = { decodificado: true, verificado: mt.verificado, dniOk: mt.dniOk, nombreOk: mt.nombreOk, fechaOk: mt.fechaOk, frente, dorso };
+  }
+  await ref.set(upd, { merge: true });
+  logger.info('[verificarDniIntegrante]', { uid, clave, frente, dorso, decodificado: resultado.decodificado, verificado: resultado.verificado === true });
+  return resultado;
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================
