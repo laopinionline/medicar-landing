@@ -11,7 +11,7 @@ t('appId definido', /\./.test(cfg.appId||''), cfg.appId);
 // 2) proyecto android generado + assets copiados con la guarda
 t('android/ generado', fs.existsSync(path.join(root,'android','app','src','main','assets','public','index.html')));
 const bundled=fs.readFileSync(path.join(root,'android','app','src','main','assets','public','index.html'),'utf8');
-t('el index bundleado tiene la guarda staff-nativo', /staffNativoView/.test(bundled) && /esAppNativa/.test(bundled));
+t('el index bundleado existe y trae esAppNativa (scaffold nativo)', /esAppNativa/.test(bundled));
 
 // 3) esAppNativa: false en web (sin window.Capacitor), true en nativo
 const { lines: extractLines, fn }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
@@ -20,11 +20,12 @@ const run=(cap)=>{ const sb={ window: cap?{Capacitor:{isNativePlatform:()=>true}
 t('esAppNativa() = false en el NAVEGADOR (sin window.Capacitor)', run(false)===false);
 t('esAppNativa() = true en la app NATIVA (Capacitor inyecta window.Capacitor)', run(true)===true);
 
-// 4) la rama staff usa la guarda: nativo → staff-nativo, web → redirect a ../app/
-t('rama staff: en nativo → view staff-nativo (no redirect)', /if\(esAppNativa\(\)\)\{ set\(\{ view:'staff-nativo'/.test(socio));
-t('rama staff: en web → window.location.replace(../app/)', /window\.location\.replace\('\.\.\/app\/'\)/.test(socio));
-t('render tiene case staff-nativo', /case 'staff-nativo': html=staffNativoView\(\)/.test(socio));
-t('staffNativoView muestra la URL del panel web', /medicaronline\.ar\/app\//.test(socio));
+// 4) DOCTRINA: socio/ es SOLO para afiliados. El staff-puro ve "Esta app es solo para socios" + Salir (web y nativo
+//    por igual); NO se rutea al panel desde socio/. El concepto staff-nativo + el redirect a /app/ fueron eliminados.
+t('rama staff → view no-afiliado (solo para socios), sin redirect a /app/', /if\(destino === 'staff'\)\{[\s\S]{0,320}set\(\{ view:'no-afiliado', cred \}\); return;/.test(socio));
+t('redirect a ../app/ ELIMINADO de socio/', !/window\.location\.replace\('\.\.\/app\/'\)/.test(socio));
+t('staff-nativo ELIMINADO (sin view ni case)', !/staffNativoView/.test(socio) && !/case 'staff-nativo'/.test(socio));
+t('cartel "Esta app es solo para socios"', /Esta app es solo para socios/.test(socio));
 
 // 5) la PWA web sigue intacta (no se rompió el flujo afiliado normal)
 t('flujo afiliado intacto: sigue el home tras cred ok', /set\(\{ view:'home', cred[,)].*navReplace\(\)/.test(socio));

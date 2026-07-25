@@ -521,7 +521,13 @@ service cloud.firestore {
                                || (isSignedIn() && miPersonaId() != null && resource.data.personaId == miPersonaId())
                                || (isSignedIn() && miPersonaId() != null && resource.data.titularPersonaId == miPersonaId()); // F2: el TITULAR lee sus dependientes (titularPersonaId denorm en F1)
       // E-1: gate intacto + validacion de forma de facturarA (solo cuando esta presente; no impone whitelist total).
-      allow create, update: if tienePermiso('gestionar_afiliados') && facturarAOk(); // Tablero-Fase1: sin bypass isAdmin
+      // VITALICIO: socio sin cuota (lo gestiona MEDICAR). SETEAR/CAMBIAR el flag `vitalicio` requiere admin/superadmin;
+      // gestionar_afiliados solo NO alcanza para ese campo. Editar OTROS campos de un socio vitalicio: permitido (el
+      // flag no cambia). En create, vitalicio:true exige admin; en update, solo si el valor cambia.
+      allow create, update: if tienePermiso('gestionar_afiliados') && facturarAOk()
+                               && ( request.resource.data.get('vitalicio', false)
+                                      == (resource != null ? resource.data.get('vitalicio', false) : false)
+                                    || isAdmin() || esSuperadmin() );
     }
 
     // empresas/{id}: raíz corporativa / área protegida (alta de socio) + convenio de cobro (E-1).

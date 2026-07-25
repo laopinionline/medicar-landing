@@ -1106,8 +1106,9 @@ auth.onAuthStateChanged(async user => {
     // igual en SU credencial (no en un panel vacío). El claim no toca las reglas (acceso desde usuarios/{uid}.roles).
     const destino = destinoTrasAuth(esRef, cred.estado);
     if(destino === 'staff'){
-      if(esAppNativa()){ set({ view:'staff-nativo', cred }); return; }
-      window.location.replace('../app/'); return; // web: staff puro → panel
+      // DOCTRINA: socio/ es SOLO para afiliados. El staff-puro (sin rol afiliado, sin prospecto) NO se rutea al panel
+      // desde acá — ve "Esta app es solo para socios" + Salir (web y nativo por igual). El doble-rol cae en 'ok'→home.
+      set({ view:'no-afiliado', cred }); return;
     }
     if(destino === 'home'){
       modoReferenteOff();
@@ -1295,7 +1296,7 @@ function bootView(){ return `<div class="center"><svg class="chev chev-load" wid
 function noAfiliadoView(){
   return `<div class="center">
     <div class="big">🔒</div>
-    <h3>Esta app es para socios</h3>
+    <h3>Esta app es solo para socios</h3>
     <p>Tu cuenta no es una cuenta de socio de MEDICAR. Si sos parte del personal, usá el sistema interno.</p>
     <button class="btn-r" onclick="salir()">Salir</button>
   </div>`;
@@ -1333,15 +1334,6 @@ async function registrarPush(uid){
   }catch(_){}
 }
 // Staff puro en la app NATIVA: no hay panel empaquetado → mensaje con la URL del panel web (en vez del redirect roto a ../app/).
-function staffNativoView(){
-  return `<div class="center">
-    <div class="big">🧑‍⚕️</div>
-    <h3>Esta app es para socios</h3>
-    <p>Tu cuenta es de personal de MEDICAR. El panel interno se usa desde el navegador:</p>
-    <p style="font-weight:700">medicaronline.ar/app/</p>
-    <button class="btn-r" onclick="salir()">Salir</button>
-  </div>`;
-}
 
 function sinVinculoView(){
   return `<div class="center">
@@ -2861,7 +2853,6 @@ function render(){
     case 'referente-buscar': html=referenteBuscarView(); break;
     case 'referente': html=referentePanelView(); break;
     case 'mis-referentes': html=misReferentesView(); break;
-    case 'staff-nativo': html=staffNativoView(); break;
     case 'no-afiliado': html=noAfiliadoView(); break;
     case 'sin-vinculo': html=sinVinculoView(); break;
     case 'error-carga': html=errorCargaView(); break;

@@ -4440,7 +4440,7 @@ async function generarAbonos(){
   facErr('');
   const periodo=(document.getElementById('fac-ab-periodo')?.value||S.fac.periodo||'').trim();
   if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
-  const rep={ generados:0, sinPlan:0, yaTenian:0, planInvalido:0, corpSinDest:0, destFijo:0, errores:0 };
+  const rep={ generados:0, sinPlan:0, yaTenian:0, planInvalido:0, corpSinDest:0, destFijo:0, vitalicios:0, errores:0 };
   try{
     // SOLO LECTURA: socios activos + abonos del período + empresas (E-3: mapa de convenios cacheado UNA vez).
     const [socSnap, abSnap, empSnap] = await Promise.all([
@@ -4452,6 +4452,7 @@ async function generarAbonos(){
     const yaConAbono=new Set(abSnap.docs.map(d=>d.data().socioId)); // incluye anulados → no regenera
     for(const sd of socSnap.docs){
       const socio=sd.data(), socioId=sd.id;
+      if(socio.vitalicio===true){ rep.vitalicios++; continue; } // VITALICIO: MEDICAR no cobra → sin abono (ni $0). El motor server también lo saltea.
       // E-3 (destino por facturarA, reemplaza la exclusión ciega por tipoAfiliado):
       //  · empresa con convenio FIJO → sin abono per-socio (la empresa paga flat; el ítem lo genera generarFacturas).
       //  · empresa per cápita (o convenio sin cargar) → genera abono normal, rolará a la factura de la empresa.
@@ -5606,12 +5607,20 @@ function afFormNew(){
     <div class="field"><label>Vigente desde</label><input id="af-vig" type="date" value="${esc(draft.vig||afTsToInput(firebase.firestore.Timestamp.now()))}"></div>
     <div class="field"><label>Carencia hasta (opcional)</label><input id="af-car" type="date" value="${esc(draft.car||'')}"></div>
     ${facturarAField(draft.facturarA||null,'af-facturara')}
+    ${vitalicioField(!!draft.vitalicio,'af-vitalicio')}
     <button class="btn-r" onclick="afGuardarNuevo()">Guardar socio</button>` : '';
   return `<div class="card"><div class="ch">Nuevo socio</div>
     ${convBanner}<div id="af-err" class="err" style="display:none;margin-bottom:.5rem"></div>
     ${dniBlock}${personaBlock}${socioBlock}
     <button class="btn-o" onclick="navBack()">Cancelar</button>
   </div>`;
+}
+// VITALICIO: socio sin cuota (lo gestiona MEDICAR). Checkbox VISIBLE para todos los que editan afiliados, OPERABLE solo
+// admin/superadmin (el front refleja lo que la regla ya enforza: setear/cambiar el flag requiere admin/superadmin).
+function esAdminOSuper(){ const r=(S.user&&Array.isArray(S.user.roles)&&S.user.roles.length)?S.user.roles:(S.user&&S.user.rol?[S.user.rol]:[]); return r.some(x=>x==='admin'||x==='superadmin'); }
+function vitalicioField(checked,id){
+  const admin=esAdminOSuper();
+  return `<div class="field"><label style="display:flex;align-items:center;gap:.5rem;cursor:${admin?'pointer':'not-allowed'}"><input type="checkbox" id="${id}" ${checked?'checked':''} ${admin?'':'disabled'}>Vitalicio — sin cuota (lo gestiona MEDICAR)</label>${admin?'':`<div style="font-size:.7rem;color:var(--ink3)">Solo admin/superadmin puede cambiar este campo.</div>`}</div>`;
 }
 async function afBuscarPersona(){
   if(!S.af) return;
@@ -5643,6 +5652,7 @@ async function afGuardarNuevo(){
   const tipo=document.getElementById('af-tipo')?.value||'directo';
   const vig=afFechaToTs(document.getElementById('af-vig')?.value||'');
   const car=afFechaToTs(document.getElementById('af-car')?.value||'');
+  const vitalicioSel=!!document.getElementById('af-vitalicio')?.checked; // solo admin/superadmin lo puede prender (rules); si no, va false
   // Validaciones específicas por tipo/modalidad (antes de crear nada).
   let numero='', empresa=null, titular=null, modo='individual', override=false;
   if(tipo==='directo'){
@@ -5701,14 +5711,14 @@ async function afGuardarNuevo(){
       const grupoTipo=(tipo==='area_protegida')?'area_protegida':'corporativo';
       const socioRef=db.collection('socios').doc();
       const r=await asignarSufijo(db.collection('empresas').doc(empresa.id), socioRef, (numeroAfiliado)=>({
-        personaId, tipoAfiliado:'corporativo', grupoTipo, empresaId:empresa.id, esResponsablePago:false,
+        personaId, tipoAfiliado:'corporativo', grupoTipo, empresaId:empresa.id, esResponsablePago:false, vitalicio:vitalicioSel,
         numeroAfiliado, planId: empresa.planIdDefault||null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV()
       }));
       socioId=socioRef.id; numeroFinal=r.numeroAfiliado;
     } else if(modo==='dependiente'){                                 // sufijo -NN sobre el TITULAR
       const socioRef=db.collection('socios').doc();
       const r=await asignarSufijo(db.collection('socios').doc(titular.id), socioRef, (numeroAfiliado)=>({
-        personaId, tipoAfiliado:'directo', grupoTipo:'familiar', titularSocioId:titular.id, esResponsablePago:false,
+        personaId, tipoAfiliado:'directo', grupoTipo:'familiar', titularSocioId:titular.id, esResponsablePago:false, vitalicio:vitalicioSel,
         titularPersonaId: titular.personaId||null, nombreVista: socioNombreDe(perData), // F1: llave de scoping (F2) + nombre denorm
         numeroAfiliado, planId:null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV()
       }));
@@ -5717,14 +5727,14 @@ async function afGuardarNuevo(){
     } else if(override){                                             // migración: N° a mano, sin contador (igual raíz: numeroRaiz + ultimoSufijo)
       const planId=document.getElementById('af-planid')?.value||null;
       const grupoTipo=(modo==='titular')?'familiar':'directo';
-      const sref=await db.collection('socios').add({ personaId, tipoAfiliado:'directo', grupoTipo, numeroAfiliado:numero, numeroRaiz:numero, ultimoSufijo:0, esResponsablePago:true, planId:planId||null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV() });
+      const sref=await db.collection('socios').add({ personaId, tipoAfiliado:'directo', grupoTipo, numeroAfiliado:numero, numeroRaiz:numero, ultimoSufijo:0, esResponsablePago:true, vitalicio:vitalicioSel, planId:planId||null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV() });
       socioId=sref.id; numeroFinal=numero;
     } else {                                                          // individual / titular: correlativo pelado (asignarNumeroRaiz)
       const planId=document.getElementById('af-planid')?.value||null;
       const grupoTipo=(modo==='titular')?'familiar':'directo';
       const socioRef=db.collection('socios').doc();
       const r=await asignarNumeroRaiz('directo', socioRef, (correlativo)=>({
-        personaId, tipoAfiliado:'directo', grupoTipo, numeroAfiliado:correlativo, numeroRaiz:correlativo, ultimoSufijo:0, esResponsablePago:true,
+        personaId, tipoAfiliado:'directo', grupoTipo, numeroAfiliado:correlativo, numeroRaiz:correlativo, ultimoSufijo:0, esResponsablePago:true, vitalicio:vitalicioSel,
         planId:planId||null, vigenteDesde:vig||FV(), carenciaHasta:car||null, activo:true, creadoEn:FV()
       }));
       socioId=socioRef.id; numeroFinal=r.correlativo;
@@ -6036,6 +6046,7 @@ function afFormEdit(){
     <div class="field"><label>Carencia hasta (opcional)</label><input id="af-e-car" type="date" value="${afTsToInput(s.carenciaHasta)}"></div>
     <div class="field"><label>Estado de alta</label><select id="af-e-activo"><option value="si" ${s.activo!==false?'selected':''}>Activo</option><option value="no" ${s.activo===false?'selected':''}>Baja lógica</option></select></div>
     ${facturarAField(s.facturarA||null,'af-e-facturara')}
+    ${vitalicioField(!!s.vitalicio,'af-e-vitalicio')}
     <button class="btn-r" onclick="afGuardarEdit('${s.id}')">Guardar</button>
     <button class="btn-o" onclick="navBack()">Cancelar</button>
   </div>`;
@@ -6054,6 +6065,7 @@ async function afGuardarEdit(id){
     vigenteDesde:afFechaToTs(document.getElementById('af-e-vig')?.value||'')||null,
     carenciaHasta:afFechaToTs(document.getElementById('af-e-car')?.value||''),
     activo:(document.getElementById('af-e-activo')?.value||'si')==='si',
+    vitalicio:!!document.getElementById('af-e-vitalicio')?.checked, // disabled para no-admin → refleja el valor actual (rule: sin cambio = permitido)
     actualizadoEn:FV()
   };
   // E-2: facturarA — empresa => set; persona (ausencia) => delete (vuelve al default persona). Ortogonal a empresaId.

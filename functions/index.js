@@ -1003,6 +1003,7 @@ exports.cambiarMiPlan = onCall(async (request) => {
   if (socSnap.empty) throw new HttpsError('failed-precondition', 'No encontramos tu afiliación activa.');
   const socioRef = socSnap.docs[0].ref;
   const socio = socSnap.docs[0].data() || {};
+  if (socio.vitalicio === true) throw new HttpsError('failed-precondition', 'Tu plan lo gestiona MEDICAR.'); // vitalicio: sin autogestión (cierra el hueco sin PLAN_EXCLUIDOS)
   if (socio.esResponsablePago !== true || !socio.planId) throw new HttpsError('permission-denied', 'Solo el titular responsable de pago puede cambiar el plan.');
   if (socio.planId === nuevoPlanId) throw new HttpsError('failed-precondition', 'Ya tenés ese plan.');
   if (PLAN_EXCLUIDOS.includes(nuevoPlanId)) throw new HttpsError('permission-denied', 'Ese plan no está disponible para autogestión.');
@@ -1504,7 +1505,7 @@ exports.asistenteChat = onCall(async (request) => {
     let plan = null, cubre = [];
     if (socio && socio.planId) {
       const ps = await db.collection('planes').doc(socio.planId).get();
-      if (ps.exists) { const p = ps.data(); plan = { nombre: p.nombre || 'tu plan', precio: p.precio != null ? p.precio : 0 };
+      if (ps.exists) { const p = ps.data(); plan = { nombre: p.nombre || 'tu plan', precio: p.precio != null ? p.precio : 0, vitalicio: socio.vitalicio === true };
         cubre = Object.keys(p.coberturas || {}).filter((k) => p.coberturas[k] === true); }
     }
     // Facturación EXPLÍCITA: pendiente (si hay) + última factura (cualquier estado) → el contexto afirma el estado, no deja hueco.
