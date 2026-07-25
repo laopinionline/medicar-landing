@@ -33,15 +33,29 @@ const t = (l, c) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}`); c ? ok++ :
   try { await MP.crearPreferencia({ accessToken: 'x', monto: 1, externalReference: 'u', fetchImpl: async () => ({ ok: false, status: 400, text: async () => 'bad' }) }); } catch (_) { tiro = true; }
   t('preference: HTTP no-2xx → throw', tiro);
 
-  // --- validarFirma: HMAC del manifest de MP ---
+  // --- validarFirma: HMAC del manifest de MP, con SEGMENTOS CONDICIONALES (el fix del 401) ---
   const secret = 'whooksecret', ts = '1700000000', dataId = 'PAY123', reqId = 'req-1';
-  const manifest = 'id:' + dataId.toLowerCase() + ';request-id:' + reqId + ';ts:' + ts + ';';
-  const v1 = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
-  t('firma VÁLIDA pasa', MP.validarFirma({ xSignature: 'ts=' + ts + ',v1=' + v1, xRequestId: reqId, dataId, secret }) === true);
-  t('firma con secret equivocado NO pasa', MP.validarFirma({ xSignature: 'ts=' + ts + ',v1=' + v1, xRequestId: reqId, dataId, secret: 'otro' }) === false);
-  t('firma con v1 alterado NO pasa', MP.validarFirma({ xSignature: 'ts=' + ts + ',v1=' + 'deadbeef' + v1.slice(8), xRequestId: reqId, dataId, secret }) === false);
-  t('firma sin ts/v1 NO pasa', MP.validarFirma({ xSignature: 'nada', xRequestId: reqId, dataId, secret }) === false);
-  t('firma sin secret NO pasa', MP.validarFirma({ xSignature: 'ts=1,v1=2', xRequestId: reqId, dataId, secret: '' }) === false);
+  const hmac = (m) => crypto.createHmac('sha256', secret).update(m).digest('hex');
+  const v1con = hmac('id:' + dataId.toLowerCase() + ';request-id:' + reqId + ';ts:' + ts + ';'); // manifest CON request-id
+  const v1sin = hmac('id:' + dataId.toLowerCase() + ';ts:' + ts + ';');                          // manifest SIN request-id (segmento omitido)
+  t('firma VÁLIDA con x-request-id pasa', MP.validarFirma({ xSignature: 'ts=' + ts + ',v1=' + v1con, xRequestId: reqId, dataId, secret }).valido === true);
+  t('firma VÁLIDA SIN x-request-id (segmento omitido) pasa', MP.validarFirma({ xSignature: 'ts=' + ts + ',v1=' + v1sin, xRequestId: '', dataId, secret }).valido === true);
+  t('el manifest con/sin request-id difiere (por eso importa el fix)', v1con !== v1sin);
+  t('NO cruzar: v1-sin no valida cuando SÍ hay request-id', MP.validarFirma({ xSignature: 'ts=' + ts + ',v1=' + v1sin, xRequestId: reqId, dataId, secret }).valido === false);
+  t('firma con secret equivocado NO pasa', MP.validarFirma({ xSignature: 'ts=' + ts + ',v1=' + v1con, xRequestId: reqId, dataId, secret: 'otro' }).valido === false);
+  t('firma con v1 alterado NO pasa', MP.validarFirma({ xSignature: 'ts=' + ts + ',v1=deadbeef' + v1con.slice(8), xRequestId: reqId, dataId, secret }).valido === false);
+  t('firma sin ts/v1 → motivo sin-ts-o-v1', MP.validarFirma({ xSignature: 'nada', xRequestId: reqId, dataId, secret }).motivo === 'sin-ts-o-v1');
+  t('firma sin secret → motivo sin-secret', MP.validarFirma({ xSignature: 'ts=1,v1=2', xRequestId: reqId, dataId, secret: '' }).motivo === 'sin-secret');
+  t('diag SEGURO: hasRequestId + prefijos de HMAC (nunca el secret)', (() => { const r = MP.validarFirma({ xSignature: 'ts=' + ts + ',v1=' + v1con, xRequestId: reqId, dataId, secret }); return r.hasRequestId === true && r.calcPrefix.length === 8 && r.v1Prefix.length === 8; })());
+
+  // --- buscarPagoAprobado (confirmador de retorno): la API es la verdad, por external_reference ---
+  let capSearch = null;
+  const searchFetch = (results) => async (url, opts) => { capSearch = { url, auth: opts.headers.Authorization }; return { ok: true, json: async () => ({ results }) }; };
+  const bAppr = await MP.buscarPagoAprobado({ accessToken: 'TEST-abc', externalReference: 'uid_1', fetchImpl: searchFetch([{ id: 1, status: 'rejected' }, { id: 2, status: 'approved', transaction_amount: 40000, external_reference: 'uid_1' }]) });
+  t('search: URL /v1/payments/search por external_reference + Bearer', /\/v1\/payments\/search\?/.test(capSearch.url) && /external_reference=uid_1/.test(capSearch.url) && capSearch.auth === 'Bearer TEST-abc');
+  t('search: encuentra el approved entre varios', bAppr.encontrado === true && bAppr.status === 'approved' && bAppr.paymentId === '2' && bAppr.monto === 40000);
+  t('search: sin approved → encontrado false + status del último', (await MP.buscarPagoAprobado({ accessToken: 'x', externalReference: 'u', fetchImpl: searchFetch([{ id: 9, status: 'rejected' }]) })).status === 'rejected');
+  t('search: sin pagos → sin_pagos', (await MP.buscarPagoAprobado({ accessToken: 'x', externalReference: 'u', fetchImpl: searchFetch([]) })).status === 'sin_pagos');
 
   // --- consultarPago: la VERDAD sale de la API ---
   const pago = await MP.consultarPago({ accessToken: 'TEST-abc', paymentId: 'PAY123', fetchImpl: async (url, opts) => { t('consulta: GET /v1/payments/{id} con Bearer', /\/v1\/payments\/PAY123$/.test(url) && opts.headers.Authorization === 'Bearer TEST-abc'); return { ok: true, json: async () => ({ id: 'PAY123', status: 'approved', external_reference: 'uid_1', transaction_amount: 20000 }) }; } });

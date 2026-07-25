@@ -1914,8 +1914,8 @@ exports.webhookAfiliacionMP = onRequest({ secrets: [MP_ACCESS_TOKEN, MP_WEBHOOK_
   try {
     const dataId = MP.dataIdDeNotificacion(req.query, req.body);
     if (!dataId) { logger.info('[webhookAfiliacionMP] sin data.id (ping/otro topic)'); res.status(200).send('ok'); return; }
-    const firmaOk = MP.validarFirma({ xSignature: req.get('x-signature'), xRequestId: req.get('x-request-id'), dataId, secret: MP_WEBHOOK_SECRET.value() });
-    if (!firmaOk) { logger.warn('[webhookAfiliacionMP] firma inválida', { dataId }); res.status(401).send('firma invalida'); return; }
+    const firma = MP.validarFirma({ xSignature: req.get('x-signature'), xRequestId: req.get('x-request-id'), dataId, secret: MP_WEBHOOK_SECRET.value() });
+    if (!firma.valido) { logger.warn('[webhookAfiliacionMP] firma inválida', { dataId, hasRequestId: firma.hasRequestId, motivo: firma.motivo || null, calcPrefix: firma.calcPrefix || null, v1Prefix: firma.v1Prefix || null }); res.status(401).send('firma invalida'); return; } // DIAGNÓSTICO TEMPORAL: hasRequestId + prefijos HMAC (no revelan secret ni body)
     const pago = await MP.consultarPago({ accessToken: MP_ACCESS_TOKEN.value(), paymentId: dataId }); // la VERDAD sale de la API
     if (pago.status === 'approved' && pago.externalReference) {
       const r = await confirmarAfiliacionPago(pago.externalReference, pago.paymentId, pago.monto);
@@ -1925,6 +1925,30 @@ exports.webhookAfiliacionMP = onRequest({ secrets: [MP_ACCESS_TOKEN, MP_WEBHOOK_
     }
     res.status(200).send('ok');
   } catch (e) { logger.error('[webhookAfiliacionMP] error', { err: e.message || String(e) }); res.status(200).send('ok'); } // 200 igual → idempotencia cubre el reintento
+});
+
+/* confirmarRetornoAfiliacion (onCall) — RED DE SEGURIDAD del webhook. La PWA, al volver del checkout (?afiliacionPago=1),
+   la llama. La CF toma el lead del uid AUTENTICADO (jamás un param de la URL), busca en la API de MP el pago aprobado por
+   external_reference = uid (fuente de verdad: la API) y, si approved, promueve por la MISMA vía idempotente que el webhook
+   (doble vía = una sola promoción). No aprobado → queda pendiente_pago. */
+exports.confirmarRetornoAfiliacion = onCall({ secrets: [MP_ACCESS_TOKEN] }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const snap = await db.collection('prospectos').doc(uid).get();
+  if (!snap.exists) throw new HttpsError('failed-precondition', 'Solo para prospectos.');
+  const lead = snap.data() || {};
+  if (lead.estado === 'afiliacion_en_proceso') return { ok: true, promovido: false, yaEstaba: true, estado: 'afiliacion_en_proceso' }; // ya lo promovió el webhook
+  if (lead.estado !== 'pendiente_pago') return { ok: false, estado: lead.estado || null };
+  let res;
+  try { res = await MP.buscarPagoAprobado({ accessToken: MP_ACCESS_TOKEN.value(), externalReference: uid }); }
+  catch (e) { logger.error('[confirmarRetornoAfiliacion] search falló', { uid, err: e.message || String(e) }); throw new HttpsError('unavailable', 'No pudimos confirmar el pago ahora. Probá de nuevo en un momento.'); }
+  if (res.encontrado && res.status === 'approved') {
+    const r = await confirmarAfiliacionPago(uid, res.paymentId, res.monto); // MISMA función que el webhook → idempotente
+    logger.info('[confirmarRetornoAfiliacion] approved', { uid, yaEstaba: r.yaEstaba || false });
+    return { ok: true, promovido: r.ok === true, estado: 'afiliacion_en_proceso' };
+  }
+  logger.info('[confirmarRetornoAfiliacion] no-approved', { uid, status: res.status });
+  return { ok: true, promovido: false, estado: 'pendiente_pago', status: res.status };
 });
 
 /* ===================== PWA-2a — Ingesta diaria del feed "Para vos" =====================

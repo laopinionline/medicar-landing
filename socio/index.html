@@ -1128,6 +1128,7 @@ auth.onAuthStateChanged(async user => {
     if(destino === 'prospecto'){ // cuenta autoregistrada (aún no socio) → home reducida
       modoReferenteOff();
       set({ view:'prospecto', cred:null, prospecto:cred.prospecto||{}, busy:false, ia:null }); navReplace();
+      afiliacionRetornoCheck(); // MP: si volvió del checkout (back_url ?afiliacionPago=1), confirma el pago server-side
       return;
     }
     if(destino === 'no-afiliado'){ set({ view:'no-afiliado', cred }); return; }
@@ -1275,7 +1276,26 @@ function prospectoView(){
 }
 // CTA de afiliación de la home del prospecto según su estado (persiste vía prospectos/{uid}.estado): disponible /
 // afiliación en proceso (post-checkout) / asesor solicitado. En proceso o asesor → botón hecho, no re-clickeable.
+// RED DE SEGURIDAD del webhook: al volver del checkout (?afiliacionPago=1), confirma el pago server-side (la CF consulta
+// la API por external_reference; los params de la URL NO son fuente de verdad). Idempotente con el webhook.
+async function afiliacionRetornoCheck(){
+  let hay=false; try{ hay=new URLSearchParams(location.search).has('afiliacionPago'); }catch(_){}
+  if(!hay) return;
+  try{ const u=new URL(location.href); u.searchParams.delete('afiliacionPago'); history.replaceState(null,'',u.pathname+u.search); }catch(_){} // limpia el param (no re-dispara)
+  S.afiliacionConfirmando=true; render();
+  try{
+    const r=await fnsCall('confirmarRetornoAfiliacion', {});
+    if(r && (r.estado==='afiliacion_en_proceso' || r.promovido || r.yaEstaba)){ if(S.prospecto) S.prospecto.estado='afiliacion_en_proceso'; }
+    else if(S.prospecto && r && r.estado){ S.prospecto.estado=r.estado; } // pendiente_pago (rechazado/pendiente): mensaje de siempre
+  }catch(_){ /* queda pendiente_pago; el webhook o un reintento lo resuelven */ }
+  S.afiliacionConfirmando=false; render();
+}
 function afiliacionCTA(){
+  if(S.afiliacionConfirmando){
+    return `<div style="margin-top:.9rem;background:#eef4ff;border:1px solid #cfe0ff;border-radius:12px;padding:1rem;text-align:center">
+      <div style="font-weight:800;color:#1b4b8f">Confirmando tu pago…</div>
+      <div style="font-size:.8rem;color:var(--gris);margin-top:.25rem">Un momento, lo estamos verificando con Mercado Pago.</div></div>`;
+  }
   const est = (S.prospecto && S.prospecto.estado) || 'nuevo';
   if(est==='pendiente_pago'){
     // El prospecto creó la preference pero el pago aún no está aprobado (rechazado / abandonado / vencido / en proceso).

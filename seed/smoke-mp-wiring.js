@@ -25,7 +25,8 @@ t('gate de estado sigue: no re-checkout si ya afiliacion_en_proceso', /estado ==
 // ---- webhook ----
 t('webhookAfiliacionMP: onRequest con ambos secrets', /exports\.webhookAfiliacionMP = onRequest\(\{ secrets: \[MP_ACCESS_TOKEN, MP_WEBHOOK_SECRET\] \}/.test(fn));
 t('webhook: valida FIRMA (nunca confía en el body)', /MP\.validarFirma\(\{ xSignature: req\.get\('x-signature'\)/.test(fn));
-t('webhook: firma inválida → 401', /firma inválida[\s\S]{0,80}status\(401\)/.test(fn));
+t('webhook: usa firma.valido (objeto) + 401 si no', /if \(!firma\.valido\) \{[\s\S]{0,300}status\(401\)/.test(fn));
+t('webhook: DIAGNÓSTICO temporal (hasRequestId + prefijos HMAC, sin secret/body)', /hasRequestId: firma\.hasRequestId[\s\S]{0,80}calcPrefix: firma\.calcPrefix[\s\S]{0,40}v1Prefix: firma\.v1Prefix/.test(fn));
 t('webhook: CONSULTA la API por el estado real', /MP\.consultarPago\(\{ accessToken: MP_ACCESS_TOKEN\.value\(\), paymentId: dataId \}\)/.test(fn));
 t('webhook: solo APPROVED promueve (rejected/pending no)', /pago\.status === 'approved' && pago\.externalReference\) \{[\s\S]{0,120}confirmarAfiliacionPago/.test(fn));
 t('webhook: 200 SIEMPRE (idempotencia cubre el reintento)', (fn.match(/res\.status\(200\)\.send\('ok'\)/g) || []).length >= 2);
@@ -39,7 +40,22 @@ t('socio: puentePagar redirige a initPoint si modo mercadopago', /r\.modo==='mer
 t('socio: paso de pago adapta banner por modo (Mercado Pago vs SIMULACIÓN)', /Pago seguro con <b>Mercado Pago/.test(socio) && /SIMULACIÓN — no se realiza ningún cobro real/.test(socio));
 t('socio: lee el modo (config) para adaptar', /function puenteCargarModo\(\)/.test(socio) && /collection\('configuracion'\)\.doc\('pasarela'\)/.test(socio));
 t('socio: estado pendiente_pago en la home + reintento', /est==='pendiente_pago'\)\{/.test(socio) && /Tu pago quedó pendiente/.test(socio) && /Reintentar el pago/.test(socio));
-t('socio: SW bumpeado a v38', /medicar-socio-v38/.test(fs.readFileSync(R('socio/sw.js'), 'utf8')));
+t('socio: SW bumpeado (≥ v38)', (() => { const m = /medicar-socio-v(\d+)/.exec(fs.readFileSync(R('socio/sw.js'), 'utf8')); return m && Number(m[1]) >= 38; })());
+
+// ---- confirmador de retorno (red de seguridad del webhook) ----
+t('CF confirmarRetornoAfiliacion: onCall con secret MP_ACCESS_TOKEN', /exports\.confirmarRetornoAfiliacion = onCall\(\{ secrets: \[MP_ACCESS_TOKEN\] \}/.test(fn));
+t('retorno: toma el lead del uid AUTENTICADO (no de la URL)', /const uid = request\.auth\.uid;[\s\S]{0,200}collection\('prospectos'\)\.doc\(uid\)/.test(fn));
+t('retorno: busca el pago por external_reference = uid (API = verdad)', /MP\.buscarPagoAprobado\(\{ accessToken: MP_ACCESS_TOKEN\.value\(\), externalReference: uid \}\)/.test(fn));
+t('retorno: approved → MISMA confirmarAfiliacionPago que el webhook (doble vía = una promoción)', /res\.encontrado && res\.status === 'approved'\) \{[\s\S]{0,120}confirmarAfiliacionPago\(uid/.test(fn));
+t('retorno: ya en proceso → yaEstaba (idempotente con el webhook)', /lead\.estado === 'afiliacion_en_proceso'\) return \{ ok: true, promovido: false, yaEstaba: true/.test(fn));
+t('retorno: no-approved → queda pendiente_pago', /promovido: false, estado: 'pendiente_pago', status: res\.status/.test(fn));
+
+// ---- socio: handler de retorno ----
+t('socio: afiliacionRetornoCheck disparado en el boot del prospecto', /afiliacionRetornoCheck\(\);/.test(socio) && /destino === 'prospecto'/.test(socio));
+t('socio: detecta ?afiliacionPago y llama confirmarRetornoAfiliacion', /has\('afiliacionPago'\)/.test(socio) && /fnsCall\('confirmarRetornoAfiliacion'/.test(socio));
+t('socio: limpia el param (no re-dispara)', /searchParams\.delete\('afiliacionPago'\)/.test(socio));
+t('socio: UI "Confirmando tu pago…"', /S\.afiliacionConfirmando\)\{/.test(socio) && /Confirmando tu pago…/.test(socio));
+t('socio: SW bumpeado a v39', /medicar-socio-v39/.test(fs.readFileSync(R('socio/sw.js'), 'utf8')));
 
 // ---- panel ----
 t('panel: badge de estado pendiente_pago', /pendiente_pago:\['Pago pendiente'/.test(app) && /pendiente_pago:1/.test(app));
