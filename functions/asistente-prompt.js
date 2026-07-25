@@ -87,8 +87,9 @@ function buildContexto(d) {
   L.push('TU CUENTA — datos de TU cuenta de socio (fuente: tu cuenta corriente/afiliado). Es LA fuente para TODA pregunta sobre "mi plan", "mi cuota", "cuánto sale/pago mi plan" y "mis facturas". Usala solo si pregunta por lo suyo; no la recites entera:');
   L.push('- Nombre: ' + (d.nombre || 'socio') + '.');
   // La cuota del socio = SU dato contable, NO el precio de lista del catálogo (aunque el nombre no coincida con un plan comercial).
-  // VITALICIO: la jerarquía contable manda — el socio conserva plan y cobertura, pero NO tiene cuota (lo gestiona MEDICAR). Nunca "$0/mes".
-  if (d.plan && d.plan.vitalicio) L.push('- Tu plan asignado: ' + d.plan.nombre + '. TU PLAN NO TIENE CUOTA: la cobertura la gestiona MEDICAR sin cargo, no pagás una cuota mensual — NO la expreses como un monto ni como cero pesos, simplemente no tiene cuota.' + (d.cubre && d.cubre.length ? ' Cubre: ' + d.cubre.join(', ') + '.' : ''));
+  // VITALICIO: cobertura TOTAL sin cuota. De cara al socio NO se nombra la categoría NI un plan NI un precio: si pregunta
+  // la cuota → "tu cobertura no tiene cuota"; si pregunta qué cubre → cobertura integral, sin listar coberturas parciales.
+  if (d.plan && d.plan.vitalicio) L.push('- Tu cobertura: COMPLETA e integral, SIN CUOTA. No pagás una cuota mensual y tu cobertura no tiene limitaciones. Si te pregunta cuánto paga o cuál es su cuota, respondé que su cobertura NO tiene cuota (no la expreses como un monto ni como cero pesos). Si te pregunta qué cubre, respondé que tiene cobertura integral. NUNCA le nombres un plan, un precio, ni ninguna categoría interna.');
   else if (d.plan) L.push('- Tu plan asignado: ' + d.plan.nombre + '. Tu cuota (la que PAGÁS vos): $' + d.plan.precio + '/mes. Es tu cuota REAL de cuenta, NO una deuda y NO el precio de lista del catálogo.' + (d.cubre && d.cubre.length ? ' Cubre: ' + d.cubre.join(', ') + '.' : ''));
   else L.push('- Tu plan asignado: sin plan asignado.');
   // Estado de facturación EXPLÍCITO y AFIRMATIVO (aun en ausencia) para que el modelo no rellene con el precio del plan.

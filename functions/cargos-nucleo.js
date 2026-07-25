@@ -22,6 +22,9 @@ function cargoDeEpisodio(ep, epId, tarifas, anioIncidente) {
   // momento (congelado al crear). NO se factura a la persona: lo cubre el contrato del área (el cargo AL contrato
   // es F4). Va ANTES de la lógica persona → nunca cae en 'no_socio' (que le facturaría al cubierto).
   if (atrib && atrib.tipo === 'lugar') return { skip: 'cubierto_area' };
+  // VITALICIO: cobertura TOTAL — el flag manda sobre el plan. El episodio queda cubierto, sin cargo (mismo patrón que
+  // cubierto_area). Va ANTES de la lógica persona → nunca cae en no_socio/fuera_cobertura.
+  if (atrib && atrib.planSnapshot && atrib.planSnapshot.vitalicio === true) return { skip: 'cubierto_vitalicio' };
   const socioId = (atrib && atrib.socioId) ? atrib.socioId : null;
   const cob = (atrib && atrib.planSnapshot && atrib.planSnapshot.coberturas) ? atrib.planSnapshot.coberturas : {};
   const enCar = (atrib && atrib.planSnapshot && Array.isArray(atrib.planSnapshot.enCarencia)) ? atrib.planSnapshot.enCarencia : [];

@@ -29,7 +29,7 @@ t('cartel "Esta app es solo para socios"', /Esta app es solo para socios/.test(s
 
 // 5) la PWA web sigue intacta (no se rompió el flujo afiliado normal)
 t('flujo afiliado intacto: sigue el home tras cred ok', /set\(\{ view:'home', cred[,)].*navReplace\(\)/.test(socio));
-t('SW bumpeado a v35', /medicar-socio-v35/.test(fs.readFileSync(path.join(root,'socio','sw.js'),'utf8')));
+t('SW bumpeado a v36', /medicar-socio-v36/.test(fs.readFileSync(path.join(root,'socio','sw.js'),'utf8')));
 
 console.log(`\n${ok}/${ok+fail} checks OK`);
 process.exit(fail?1:0);
