@@ -1929,7 +1929,8 @@ function dDespForm(d){
   </div>
   <div class="card">
     <div class="st">Ubicación de la atención</div>
-    <div class="field"><label>Domicilio</label><input id="dom" list="calles-list" type="text" placeholder="Calle y número" autocomplete="off" oninput="dspDomChange()"><datalist id="calles-list">${afCallesOpts()}</datalist></div>
+    <div class="field"><label>Domicilio</label><input id="dom" list="calles-list" type="text" value="${d.paciente&&d.paciente.direccion?esc(d.paciente.direccion):''}" placeholder="Calle y número" autocomplete="off" oninput="dspDomChange()"><datalist id="calles-list">${afCallesOpts()}</datalist></div>
+    ${d.paciente&&d.paciente.direccion?`<div style="font-size:.62rem;color:var(--ink3);margin:-.35rem 0 .55rem">Precargado del domicilio de la ficha — editalo si la atención es en otro lugar (no modifica la ficha).</div>`:''}
     <div id="dsp-area-banner"></div>
     <div style="font-size:.62rem;color:var(--ink3);margin:-.35rem 0 .55rem">El callejero sugiere la calle; se admite texto libre (rural, calle nueva). La normalización canónica se resuelve al guardar.</div>
     <div class="field"><label>Tipo de lugar</label><select id="tlugar">
