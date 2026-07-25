@@ -6474,8 +6474,8 @@ function mktProspectosView(){
   return `${toggle}<div class="card">${rows}</div>`;
 }
 function mktProspShowDesc(on){ if(S.mkt) S.mkt.pShowDesc=!!on; render(); }
-function mktProspAbrir(id){ if(S.mkt){ S.mkt.pedit=id; render(); } }
-function mktProspVolver(){ if(S.mkt){ S.mkt.pedit=null; render(); } }
+function mktProspAbrir(id){ if(S.mkt){ S.mkt.pedit=id; S.mkt.dniModal=null; render(); } }
+function mktProspVolver(){ if(S.mkt){ S.mkt.pedit=null; S.mkt.dniModal=null; render(); } }
 function mktProspFicha(id){
   const p=((S.mkt&&S.mkt.prospectos)||[]).find(x=>x.id===id); if(!p) return `<div class="card">Prospecto no encontrado. <button class="btn-o" onclick="mktProspVolver()">Volver</button></div>`;
   const g=p.gestion||{}; const pe=p.planElegido||{}; const da=p.datosAlta||{}; const dom=da.domicilio||{};
@@ -6485,7 +6485,7 @@ function mktProspFicha(id){
   const domTxt=dom.texto?(esc(dom.texto)+(dom.pisoDepto?(' — '+esc(dom.pisoDepto)):'')+(dom.calleId?` <span style="color:var(--ink3);font-size:.68rem">[${esc(dom.calleId)}]</span>`:'')):'';
   const integ=(p.integrantes||[]).map((m,i)=>{
     const md=m.comparteDomicilio?'comparte domicilio del titular':(m.domicilio?(esc(m.domicilio.texto||'')+(m.domicilio.pisoDepto?(' — '+esc(m.domicilio.pisoDepto)):'')):'—');
-    return `<div class="card" style="background:var(--bg);margin-top:.4rem"><div style="display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700;font-size:.8rem">Integrante ${i+2} · ${esc(m.vinculo||'')}</div>${prospDniBadge(p,'int_'+(i+2))}</div><div style="font-size:.76rem;color:var(--ink2)">${esc(m.nombre||'—')} · DNI ${esc(m.dni||'—')} · nac ${prospFechaCorta(m.fechaNacimiento)}</div><div style="font-size:.72rem;color:var(--ink3)">${md}</div></div>`;
+    return `<div class="card" style="background:var(--bg);margin-top:.4rem"><div style="display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700;font-size:.8rem">Integrante ${i+2} · ${esc(m.vinculo||'')}</div>${prospDniBadge(p,'int_'+(i+2))}</div><div style="font-size:.76rem;color:var(--ink2)">${esc(m.nombre||'—')} · DNI ${esc(m.dni||'—')} · nac ${prospFechaCorta(m.fechaNacimiento)}</div><div style="font-size:.72rem;color:var(--ink3)">${md}</div>${prospFotosHTML(p,'int_'+(i+2))}</div>`;
   }).join('');
   const contactadoBox=g.contactado
     ? `<div style="background:var(--g,#1D9E75);color:#fff;border-radius:8px;padding:.5rem .65rem;font-size:.76rem;font-weight:600">✓ Contactado ${g.contactadoPor?('por '+esc(g.contactadoPor)):''} · ${prospFecha(g.contactadoEn)} <button class="btn-o" style="width:auto;padding:.2rem .5rem;margin:.35rem 0 0" onclick="mktProspAccion('${p.id}','descontactar')">Deshacer</button></div>`
@@ -6501,9 +6501,11 @@ function mktProspFicha(id){
       <div style="font-size:.72rem;color:var(--ink3);margin:.2rem 0 .6rem">Registrado ${prospFecha(p.creadoEn)}${p.solicitadoEn?(' · pidió asesor '+prospFecha(p.solicitadoEn)):''}${p.checkoutEn?(' · checkout '+prospFecha(p.checkoutEn)):''}</div>
       ${row('Teléfono',telLink)}${row('Email',mailLink)}${row('DNI',esc(p.dni||''))}${row('Fecha de nacimiento',da.fechaNacimiento?(prospFechaCorta(da.fechaNacimiento)+(da.edad!=null?(' ('+da.edad+' años)'):'')):'')}${row('Domicilio',domTxt)}
       ${pe.key?`<div class="lr"><div class="lrb"><div class="lrs">Plan elegido</div><div class="lrn" style="font-size:.85rem">${esc(pe.nombre||'')} · ${pe.integrantes||1} ${(pe.integrantes||1)>1?'personas':'persona'} · <b>${prospMoney(pe.total)}</b>/mes</div></div></div>`:''}
+      ${p.estado==='afiliacion_en_proceso'?prospFotosHTML(p,'titular'):''}
     </div>
     ${integ?`<div style="font-weight:700;font-size:.82rem;margin:.8rem 0 .2rem">Integrantes del grupo</div>${integ}`:''}
-    <div class="card" style="margin-top:.8rem"><div style="font-weight:700;font-size:.82rem;margin-bottom:.4rem">Gestión</div>${contactadoBox}<div style="margin-top:.6rem">${descBox}</div>${activar}</div>`;
+    <div class="card" style="margin-top:.8rem"><div style="font-weight:700;font-size:.82rem;margin-bottom:.4rem">Gestión</div>${contactadoBox}<div style="margin-top:.6rem">${descBox}</div>${activar}</div>
+    ${prospFotoModalHTML()}`;
 }
 async function mktProspAccion(id,accion){ if(!puede('marketing')) return; mktErr(''); try{ await fnsCall('gestionarProspecto',{prospectoId:id,accion}); }catch(e){ mktErr((e&&e.message)||'No se pudo.'); } }
 async function mktProspDescartar(id){ if(!puede('marketing')) return; const motivo=(document.getElementById('mkt-p-desc')?.value||'').trim(); if(!motivo){ mktErr('Ingresá el motivo del descarte.'); return; } try{ await fnsCall('gestionarProspecto',{prospectoId:id,accion:'descartar',motivo}); }catch(e){ mktErr((e&&e.message)||'No se pudo.'); } }
@@ -6520,6 +6522,32 @@ function prospDniBadge(p,clave){
 }
 function prospDniCompleto(p){ return prospDniClaves(p).every(c=>{ const f=((p.fotos||{})[c])||{}; return f.frente&&f.dorso; }); }
 function prospDniVerificadoTodo(p){ return prospDniClaves(p).every(c=>((p.identidadVerificada||{})[c])===true); }
+// VISOR de fotos del DNI (solo admin/superadmin — las Storage rules gatean el read; para un marketing ni se intenta,
+// ve el badge sin miniatura y sin error). getDownloadURL lazy, cacheado en S.mkt.dniUrls; click → modal grande.
+function prospFotosHTML(p,clave){
+  const f=((p.fotos||{})[clave])||{}; if(!f.frente && !f.dorso) return ''; // sin fotos → nada (el badge ya lo dice)
+  if(!esAdminOSuper()) return ''; // marketing: solo badge, sin miniatura
+  const store=((S.mkt.dniUrls||{})[p.id]||{})[clave];
+  if(!store || store.loading){ if(!store) prospCargarFotos(p.id,clave); return `<div style="font-size:.66rem;color:var(--ink3);margin-top:.3rem">Cargando fotos…</div>`; }
+  const thumb=(url,lbl)=> url ? `<div style="flex:1"><div style="font-size:.6rem;color:var(--ink3);margin-bottom:.15rem">${lbl}</div><img src="${esc(url)}" alt="DNI ${lbl}" onclick="prospFotoModal('${esc(url)}')" style="width:100%;height:82px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:zoom-in"></div>` : '';
+  const cells=[thumb(store.frente,'Frente'),thumb(store.dorso,'Dorso')].filter(Boolean).join('');
+  return cells ? `<div style="display:flex;gap:.5rem;margin-top:.4rem">${cells}</div>` : '';
+}
+async function prospCargarFotos(pid,clave){
+  if(!S.mkt) return;
+  S.mkt.dniUrls=S.mkt.dniUrls||{}; S.mkt.dniUrls[pid]=S.mkt.dniUrls[pid]||{};
+  if(S.mkt.dniUrls[pid][clave]) return; // ya en curso/resuelto (evita re-disparo en cada render)
+  S.mkt.dniUrls[pid][clave]={loading:true};
+  const p=((S.mkt.prospectos)||[]).find(x=>x.id===pid)||{}; const f=((p.fotos||{})[clave])||{};
+  const url=async(which)=>{ try{ return await firebase.storage().ref('prospectos/'+pid+'/dni/'+clave+'/'+which+'.jpg').getDownloadURL(); }catch(e){ return false; } }; // permiso/ausencia → false, sin error visible
+  const frente=f.frente?await url('frente'):false;
+  const dorso=f.dorso?await url('dorso'):false;
+  S.mkt.dniUrls[pid][clave]={ frente, dorso, loading:false };
+  render();
+}
+function prospFotoModal(url){ if(S.mkt){ S.mkt.dniModal=url; render(); } }
+function prospFotoModalCerrar(){ if(S.mkt){ S.mkt.dniModal=null; render(); } }
+function prospFotoModalHTML(){ const u=S.mkt&&S.mkt.dniModal; if(!u) return ''; return `<div style="position:fixed;inset:0;z-index:600;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:1rem" onclick="prospFotoModalCerrar()"><img src="${esc(u)}" style="max-width:100%;max-height:100%;border-radius:10px" onclick="event.stopPropagation()"><button onclick="prospFotoModalCerrar()" style="position:absolute;top:1rem;right:1rem;background:rgba(255,255,255,.9);border:none;border-radius:50%;width:36px;height:36px;font-size:1.2rem;cursor:pointer">✕</button></div>`; }
 // "Activar" (barato): reusa el prefill del alta (convPrefill/convOpenAlta), sin marcar convertido (auto-link = follow-up).
 function mktActivarProspecto(id){
   if(!puede('marketing')) return;

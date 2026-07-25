@@ -51,5 +51,31 @@ t('vendor: reader.js + zxing_reader.wasm presentes en el repo', fs.existsSync(R(
 t('panel: aviso-override + audit en Activar', /if\(!prospDniCompleto\(p\) \|\| !prospDniVerificadoTodo\(p\)\)/.test(app) && /audit\('prospecto_activado_dni_incompleto'/.test(app) && /confirm\(falta/.test(app));
 t('storage.rules: match DNI (dueño escribe, admin lee)', /match \/prospectos\/\{uid\}\/dni\/\{archivo=\*\*\}/.test(fs.readFileSync(R('storage.rules'), 'utf8')));
 
+// ---- 4) VISOR de fotos del admin (prospFotosHTML / modal) en vm ----
+const visorSrc = app.slice(app.indexOf('function prospFotosHTML(p,clave)'), app.indexOf('// "Activar" (barato)'));
+function mkVisor(esAdmin, dniUrls, dniModal){
+  const sb = { esc, esAdminOSuper: () => esAdmin, firebase: {}, render(){}, S: { mkt: { prospectos: [], dniUrls: dniUrls || {}, dniModal: dniModal || null } } };
+  vm.runInNewContext(visorSrc + '\nthis.fotos=prospFotosHTML; this.modal=prospFotoModalHTML;', sb, { timeout: 2000 });
+  return sb;
+}
+const pFoto = { id: 'u1', fotos: { titular: { frente: true, dorso: true } } };
+// admin con URLs cacheadas → miniaturas + click al modal
+const vAdmin = mkVisor(true, { u1: { titular: { frente: 'https://x/f.jpg', dorso: 'https://x/d.jpg', loading: false } } });
+const htmlAdmin = vAdmin.fotos(pFoto, 'titular');
+t('visor admin: miniaturas frente+dorso con <img> y click al modal', /<img src="https:\/\/x\/f\.jpg"[\s\S]*prospFotoModal\(/.test(htmlAdmin) && /https:\/\/x\/d\.jpg/.test(htmlAdmin) && /cursor:zoom-in/.test(htmlAdmin));
+// marketing (no admin) → badge sin miniatura, sin error (string vacío, nunca intenta cargar)
+t('visor marketing: NO renderiza miniatura (solo badge), sin error', mkVisor(false, {}).fotos(pFoto, 'titular') === '');
+// sin fotos → nada
+t('visor: sin fotos → vacío', vAdmin.fotos({ id: 'u2', fotos: {} }, 'titular') === '');
+// modal
+t('visor modal: overlay con la imagen grande + cerrar', /max-height:100%/.test(mkVisor(true, {}, 'https://x/big.jpg').modal()) && /prospFotoModalCerrar\(\)/.test(mkVisor(true, {}, 'https://x/big.jpg').modal()));
+t('visor modal: oculto sin dniModal', mkVisor(true, {}, null).modal() === '');
+
+// ---- 5) WIRING del visor ----
+t('visor: miniaturas conectadas en titular + integrante', /prospFotosHTML\(p,'titular'\)/.test(app) && /prospFotosHTML\(p,'int_'\+\(i\+2\)\)/.test(app));
+t('visor: modal anclado en la ficha', /\$\{prospFotoModalHTML\(\)\}/.test(app));
+t('visor: dniModal limpiado al abrir Y al volver de la ficha', /mktProspAbrir\(id\)\{ if\(S\.mkt\)\{ S\.mkt\.pedit=id; S\.mkt\.dniModal=null/.test(app) && /mktProspVolver\(\)\{ if\(S\.mkt\)\{ S\.mkt\.pedit=null; S\.mkt\.dniModal=null/.test(app));
+t('visor: getDownloadURL lazy + catch de permiso (false, sin error)', /getDownloadURL\(\)/.test(app) && /catch\(e\)\{ return false; \}/.test(app));
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-dni-ui: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);
