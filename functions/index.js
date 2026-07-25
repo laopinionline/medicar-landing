@@ -1387,7 +1387,7 @@ exports.generarCargosCF = onCall(async (request) => {
   ]);
   const conCargo = new Set(cgSnap.docs.map((d) => d.data().episodioId)); // idempotencia por episodioId (incluye anulados)
   const tarifas = tarSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  const rep = { generados: 0, sinTarifa: 0, sinCargo: 0, cubierto_area: 0, yaTenian: 0, sinAtribucion: 0, enCarencia: 0, errores: 0 }; // F3b: cubierto_area = episodios en área protegida (no facturan a la persona)
+  const rep = { generados: 0, sinTarifa: 0, sinCargo: 0, cubierto_area: 0, cubierto_vitalicio: 0, yaTenian: 0, sinAtribucion: 0, enCarencia: 0, errores: 0 }; // F3b: cubierto_area = área protegida; cubierto_vitalicio = socio vitalicio (cobertura total). Ambos son skip → rep[skip]++ (deben existir o daría NaN)
   const nuevos = []; // dry: lo que crearía (para la comparación de paridad)
 
   for (const doc of epsSnap.docs) {

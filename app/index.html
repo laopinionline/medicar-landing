@@ -1138,6 +1138,22 @@ function plan(){
 
   const s=p.socio, pl=p.plan;
   const activo=s.activo!==false;
+  // VITALICIO: cobertura integral sin cuota; de cara al socio NO se nombra la categoría (el staff la ve por el chip de Afiliados).
+  if(s.vitalicio===true){
+    const col=activo?'var(--r)':'var(--ink3)';
+    return `
+    <div class="card">
+      <div class="ch">Cobertura activa</div>
+      <div style="text-align:center;padding:1rem 0 .5rem">
+        <div style="font-size:1.9rem;font-style:italic;font-weight:800;color:${col};letter-spacing:-.02em;line-height:1.05">Cobertura integral</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:.35rem">Sin cuota</div>
+        <div style="margin-top:.75rem"><span class="badge ${activo?'bg':'br'}">${activo?'Activo':'Baja'}</span></div>
+      </div>
+      <div class="ir" style="margin-top:.75rem"><span class="il">N° de afiliado</span><span class="iv">${esc(s.numeroAfiliado||'—')}</span></div>
+      <div class="ir"><span class="il">Tipo</span><span class="iv">${esc(planTipoLbl(s.tipoAfiliado))}</span></div>
+    </div>
+    ${planCtaContacto()}`;
+  }
   const nombrePlan=pl?(pl.nombre||'—'):'—';
   const desc=pl?(pl.descripcion||''):'';
   const color=activo?'var(--r)':'var(--ink3)';
@@ -2087,6 +2103,12 @@ async function resolverAtribucion(personaId, domCanon){
     const socioId=qs.docs[0].id;
     const socio=qs.docs[0].data();
     let planSnapshot=null;
+    // VITALICIO: cobertura TOTAL, sin límites — el flag manda sobre el planId. El episodio queda cubierto sin carencia;
+    // cargoDeEpisodio saltea (cubierto_vitalicio) → nunca cae en no_socio/fuera_cobertura.
+    if(socio.vitalicio===true){
+      planSnapshot={ vitalicio:true, enCarencia:[], vigenteAlMomento: firebase.firestore.Timestamp.now() };
+      return { tipo:'persona', socioId, planSnapshot };
+    }
     if(socio.planId){
       const ps=await db.collection('planes').doc(socio.planId).get();
       if(ps.exists){
@@ -4258,7 +4280,7 @@ async function generarCargos(){
   if(!puede('facturar')) return; // la regla es la defensa real
   facErr('');
   if(!Array.isArray(S.fac.tarifas)){ facErr('Esperá a que carguen las tarifas.'); return; }
-  const rep={ generados:0, sinTarifa:0, sinCargo:0, cubierto_area:0, yaTenian:0, sinAtribucion:0, errores:0 }; // F3b: cubierto_area = episodios en área protegida
+  const rep={ generados:0, sinTarifa:0, sinCargo:0, cubierto_area:0, cubierto_vitalicio:0, yaTenian:0, sinAtribucion:0, errores:0 }; // F3b: cubierto_area = episodios en área protegida; cubierto_vitalicio = socio vitalicio (cobertura total)
   try{
     // SOLO LECTURA de episodios cerrados + cargos existentes (idempotencia por episodioId).
     const [epsSnap, cgSnap] = await Promise.all([
@@ -4278,6 +4300,7 @@ async function generarCargos(){
       const atrib=ep.atribucion||null;
       const sinAtrib=!atrib;
       if(atrib && atrib.tipo==='lugar'){ rep.cubierto_area=(rep.cubierto_area||0)+1; continue; } // F3b (paridad núcleo): área protegida → NO factura a la persona (contrato = F4)
+      if(atrib && atrib.planSnapshot && atrib.planSnapshot.vitalicio===true){ rep.cubierto_vitalicio=(rep.cubierto_vitalicio||0)+1; continue; } // VITALICIO: cobertura total → sin cargo (paridad núcleo)
       const socioId=(atrib && atrib.socioId)?atrib.socioId:null;
       const cob=(atrib && atrib.planSnapshot && atrib.planSnapshot.coberturas)?atrib.planSnapshot.coberturas:{};
       const enCar=(atrib && atrib.planSnapshot && Array.isArray(atrib.planSnapshot.enCarencia))?atrib.planSnapshot.enCarencia:[];
@@ -4310,7 +4333,7 @@ async function generarCargos(){
       catch(e){ rep.errores++; console.warn('[generarCargos] fallo al crear cargo de',epId,e); }
     }
     audit('cargos_generados','cargos','',rep.generados+' generados, '+rep.sinTarifa+' sin tarifa');
-    S.fac.report=`Generados: <b>${rep.generados}</b>${rep.enCarencia?(' (en carencia: '+rep.enCarencia+')'):''} · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo}${rep.cubierto_area?(' · Cubierto por área: <b>'+rep.cubierto_area+'</b>'):''} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
+    S.fac.report=`Generados: <b>${rep.generados}</b>${rep.enCarencia?(' (en carencia: '+rep.enCarencia+')'):''} · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo}${rep.cubierto_area?(' · Cubierto por área: <b>'+rep.cubierto_area+'</b>'):''}${rep.cubierto_vitalicio?(' · Cubierto (vitalicio): <b>'+rep.cubierto_vitalicio+'</b>'):''} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
 }
@@ -4330,7 +4353,7 @@ async function generarCargosCF(){
   try{
     const r=await fnsCall('generarCargosCF',{dry:false});
     audit('cargos_generados','cargos','',(r.generados||0)+' generados (CF)');
-    S.fac.report=`Generados: <b>${r.generados||0}</b>${r.enCarencia?(' (en carencia: '+r.enCarencia+')'):''} · Salteados sin tarifa: ${r.sinTarifa||0} · Sin cargo (cubierto por abono): ${r.sinCargo||0}${r.cubierto_area?(' · Cubierto por área: <b>'+r.cubierto_area+'</b>'):''} · Ya tenían: ${r.yaTenian||0} · Sin atribución (históricos): <b>${r.sinAtribucion||0}</b>${r.errores?(' · Errores: '+r.errores):''} · <i>motor server-side</i>`;
+    S.fac.report=`Generados: <b>${r.generados||0}</b>${r.enCarencia?(' (en carencia: '+r.enCarencia+')'):''} · Salteados sin tarifa: ${r.sinTarifa||0} · Sin cargo (cubierto por abono): ${r.sinCargo||0}${r.cubierto_area?(' · Cubierto por área: <b>'+r.cubierto_area+'</b>'):''}${r.cubierto_vitalicio?(' · Cubierto (vitalicio): <b>'+r.cubierto_vitalicio+'</b>'):''} · Ya tenían: ${r.yaTenian||0} · Sin atribución (históricos): <b>${r.sinAtribucion||0}</b>${r.errores?(' · Errores: '+r.errores):''} · <i>motor server-side</i>`;
     render();
   }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
 }
@@ -5437,7 +5460,7 @@ function afPanel(){
     const inact=s.activo===false;
     const meta=['N° '+esc(s.numeroAfiliado||'—'), '· '+afPlanNom(s.planId), '· desde '+afFmtFecha(s.vigenteDesde), '· '+esc(s.tipoAfiliado||'—'), inact?'· inactivo':''].filter(Boolean).join(' ');
     const acts=`<div style="display:flex;gap:.4rem"><button class="${btn}" onclick="afEditar('${s.id}')">Editar</button><button class="${btn}" onclick="afBaja('${s.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
-    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${vitalicioChip(s)} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin socios${showInact?'':' activos'}</div>`;
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="afShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
   const head=`<div class="panel-h"><b>Afiliados</b><span class="live-tag">en vivo</span></div>`;
@@ -5991,6 +6014,7 @@ function leerFacturarA(prefix){
   return { tipo:'empresa', empresaId:empId, razonSocial:(emp&&emp.razonSocial)||'' }; // razonSocial denorm al momento
 }
 function facturarAChip(fa){ return (fa && fa.tipo==='empresa') ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:var(--ink,#333);color:#fff">Factura a: ${esc(fa.razonSocial||'empresa')}</span>` : ''; }
+function vitalicioChip(s){ return (s && s.vitalicio===true) ? `<span style="font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.06rem .4rem;border-radius:6px;background:#0F6E56;color:#fff">VITALICIO</span>` : ''; } // condición interna: cobertura integral sin cuota (el socio no la ve)
 
 // Muestra/oculta los grupos del alta según el tipo (DOM puro, sin render → no borra lo tipeado).
 function afTipoChange(v){

@@ -47,6 +47,20 @@ console.log('\nF3b — atribución por lugar');
   eq('cubierto_area gana sobre siempre_extra/no_socio', r, { skip: 'cubierto_area' });
 }
 
+console.log('\nVITALICIO — cobertura total');
+{ // vitalicio → skip cubierto_vitalicio (cobertura total, sin cargo), aunque la prestación NO esté en coberturas
+  const r = cargoDeEpisodio(ep({ atribucion: { socioId: 's1', planSnapshot: { vitalicio: true, enCarencia: [] } } }), 'eV1', TAR, 2026);
+  eq('vitalicio → skip cubierto_vitalicio', r, { skip: 'cubierto_vitalicio' });
+}
+{ // el flag vitalicio MANDA sobre siempre_extra (traslado) — cobertura total, sin límites
+  const r = cargoDeEpisodio(ep({ codigoPresuntivo: 'traslado', atribucion: { socioId: 's1', planSnapshot: { vitalicio: true, enCarencia: [] } } }), 'eV2', TAR, 2026);
+  eq('cubierto_vitalicio gana sobre siempre_extra', r, { skip: 'cubierto_vitalicio' });
+}
+{ // lugar (área) sigue teniendo prioridad sobre vitalicio (el contrato del área cubre primero)
+  const r = cargoDeEpisodio(ep({ atribucion: { tipo: 'lugar', socioId: 's1', planSnapshot: { vitalicio: true, enCarencia: [] } } }), 'eV3', TAR, 2026);
+  eq('lugar gana sobre vitalicio (área cubre primero)', r, { skip: 'cubierto_area' });
+}
+
 console.log('\nskips');
 eq('código sin mapeo → sinTarifa', cargoDeEpisodio(ep({ codigoPresuntivo: 'gris' }), 'e6', TAR, 2026), { skip: 'sinTarifa' });
 eq('sin código → sinTarifa', cargoDeEpisodio(ep({ codigoPresuntivo: '', desenlace: null }), 'e7', TAR, 2026), { skip: 'sinTarifa' });
