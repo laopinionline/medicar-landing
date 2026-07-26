@@ -1008,6 +1008,16 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // invitaciones_afiliado/{token}: link para que un INTEGRANTE del grupo (sin cuenta) cree su propia cuenta de socio.
+    // docId = token fuerte (crypto). TODO por CF Admin SDK: generar (titular o admin) / validar (pública) / canjear
+    // (crea usuarios/{uid} con personaId + rol afiliado; merge de roles si la cuenta existe) / revocar. read: el
+    // titular dueño (su bandeja, para revocar la pendiente) + staff del padrón. create/update/delete cerrados: la CF
+    // bypassa por Admin SDK. El invitado NO la lee (validar es CF, cero-oráculo). Un-uso + TTL los enforcea la CF.
+    match /invitaciones_afiliado/{token} {
+      allow read:  if isSignedIn() && ( resource.data.titularPersonaId == miPersonaId() || tienePermiso('gestionar_afiliados') );
+      allow create, update, delete: if false;
+    }
+
     // BITÁCORA operativa — bitacora/{id}: canal ASINCRÓNICO operativo→admin (novedades: "apellido mal cargado", etc.).
     //  - create: operativo (chofer/medico/despachante; admin/superadmin también) reporta LO PROPIO — reportadoPorUid ==
     //    uid, nace 'pendiente', SIN campos de resolución. Shape mínimo validado (texto no vacío; refTipo acotado).
@@ -1054,7 +1064,7 @@ service cloud.firestore {
     match /{coleccion}/{resto=**} {
       allow read:  if esSuperadmin();
       allow write: if esSuperadmin()
-                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios', 'reportes_sintomas', 'chequeos_parametros', 'pagos', 'creditos', 'creditos_saldo', 'bitacora']);
+                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios', 'reportes_sintomas', 'chequeos_parametros', 'pagos', 'creditos', 'creditos_saldo', 'bitacora', 'invitaciones_afiliado']);
     }
   }
 }

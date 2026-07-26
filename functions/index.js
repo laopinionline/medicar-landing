@@ -39,6 +39,7 @@ const { cargoDeEpisodio, fmtIncidente } = require('./cargos-nucleo'); // Factura
 const CallejeroCore = require('./callejero-core'); // Callejero canónico server-side (calco de callejero.js; paridad por smoke). Re-resuelve el domicilio del checkout.
 const { resolverDomCheckout } = require('./checkout-dom'); // Checkout: resolución pura del domicilio (recompute-and-use), testeable
 const { parsePDF417, matchIntegrante } = require('./dni-pdf417'); // DNI: parse del PDF417 + cruce contra la ficha (server-side)
+const { estadoInvitacion, ruedaAlTitular } = require('./invitacion-core'); // Invitación de integrante: estado del token + privacidad de turnos
 const DNI_BUCKET = 'medicar-sistema.firebasestorage.app'; // bucket explícito (initializeApp() sin storageBucket)
 const MP = require('./mercadopago'); // Mercado Pago (Checkout Pro por redirect) — puente de afiliación
 const { defineSecret } = require('firebase-functions/params');
@@ -318,14 +319,17 @@ exports.crearLeadWeb = onRequest(async (req, res) => {
 async function resolverDestino(callerPersonaId, paraPersonaId) {
   if (!paraPersonaId || paraPersonaId === callerPersonaId) {
     const per = (await db.collection('personas').doc(callerPersonaId).get()).data() || {};
-    // Fase A — titularPersonaId = la CABEZA del grupo: si el caller es dependiente-con-login, su titular; si es
-    // titular (o no tiene socio), él mismo. Así TODOS los turnos del grupo ruedan a la misma cabeza.
+    // PRIVACIDAD: titularPersonaId = la CABEZA del grupo SOLO si el turno debe rodar al titular. Rueda salvo que el
+    // caller sea ADULTO con cuenta propia (= independiente): como está autenticado, tiene cuenta → rueda ⇔ es MENOR.
+    // Menor → rueda a su titular (el titular conserva lo asistencial). Adulto → queda privado (titularPersonaId = él).
     let titularPersonaId = callerPersonaId;
-    try {
-      const sq = await db.collection('socios').where('personaId', '==', callerPersonaId).get();
-      const s = sq.docs.map((d) => d.data()).find((x) => x.activo !== false) || (sq.docs[0] && sq.docs[0].data());
-      if (s && s.titularPersonaId) titularPersonaId = s.titularPersonaId;
-    } catch (_) {}
+    if (ruedaAlTitular(edadDeISO(per.fechaNacimiento), true)) {
+      try {
+        const sq = await db.collection('socios').where('personaId', '==', callerPersonaId).get();
+        const s = sq.docs.map((d) => d.data()).find((x) => x.activo !== false) || (sq.docs[0] && sq.docs[0].data());
+        if (s && s.titularPersonaId) titularPersonaId = s.titularPersonaId;
+      } catch (_) {}
+    }
     return { personaId: callerPersonaId, nombreVista: nombreDe(per), titularPersonaId };
   }
   const q = await db.collection('socios')
@@ -333,8 +337,13 @@ async function resolverDestino(callerPersonaId, paraPersonaId) {
     .where('titularPersonaId', '==', callerPersonaId).get();
   const dep = q.docs.map((d) => d.data()).find((s) => s.activo !== false);
   if (!dep) throw new HttpsError('permission-denied', 'Solo podés reservar/cancelar para vos o tus dependientes.');
-  let nombreVista = dep.nombreVista || '';
-  if (!nombreVista) { const per = (await db.collection('personas').doc(paraPersonaId).get()).data() || {}; nombreVista = nombreDe(per); }
+  const per = (await db.collection('personas').doc(paraPersonaId).get()).data() || {};
+  // PRIVACIDAD: el titular NO reserva por un integrante INDEPENDIENTE (adulto con cuenta propia). Menor (con/sin
+  // cuenta) o adulto sin cuenta → el titular gestiona (rueda). El cumple-18 flip es automático (edad en vivo).
+  if (!ruedaAlTitular(edadDeISO(per.fechaNacimiento), await personaTieneLogin(paraPersonaId))) {
+    throw new HttpsError('permission-denied', 'Esa persona tiene su propia cuenta; gestiona sus turnos desde su app.');
+  }
+  const nombreVista = dep.nombreVista || nombreDe(per);
   // el dependiente rueda a SU titular = el caller (la query ya validó titularPersonaId==callerPersonaId).
   return { personaId: paraPersonaId, nombreVista, titularPersonaId: callerPersonaId };
 }
@@ -563,6 +572,10 @@ exports.recordarTurno = onTaskDispatched(
 
 // Ventana del código sin canjear (7 días). Y ms del helper de expiración.
 const REF_CODIGO_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Invitación de integrante: TTL 7 días, token fuerte (192 bits URL-safe), link a la PWA.
+const INVITA_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const INVITA_LINK_BASE = 'https://medicaronline.ar/socio/?invita=';
+const generarTokenInvita = () => crypto.randomBytes(24).toString('base64url');
 const refRandomInt = (n) => crypto.randomInt(n); // aleatoriedad fuerte para el código
 
 // Rate limit del oracle público validarCodigoReferente: máx 10 intentos por IP cada 10 min. Traba simple
@@ -659,6 +672,99 @@ exports.canjearCodigoReferente = onCall(async (request) => {
   await admin.auth().setCustomUserClaims(uid, { ...(user.customClaims || {}), rol: 'referente' });
   logger.info('[canjearCodigoReferente]', { uid, titularPersonaId, codigo });
   return { titularPersonaId, titularNombre };
+});
+
+/* ===================== INVITACIÓN DE INTEGRANTE — cuenta propia de socio =====================
+   Doctrina: cada integrante del grupo puede tener su propia cuenta/app. La invitación (link un-uso, TTL 7d) crea la
+   cuenta de AFILIADO real (usuarios/{uid} con personaId), no un referente. Sin filtro de edad (menor y adulto igual). */
+
+// generarInvitacionAfiliado — el TITULAR (para su dependiente) o STAFF (gestionar_afiliados, cualquiera) genera el link.
+exports.generarInvitacionAfiliado = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const u = (await db.collection('usuarios').doc(uid).get()).data() || {};
+  const roles = Array.isArray(u.roles) ? u.roles : (u.rol ? [u.rol] : []);
+  const esStaff = roles.some((r) => r === 'admin' || r === 'superadmin') || (u.permisos && u.permisos.gestionar_afiliados === true);
+  const callerPersonaId = u.personaId || null;
+  const personaId = String((request.data || {}).personaId || '').trim();
+  if (!personaId) throw new HttpsError('invalid-argument', 'Falta el integrante.');
+  const sq = await db.collection('socios').where('personaId', '==', personaId).get();
+  const dep = sq.docs.map((d) => d.data()).find((s) => s.activo !== false) || (sq.docs[0] && sq.docs[0].data());
+  if (!dep) throw new HttpsError('not-found', 'Integrante no encontrado.');
+  if (!esStaff && (!callerPersonaId || dep.titularPersonaId !== callerPersonaId)) throw new HttpsError('permission-denied', 'Solo podés invitar a integrantes de tu grupo.');
+  if (await personaTieneLogin(personaId)) throw new HttpsError('failed-precondition', 'Esa persona ya tiene su cuenta.');
+  const per = (await db.collection('personas').doc(personaId).get()).data() || {};
+  const nombre = nombreDe(per);
+  const titularPersonaId = dep.titularPersonaId || callerPersonaId || personaId;
+  let token = '', ref = null;
+  for (let i = 0; i < 4; i++) { token = generarTokenInvita(); ref = db.collection('invitaciones_afiliado').doc(token); if (!(await ref.get()).exists) break; token = ''; }
+  if (!token) throw new HttpsError('internal', 'No se pudo generar la invitación. Reintentá.');
+  await ref.set({ personaId, titularPersonaId, nombre, estado: 'pendiente', creadoEn: FV(), creadoPor: uid, expiraEn: admin.firestore.Timestamp.fromMillis(Date.now() + INVITA_TTL_MS) });
+  logger.info('[generarInvitacionAfiliado]', { personaId, titularPersonaId, porStaff: !!esStaff });
+  return { token, link: INVITA_LINK_BASE + token, nombre };
+});
+
+// validarInvitacion — PÚBLICA (rate-limit, cero-oráculo): antes de crear cuenta, valida el token y devuelve el nombre
+// para la bienvenida. NO consume. Cualquier estado no-pendiente → { valido:false } (sin distinción).
+exports.validarInvitacion = onCall(async (request) => {
+  await chequearRateLimitValidar(request);
+  const token = String((request.data || {}).token || '').trim();
+  if (token.length < 16) return { valido: false };
+  const snap = await db.collection('invitaciones_afiliado').doc(token).get();
+  if (estadoInvitacion(snap.exists ? snap.data() : null, Date.now()) !== 'pendiente') return { valido: false };
+  return { valido: true, nombre: (snap.data() || {}).nombre || '' };
+});
+
+// canjearInvitacion — el INVITADO (ya autenticado con SU cuenta email/pass) canjea: crea/mergea usuarios/{uid} con
+// personaId + rol afiliado (Admin SDK), denorm cuentaPropia en el socio, consume el token. Merge de roles si existe.
+exports.canjearInvitacion = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const uid = request.auth.uid;
+  const email = (request.auth.token && request.auth.token.email) || '';
+  const token = String((request.data || {}).token || '').trim();
+  if (!token) throw new HttpsError('invalid-argument', 'Invitación inválida.');
+  const ref = db.collection('invitaciones_afiliado').doc(token);
+  const snap = await ref.get();
+  const inv = snap.exists ? (snap.data() || {}) : null;
+  const est = estadoInvitacion(inv, Date.now());
+  if (est === 'usado') { if (inv && inv.canjeadoPor === uid) return { ok: true, personaId: inv.personaId }; throw new HttpsError('already-exists', 'Esa invitación ya fue usada.'); }
+  if (est !== 'pendiente') throw new HttpsError('failed-precondition', est === 'vencido' ? 'La invitación venció.' : 'Invitación inválida.');
+  const personaId = inv.personaId;
+  const uDoc = await db.collection('usuarios').doc(uid).get();
+  const uData = uDoc.exists ? (uDoc.data() || {}) : null;
+  if (uData && uData.personaId && uData.personaId !== personaId) throw new HttpsError('failed-precondition', 'Tu cuenta ya está vinculada a otro socio.');
+  if (await personaTieneLogin(personaId) && !(uData && uData.personaId === personaId)) throw new HttpsError('failed-precondition', 'Esa persona ya tiene su cuenta.');
+  const per = (await db.collection('personas').doc(personaId).get()).data() || {};
+  const nombre = nombreDe(per);
+  // Crear/mergear la cuenta (Admin SDK bypassa la regla create:superadmin). Merge de roles = identidad unificada.
+  if (uData) {
+    const roles = Array.isArray(uData.roles) ? uData.roles.slice() : (uData.rol ? [uData.rol] : []);
+    if (!roles.includes('afiliado')) roles.push('afiliado');
+    await db.collection('usuarios').doc(uid).set({ personaId, roles }, { merge: true });
+  } else {
+    await db.collection('usuarios').doc(uid).set({ personaId, rol: 'afiliado', roles: ['afiliado'], email, nombre, activo: true, creadoEn: FV() });
+  }
+  // Denorm en el socio del integrante (para el selector del titular + privacidad): cuentaPropia + fechaNacimiento + uid.
+  try { const sq = await db.collection('socios').where('personaId', '==', personaId).get(); const sd = sq.docs.find((d) => d.data().activo !== false) || sq.docs[0]; if (sd) await sd.ref.set({ cuentaPropia: true, cuentaUid: uid, fechaNacimiento: per.fechaNacimiento || null }, { merge: true }); } catch (e) { logger.warn('[canjearInvitacion] denorm socio falló', { err: e.message }); }
+  await ref.set({ estado: 'usado', canjeadoPor: uid, canjeadoEn: FV() }, { merge: true }); // consumir (post-creación: un-uso lo garantiza también personaTieneLogin)
+  logger.info('[canjearInvitacion]', { uid, personaId });
+  return { ok: true, personaId };
+});
+
+// revocarInvitacion — el TITULAR revoca una invitación PENDIENTE de su grupo.
+exports.revocarInvitacion = onCall(async (request) => {
+  const callerPersonaId = await assertAfiliado(request);
+  const token = String((request.data || {}).token || '').trim();
+  if (!token) throw new HttpsError('invalid-argument', 'Falta la invitación.');
+  const ref = db.collection('invitaciones_afiliado').doc(token);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('not-found', 'Invitación no encontrada.');
+  const inv = snap.data() || {};
+  if (inv.titularPersonaId !== callerPersonaId) throw new HttpsError('permission-denied', 'No es tu invitación.');
+  if (inv.estado !== 'pendiente') throw new HttpsError('failed-precondition', 'Esa invitación ya no está pendiente.');
+  await ref.set({ estado: 'revocado', revocadoEn: FV() }, { merge: true });
+  logger.info('[revocarInvitacion]', { callerPersonaId });
+  return { ok: true };
 });
 
 // (3) revocarVinculoReferente — el TITULAR corta un código/vínculo. Pasa el código Y el espejo a 'revocado' en
