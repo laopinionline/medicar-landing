@@ -31,8 +31,15 @@ function agruparFacturas({ abonos, cargos, socMap, empMap, empresasYaFacturadas,
     g.items.push(item);
   };
 
-  // VITALICIO: socio sin cuota (lo gestiona MEDICAR). El motor lo SALTEA — no genera factura de ningún tipo (ni $0).
-  const esVitalicio = (socioId) => { const s = socMap && socMap[socioId]; return !!(s && s.vitalicio === true); };
+  // VITALICIO (grupal, diseño B): socio sin cuota (lo gestiona MEDICAR). Flag PROPIO O heredado del TITULAR del grupo
+  // (por titularSocioId; el socMap ya trae todos los socios de la corrida → cero reads extra). El motor lo SALTEA —
+  // no genera factura de ningún tipo (ni $0), ni para el titular ni para sus dependientes.
+  const esVitalicio = (socioId) => {
+    const s = socMap && socMap[socioId]; if (!s) return false;
+    if (s.vitalicio === true) return true;
+    const t = s.titularSocioId && socMap[s.titularSocioId];
+    return !!(t && t.vitalicio === true);
+  };
 
   (abonos || []).forEach((a) => {
     if (a.estado === 'anulado') return;
