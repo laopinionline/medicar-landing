@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>MEDICAR · Preview del shell (propuesta visual)</title>
+<style>
+/* Tokens del Tramo 1 (docs/marca.md · sistema-visual de Bidondo) */
+:root{
+  --rojo:#ED1C24; --rojo-hondo:#C8151C; --naranja:#F7941E;
+  --tinta:#1A1A1A; --gris:#6B7075; --ink3:#9AA0A6; --linea:#E7E9EC; --nieve:#F7F8FA; --blanco:#FFFFFF;
+  --verde:#1D9E75; --verde-hondo:#1F7A4D; --verde-nube:#EAFAF0; --ambar:#E6A100; --ambar-nube:#FFF8E6;
+  --radio:16px; --sombra:0 1px 2px rgba(20,22,25,.04), 0 8px 24px rgba(20,22,25,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg,#eef0f3);color:var(--tinta);padding:1.2rem .8rem 3rem;-webkit-font-smoothing:antialiased}
+.wrap{max-width:440px;margin:0 auto}
+h1{font-size:1.05rem;font-weight:800;letter-spacing:-.01em;margin-bottom:.15rem}
+.muted{color:var(--gris);font-size:.78rem;line-height:1.5}
+.ctl{background:var(--blanco);border:1px solid var(--linea);border-radius:12px;padding:.7rem .8rem;margin:.9rem 0;box-shadow:var(--sombra)}
+.ctl .lbl{font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);font-weight:800;margin-bottom:.5rem}
+.seg{display:flex;gap:.35rem;flex-wrap:wrap}
+.seg button{flex:1;min-width:90px;border:1.5px solid var(--linea);background:var(--nieve);color:var(--gris);border-radius:9px;padding:.45rem .3rem;font-size:.72rem;font-weight:700;cursor:pointer;font-family:inherit}
+.seg button.on{border-color:var(--rojo);background:#fff;color:var(--rojo)}
+/* ---- Marco de teléfono ---- */
+.phone{position:relative;background:var(--nieve);border-radius:26px;overflow:hidden;box-shadow:0 10px 40px -12px rgba(20,22,25,.35),0 0 0 8px #0d0d0f,0 0 0 9px #26272b;height:660px;display:flex;flex-direction:column}
+/* ===== HEADER EMERGENCIAS — variantes ===== */
+.emerg{flex:none;background:var(--rojo);color:#fff;text-decoration:none;display:flex;align-items:center}
+/* A · banda fina */
+.emerg.vA{height:34px;justify-content:center;gap:.5rem;padding:0 1rem}
+.emerg.vA .ico{width:15px;height:15px}
+.emerg.vA .t{font-size:.72rem;font-weight:800;letter-spacing:.14em}
+.emerg.vA .n{font-size:.72rem;font-weight:600;opacity:.9;letter-spacing:.04em}
+.emerg.vA .sep{opacity:.5}
+/* B · hairline mínima (label chico izq · número protagonista der) */
+.emerg.vB{height:30px;justify-content:space-between;padding:0 1rem}
+.emerg.vB .t{font-size:.6rem;font-weight:800;letter-spacing:.16em;opacity:.92}
+.emerg.vB .n{font-size:.82rem;font-weight:800;letter-spacing:.02em}
+/* C · pulso a la izquierda + número */
+.emerg.vC{height:32px;justify-content:center;gap:.55rem}
+.emerg.vC .ico{width:17px;height:13px}
+.emerg.vC .t{font-size:.66rem;font-weight:800;letter-spacing:.13em}
+.emerg.vC .n{font-size:.78rem;font-weight:800}
+.emerg.vC .sep{opacity:.45}
+/* ---- Contenido ---- */
+.body{flex:1;overflow-y:auto;padding:.9rem .9rem 1rem}
+.sec-h{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);font-weight:800;margin:1.1rem .1rem .5rem}
+.card{background:var(--blanco);border:1px solid var(--linea);border-radius:14px;box-shadow:var(--sombra)}
+.cred{background:linear-gradient(135deg,#232527,#0d0d0f);color:#fff;border-radius:16px;padding:1rem 1.1rem;position:relative;overflow:hidden}
+.cred .brand{display:flex;align-items:center;gap:.35rem;font-weight:800;font-size:.95rem}
+.cred .brand svg{width:15px;height:18px}
+.cred .est{font-size:.66rem;color:var(--verde);font-weight:700;margin-top:.15rem}
+.cred .nom{font-size:1.15rem;font-weight:800;margin-top:.7rem}
+.cred .num{font-family:ui-monospace,monospace;font-size:1.1rem;letter-spacing:.08em;margin-top:.5rem}
+.cred .lbl{font-size:.56rem;text-transform:uppercase;letter-spacing:.1em;opacity:.6}
+.pill{display:inline-flex;align-items:center;gap:.35rem;font-size:.7rem;font-weight:700;padding:.3rem .6rem;border-radius:999px}
+.rowc{padding:.85rem 1rem;border-bottom:1px solid var(--linea);display:flex;align-items:center;gap:.7rem;font-size:.88rem;font-weight:600}
+.rowc:last-child{border-bottom:none}
+.rowc .chev{margin-left:auto;color:var(--ink3)}
+/* ===== TAB BAR ===== */
+.tabbar{flex:none;display:flex;background:var(--blanco);border-top:1px solid var(--linea)}
+.tabbar button{flex:1;background:none;border:none;padding:.5rem .2rem .6rem;display:flex;flex-direction:column;align-items:center;gap:.18rem;cursor:pointer;color:var(--gris);font-family:inherit}
+.tabbar button.on{color:var(--rojo)}
+.tabbar .ic{width:24px;height:24px}
+.tabbar .tl{font-size:.6rem;font-weight:600}
+.tabbar button.on .tl{font-weight:800}
+.note{font-size:.72rem;color:var(--gris);background:var(--ambar-nube);border:1px solid #f0e3bd;border-radius:10px;padding:.6rem .75rem;margin-top:.7rem;line-height:1.5}
+.iconset{display:flex;gap:1.1rem;justify-content:center;padding:.4rem 0}
+.iconset .it{display:flex;flex-direction:column;align-items:center;gap:.3rem;color:var(--gris)}
+.iconset .it svg{width:26px;height:26px}
+.iconset .it span{font-size:.58rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MEDICAR · Preview del shell</h1>
+  <p class="muted">Propuesta visual para aprobación — <b>no toca el shell real</b>. Elegí variante de banda y navegá los 5 tabs con el set de íconos propio (derivado del chevrón, mismo trazo que los íconos actuales). Tokens del manual (docs/marca.md).</p>
+
+  <div class="ctl">
+    <div class="lbl">Header EMERGENCIAS · variante</div>
+    <div class="seg" id="segH">
+      <button data-h="vA" class="on">A · banda fina</button>
+      <button data-h="vB">B · hairline mínima</button>
+      <button data-h="vC">C · pulso + número</button>
+    </div>
+  </div>
+
+  <div class="phone">
+    <a class="emerg vA" id="emerg" href="#" onclick="return false">
+      <span class="ico" data-slot="ico"></span>
+      <span class="t">EMERGENCIAS</span><span class="sep" data-slot="sep">·</span><span class="n">443044</span>
+    </a>
+    <div class="body" id="body"></div>
+    <nav class="tabbar" id="tabbar"></nav>
+  </div>
+
+  <div class="ctl" style="margin-top:1.1rem">
+    <div class="lbl">Set de íconos propio (line-icons · trazo del chevrón · » para "Más")</div>
+    <div class="iconset" id="iconset"></div>
+  </div>
+
+  <p class="muted" style="margin-top:1rem">Todo esto es un <b>mockup estático</b>: sirve para decidir la piel. Con tu visto bueno se lleva al shell real (header + set de íconos), sin tocar la lógica.</p>
+</div>
+
+<script>
+/* ===== SET DE ÍCONOS PROPIO — 24x24, stroke=currentColor 2px, round caps/joins (mismo trazo que IC del socio) ===== */
+const A='stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+const ICONS={
+  inicio:`<svg viewBox="0 0 24 24" ${A}><path d="M4 11.3 12 5l8 6.3"/><path d="M6 10.2V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-8.8"/><path d="M10 20v-4.2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V20"/></svg>`,
+  ia:`<svg viewBox="0 0 24 24" ${A}><path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/><path d="M10 9.5 12.5 11 10 12.5"/></svg>`,
+  salud:`<svg viewBox="0 0 24 24" ${A}><path d="M12 20s-6.6-4-6.6-9A3.4 3.4 0 0 1 12 8.2 3.4 3.4 0 0 1 18.6 11c0 5-6.6 9-6.6 9Z"/><path d="M7.5 12h2l1.3-2.2 1.8 4 1-1.8h1.9"/></svg>`,
+  turnos:`<svg viewBox="0 0 24 24" ${A}><rect x="4" y="5.5" width="16" height="14.5" rx="2.5"/><path d="M4 9.5h16"/><path d="M8.5 3.2v4M15.5 3.2v4"/></svg>`,
+  mas:`<svg viewBox="0 0 24 24" ${A}><path d="M7 8l4 4-4 4"/><path d="M13 8l4 4-4 4"/></svg>`
+};
+/* Chevrón de marca (line, para la banda C y la credencial) */
+const CHEV=`<svg viewBox="0 0 24 24" ${A}><path d="M8 6l6 6-6 6"/><path d="M14 6l0 0"/></svg>`;
+const PULSO=`<svg viewBox="0 0 24 24" stroke="#fff" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l2-5 3 10 2.5-7 1.5 2h5"/></svg>`;
+const CRUZ=`<svg viewBox="0 0 24 24" stroke="#fff" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M12 6v12M6 12h12"/></svg>`;
+const CHEVW=`<svg viewBox="0 0 24 24" stroke="#fff" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l6 6-6 6"/></svg>`;
+
+const TABS=[['inicio','Inicio'],['ia','MEDICAR IA'],['salud','Mi salud'],['turnos','Turnos'],['mas','Más']];
+let tab='inicio', hv='vA';
+
+const CONTENT={
+  inicio:()=>`
+    <div class="cred">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div><div class="brand">${CHEVW}medicar</div><div class="est">● Afiliado activo</div></div>
+      </div>
+      <div class="nom">Pérez, Lucía</div>
+      <div class="lbl" style="margin-top:.7rem">N° de afiliado</div><div class="num">90 002</div>
+      <div style="font-size:.58rem;opacity:.5;position:absolute;bottom:.6rem;right:.8rem">tocá para el QR ⟳</div>
+    </div>
+    <div class="sec-h">Calificá tu atención</div>
+    <div class="card" style="padding:.9rem 1rem">
+      <div style="font-weight:700;font-size:.85rem">¿Cómo fue tu atención del 24/07?</div>
+      <div style="color:#d8d8d8;font-size:1.5rem;letter-spacing:.15rem;margin:.35rem 0">★★★★★</div>
+    </div>
+    <div class="sec-h">Estado</div>
+    <div class="card" style="border:1.5px solid var(--ambar);padding:.85rem 1rem">
+      <div style="font-weight:700;font-size:.85rem">Tenés un chequeo pendiente</div>
+      <div style="color:var(--gris);font-size:.74rem;margin-top:.2rem">Pasó más de una semana de tu último chequeo.</div>
+    </div>`,
+  ia:()=>`
+    <div style="display:flex;flex-direction:column;gap:.6rem;padding-top:.4rem">
+      <div style="align-self:flex-start;max-width:80%;background:var(--blanco);border:1px solid var(--linea);border-radius:14px 14px 14px 4px;padding:.6rem .8rem;font-size:.85rem">Hola Lucía 👋 ¿En qué te puedo ayudar con tu cobertura?</div>
+      <div style="align-self:flex-end;max-width:80%;background:var(--rojo);color:#fff;border-radius:14px 14px 4px 14px;padding:.6rem .8rem;font-size:.85rem">¿Cuándo vence mi próxima cuota?</div>
+      <div style="align-self:flex-start;max-width:80%;background:var(--blanco);border:1px solid var(--linea);border-radius:14px 14px 14px 4px;padding:.6rem .8rem;font-size:.85rem">Tu cuota vence el 05/08. ¿Querés ver el detalle?</div>
+    </div>
+    <div style="position:sticky;bottom:0;background:var(--nieve);padding-top:.6rem">
+      <div style="display:flex;gap:.4rem"><div style="flex:1;background:#fff;border:1px solid var(--linea);border-radius:999px;padding:.6rem .9rem;color:var(--ink3);font-size:.85rem">Escribí tu consulta…</div><div style="width:40px;height:40px;border-radius:50%;background:var(--rojo);display:flex;align-items:center;justify-content:center;color:#fff">➤</div></div>
+    </div>`,
+  salud:()=>`
+    <div class="sec-h">Chequeo semanal</div>
+    <div class="card" style="padding:.9rem 1rem"><div style="font-weight:700;font-size:.85rem">¿Cómo te sentís esta semana?</div><div style="color:var(--gris);font-size:.74rem;margin-top:.2rem">3 preguntas rápidas · te lleva 1 minuto</div><div class="pill" style="background:var(--verde-nube);color:var(--verde-hondo);margin-top:.6rem">Empezar chequeo</div></div>
+    <div class="sec-h">No me siento bien</div>
+    <div class="card" style="padding:.9rem 1rem"><div style="color:var(--gris);font-size:.8rem">Reportá un síntoma y te orientamos.</div></div>
+    <div class="sec-h">Registrar signos</div>
+    <div class="card" style="padding:.9rem 1rem"><div style="color:var(--gris);font-size:.8rem">Presión, glucemia, peso…</div></div>`,
+  turnos:()=>`
+    <div class="sec-h">Mis turnos</div>
+    <div class="card" style="padding:.8rem 1rem"><div style="font-weight:700;font-size:.85rem">Jue 31/07 · 16:30</div><div style="color:var(--gris);font-size:.74rem">Videollamada · Dr. Gómez</div></div>
+    <div class="sec-h">Turnos por videollamada</div>
+    <div class="card" style="padding:.9rem 1rem"><div style="color:var(--gris);font-size:.8rem;margin-bottom:.5rem">Hay franjas disponibles para reservar.</div><div class="pill" style="background:var(--verde-nube);color:var(--verde-hondo)">Coordinar por WhatsApp</div></div>`,
+  mas:()=>`
+    <div class="card" style="overflow:hidden;margin-top:.3rem">
+      <div class="rowc">🧾 Mi cuenta y comprobantes <span class="chev">${CHEV}</span></div>
+      <div class="rowc">👪 Mi grupo familiar <span class="chev">${CHEV}</span></div>
+      <div class="rowc">🤝 Mis referentes <span class="chev">${CHEV}</span></div>
+      <div class="rowc">📰 Novedades y feed <span class="chev">${CHEV}</span></div>
+    </div>
+    <div class="note">Los emojis de esta fila son sólo placeholder del contenido; los íconos definitivos de marca son los de la <b>tab bar</b> (abajo) y se replican donde haga falta.</div>`
+};
+
+function pintarHeader(){
+  const e=document.getElementById('emerg'); e.className='emerg '+hv;
+  const ico=e.querySelector('[data-slot="ico"]'); const sep=e.querySelector('[data-slot="sep"]');
+  if(hv==='vC'){ ico.innerHTML=PULSO; ico.style.display=''; sep.style.display=''; }
+  else if(hv==='vA'){ ico.innerHTML=CRUZ; ico.style.display=''; sep.style.display=''; }
+  else { ico.innerHTML=''; ico.style.display='none'; sep.style.display='none'; }
+}
+function pintarTabs(){
+  document.getElementById('tabbar').innerHTML=TABS.map(([id,lbl])=>`<button class="${id===tab?'on':''}" onclick="irTab('${id}')"><span class="ic">${ICONS[id]}</span><span class="tl">${lbl}</span></button>`).join('');
+}
+function irTab(t){ tab=t; document.getElementById('body').innerHTML=CONTENT[t](); pintarTabs(); }
+document.getElementById('segH').addEventListener('click',e=>{ const b=e.target.closest('[data-h]'); if(!b) return; hv=b.dataset.h; document.querySelectorAll('#segH button').forEach(x=>x.classList.toggle('on',x===b)); pintarHeader(); });
+document.getElementById('iconset').innerHTML=TABS.map(([id,lbl])=>`<div class="it">${ICONS[id]}<span>${lbl}</span></div>`).join('');
+pintarHeader(); pintarTabs(); irTab('inicio');
+</script>
+</body>
+</html>
