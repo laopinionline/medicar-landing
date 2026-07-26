@@ -44,7 +44,7 @@ t('b2 regresión: socio normal sin la cobertura → cargo fuera_cobertura (NO cu
 
 // --- 2c) SOCIO PWA (a1/a2/a3): la credencial NO nombra plan/cuota si vitalicio; "Afiliado activo" queda ---
 t('a: esVit derivado del flag en la credencial', /const esVit = !!\(socio && socio\.vitalicio===true\)/.test(socio));
-t('a1: celda "Plan" oculta si vitalicio (${esVit?...})', /\$\{esVit\?''\:`<div class="cell"><span>Plan<\/span>/.test(socio));
+t('a1: celda "Plan" oculta si vitalicio (credCardHTML, ${d.esVit?...})', /\$\{d\.esVit\?''\:`<div class="cell"><span>Plan<\/span>/.test(socio));
 t('a2: bloque de cuota NO se renderiza si vitalicio', /if\(socio && socio\.planId && c\.plan && !esVit\)\{/.test(socio));
 t('a3: abrirCambiarPlan no-op defensivo si vitalicio', /vitalicio===true\) return;/.test(socio) && /function abrirCambiarPlan/.test(socio));
 t('a: "Afiliado activo" sigue siendo la etiqueta neutra', /● Afiliado activo/.test(socio));
