@@ -49,7 +49,7 @@ t('IA: asistenteChat usa el uid del caller, SIN paraPersonaId (el titular no cha
 // --- 6) UI (socio + panel) ---
 t('socio: flujo ?invita → bienvenida (validar) + crear contraseña + canje', /invitaTokenDeURL\(\)/.test(socio) && /mostrarBienvenidaInvita/.test(socio) && /fnsCall\('canjearInvitacion'/.test(socio) && /case 'invita': html=invitaView\(\)/.test(socio));
 t('socio: botón Invitar por integrante sin cuenta + share nativo', /invitarIntegrante\('/.test(socio) && /navigator\.share/.test(socio) && /generarInvitacionAfiliado/.test(socio));
-t('socio: solo el titular responsable invita; "tiene su app ✓" si cuentaPropia', /esResponsablePago===true && !socio\.titularSocioId/.test(socio) && /tiene su app ✓/.test(socio));
+t('socio: invita CUALQUIER titular (no exige esResponsablePago; incluye vitalicio); "tiene su app ✓" si cuentaPropia', /const puedeInvitar = !!\(socio && !socio\.titularSocioId\)/.test(socio) && /tiene su app ✓/.test(socio));
 t('panel: botón Invitar (socio sin cuenta) + chip "Con app"', /afInvitar\('/.test(app) && /s\.cuentaPropia!==true/.test(app) && />Con app</.test(app));
 t('rules: match invitaciones_afiliado presente', /match \/invitaciones_afiliado\/\{token\}/.test(rules));
 

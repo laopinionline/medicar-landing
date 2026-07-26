@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v41'; // Invitación de integrante: bienvenida ?invita + botón Invitar en el grupo. HTML network-first + purga de caches viejas
+const CACHE = 'medicar-socio-v42'; // Fix "Mi grupo familiar"/Invitar renderiza para TODO titular (incl. vitalicio); gate robusto. HTML network-first + purga de caches viejas
 const SHELL = [
   './',
   './index.html',
