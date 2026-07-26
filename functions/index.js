@@ -1914,8 +1914,8 @@ exports.webhookAfiliacionMP = onRequest({ secrets: [MP_ACCESS_TOKEN, MP_WEBHOOK_
   try {
     const dataId = MP.dataIdDeNotificacion(req.query, req.body);
     if (!dataId) { logger.info('[webhookAfiliacionMP] sin data.id (ping/otro topic)'); res.status(200).send('ok'); return; }
-    const firma = MP.validarFirma({ xSignature: req.get('x-signature'), xRequestId: req.get('x-request-id'), dataId, secret: MP_WEBHOOK_SECRET.value() });
-    if (!firma.valido) { logger.warn('[webhookAfiliacionMP] firma inválida', { dataId, hasRequestId: firma.hasRequestId, motivo: firma.motivo || null, calcPrefix: firma.calcPrefix || null, v1Prefix: firma.v1Prefix || null }); res.status(401).send('firma invalida'); return; } // DIAGNÓSTICO TEMPORAL: hasRequestId + prefijos HMAC (no revelan secret ni body)
+    const firma = MP.validarFirma({ xSignature: req.get('x-signature'), xRequestId: req.get('x-request-id'), dataId, secret: (MP_WEBHOOK_SECRET.value() || '').trim() }); // trim: defiende de whitespace/newline del paste del secret
+    if (!firma.valido) { logger.warn('[webhookAfiliacionMP] firma inválida', { dataId }); res.status(401).send('firma invalida'); return; }
     const pago = await MP.consultarPago({ accessToken: MP_ACCESS_TOKEN.value(), paymentId: dataId }); // la VERDAD sale de la API
     if (pago.status === 'approved' && pago.externalReference) {
       const r = await confirmarAfiliacionPago(pago.externalReference, pago.paymentId, pago.monto);

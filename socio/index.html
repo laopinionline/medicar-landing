@@ -1279,9 +1279,10 @@ function prospectoView(){
 // RED DE SEGURIDAD del webhook: al volver del checkout (?afiliacionPago=1), confirma el pago server-side (la CF consulta
 // la API por external_reference; los params de la URL NO son fuente de verdad). Idempotente con el webhook.
 async function afiliacionRetornoCheck(){
-  let hay=false; try{ hay=new URLSearchParams(location.search).has('afiliacionPago'); }catch(_){}
-  if(!hay) return;
-  try{ const u=new URL(location.href); u.searchParams.delete('afiliacionPago'); history.replaceState(null,'',u.pathname+u.search); }catch(_){} // limpia el param (no re-dispara)
+  let hayParam=false; try{ hayParam=new URLSearchParams(location.search).has('afiliacionPago'); }catch(_){}
+  const pendiente=!!(S.prospecto && S.prospecto.estado==='pendiente_pago');
+  if(!hayParam && !pendiente) return; // dispara si volvió del checkout (param) O si el lead sigue esperando el pago (aunque MP no devuelva el param)
+  if(hayParam){ try{ const u=new URL(location.href); u.searchParams.delete('afiliacionPago'); history.replaceState(null,'',u.pathname+u.search); }catch(_){} } // limpia el param (no re-dispara)
   S.afiliacionConfirmando=true; render();
   try{
     const r=await fnsCall('confirmarRetornoAfiliacion', {});
