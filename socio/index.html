@@ -89,6 +89,8 @@ input{font-family:inherit}
 /* ---------- CREDENCIAL (mockup sistema visual) ---------- */
 .cred{border-radius:20px;padding:1.3rem 1.3rem 1.4rem;color:#fff;position:relative;overflow:hidden;background:linear-gradient(135deg,#2a2d31,#1a1a1a);box-shadow:var(--sombra-alta)}
 .cred .lines-bg{position:absolute;right:-8px;top:-6px;opacity:.16;pointer-events:none}
+#cred-carrusel{-ms-overflow-style:none;scrollbar-width:none}
+#cred-carrusel::-webkit-scrollbar{display:none}
 .cred-top{display:flex;justify-content:space-between;align-items:center;position:relative;z-index:1}
 .cred .cred-brand{display:inline-flex;align-items:center;gap:2px;font-style:italic;font-weight:800;font-size:.95rem}
 .cred .est{font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;font-weight:800;color:#25d07a}
@@ -990,8 +992,10 @@ async function cargarCredencial(uid){
 
   // F3: grupo familiar — dependientes cuyo titular es esta persona (F2 habilita la lectura por titularPersonaId).
   let dependientes = [];
+  let invitaciones = []; // invitaciones que YO (titular) generé — para la gestión en Mi grupo familiar (regla: titularPersonaId==yo)
   if(personaId){
     try{ const dep = await db.collection('socios').where('titularPersonaId','==',personaId).get(); dependientes = dep.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
+    try{ const iv = await db.collection('invitaciones_afiliado').where('titularPersonaId','==',personaId).get(); invitaciones = iv.docs.map(d=>({token:d.id, ...d.data()})).filter(x=>x.estado==='pendiente'); }catch(_){}
   }
 
   // (El socio ya NO ve abonos: la vista de cuenta es por comprobantes/facturas. Se dejó de cargar c.abonos.)
@@ -1069,7 +1073,7 @@ async function cargarCredencial(uid){
     sintomas = sc.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>((a.orden||0)-(b.orden||0)));
   }catch(_){}
 
-  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, facturas, saldoFavor, creditoMovs, pagos, agenda, misTurnos, waAtencion, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
+  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, invitaciones, facturas, saldoFavor, creditoMovs, pagos, agenda, misTurnos, waAtencion, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
 }
 
 /* ---------- Auth flow ---------- */
@@ -1368,9 +1372,13 @@ async function invitarIntegrante(personaId){
     const link=r.link||''; const texto='Te invito a tu propia cuenta de MEDICAR 👉 '+link;
     if(navigator.share){ try{ await navigator.share({ title:'MEDICAR', text:texto, url:link }); S.invMsg='Invitación compartida.'; }catch(_){ S.invMsg=''; } }
     else { try{ await navigator.clipboard.writeText(link); S.invMsg='Link de invitación copiado — pegalo en WhatsApp.'; }catch(_){ S.invMsg='Link: '+link; } }
-    render();
+    await recargarCred(); // refresca c.invitaciones → la fila muestra "Invitación enviada · vence en X días" + Reenviar/Revocar
   }catch(e){ S.invMsg=errCF(e,'No se pudo generar la invitación.'); render(); }
 }
+// "vence en X días" desde expiraEn (Timestamp).
+function invVenceLabel(inv){ try{ const ms=(inv.expiraEn&&inv.expiraEn.toMillis)?inv.expiraEn.toMillis():((inv.expiraEn&&inv.expiraEn.seconds)?inv.expiraEn.seconds*1000:0); if(!ms) return ''; const dias=Math.ceil((ms-Date.now())/864e5); return dias>0?` · vence en ${dias} día${dias===1?'':'s'}`:' · vencida'; }catch(_){ return ''; } }
+async function reenviarInvitacion(personaId){ await invitarIntegrante(personaId); } // genera un link FRESCO + share (el server crea uno nuevo)
+async function revocarInvitacionUI(token){ try{ await fnsCall('revocarInvitacion',{ token }); S.invMsg='Invitación revocada.'; await recargarCred(); }catch(e){ S.invMsg=errCF(e,'No se pudo revocar.'); render(); } }
 function afiliacionCTA(){
   if(S.afiliacionConfirmando){
     return `<div style="margin-top:.9rem;background:#eef4ff;border:1px solid #cfe0ff;border-radius:12px;padding:1rem;text-align:center">
@@ -1536,6 +1544,24 @@ function errorCargaView(){
   </div>`;
 }
 
+// Una tarjeta de credencial. d = {nombre, numero, dni?, plan?, tipo, activo, esVit}. enCarrusel = estilos de slide.
+function credCardHTML(d, enCarrusel){
+  const estadoLinea = d.activo ? `<div class="est">● Afiliado activo</div>` : `<div class="est off">● Inactivo</div>`;
+  const slide = enCarrusel ? 'flex:0 0 100%;scroll-snap-align:start;box-sizing:border-box;' : '';
+  return `<div class="cred" style="${slide}">
+    <svg class="lines-bg" width="130" height="80" viewBox="0 0 120 60"><rect x="6" y="16" width="108" height="6" rx="3" fill="#fff"/><rect x="22" y="30" width="92" height="6" rx="3" fill="#fff"/><rect x="40" y="44" width="74" height="6" rx="3" fill="#fff"/></svg>
+    <div class="cred-top"><div class="cred-brand">${chv(14,'cw')}<span style="margin-left:1px">medicar</span></div>${estadoLinea}</div>
+    <div class="nom">${esc(d.nombre)}</div>
+    <div style="margin-top:.9rem;position:relative;z-index:1"><div class="cred-num-lbl">N° de afiliado</div><div class="cred-num">${esc(d.numero)}</div></div>
+    <div class="grid">
+      ${d.dni?`<div class="cell"><span>DNI</span><b>${esc(fmtDni(d.dni))}</b></div>`:''}
+      ${d.esVit?'':`<div class="cell"><span>Plan</span><b>${esc(d.plan||'—')}</b></div>`}
+      <div class="cell"><span>Tipo</span><b>${esc(d.tipo)}</b></div>
+    </div>
+  </div>`;
+}
+function credCarruselScroll(elm){ if(!elm) return; const idx=Math.round(elm.scrollLeft/Math.max(1,elm.clientWidth)); const dots=document.getElementById('cred-dots'); if(dots){ Array.prototype.forEach.call(dots.children,(b,i)=>{ b.style.background = i===idx ? 'var(--rojo)' : 'var(--linea)'; }); } }
+function credCarruselIr(i){ const elm=document.getElementById('cred-carrusel'); if(elm) elm.scrollTo({ left:i*elm.clientWidth, behavior:'smooth' }); }
 function homeView(){
   const c=S.cred||{}; const per=c.per||{}; const u=c.u||{}; const socio=c.socio||null;
   // R1.5: cargar la bandeja de solicitudes una vez (fire-and-forget, guard). Solo un timestamp/nombre, no dato sensible.
@@ -1578,6 +1604,16 @@ function homeView(){
   // dependientes); el re-filtro por titularSocioId===socio.id era redundante y frágil (rompía p.ej. al titular vitalicio).
   // Gate único: soy TITULAR (no un dependiente). El servidor igual valida el vínculo al invitar.
   const depsDeMiSocio = (socio && !socio.titularSocioId ? (c.dependientes||[]) : []);
+  // CARRUSEL de credenciales: la del titular PRIMERA + una por integrante que TODAVÍA GESTIONA (menores siempre +
+  // adultos SIN cuenta propia). Los adultos independientes (cuentaPropia) quedan AFUERA (su credencial vive en su app).
+  const _indepCred = (d)=> d.cuentaPropia===true && (edadDe(d.fechaNacimiento)||0)>=18;
+  const credManaged = depsDeMiSocio.filter(d=> d.activo!==false && !_indepCred(d)).map(d=>({ nombre:d.nombreVista||'—', numero:d.numeroAfiliado||'—', dni:null, plan:'Cobertura familiar', tipo:tipoLbl(d.tipoAfiliado), activo:d.activo!==false, esVit:(d.vitalicio===true)||esVit }));
+  const credTitular = { nombre, numero, dni:per.dni, plan, tipo, activo, esVit };
+  const credCards = [credTitular, ...credManaged];
+  const credencialHTML = credCards.length<=1
+    ? credCardHTML(credTitular, false) // socio sin grupo → una tarjeta idéntica a hoy (cero cambio visual)
+    : `<div id="cred-carrusel" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory" onscroll="credCarruselScroll(this)">${credCards.map(d=>credCardHTML(d,true)).join('')}</div>`
+      + `<div id="cred-dots" style="display:flex;justify-content:center;gap:.45rem;margin-top:.6rem">${credCards.map((_,i)=>`<button onclick="credCarruselIr(${i})" aria-label="Credencial ${i+1}" style="width:8px;height:8px;border-radius:50%;border:none;padding:0;cursor:pointer;background:${i===0?'var(--rojo)':'var(--linea)'}"></button>`).join('')}</div>`;
   let cuotaSec = '';
   if(socio && socio.planId && c.plan && !esVit){ // vitalicio → sin bloque de cuota (ni monto ni "Cambiar mi plan")
     const activos = depsDeMiSocio.filter(d=>d.activo!==false).length;
@@ -1599,12 +1635,18 @@ function homeView(){
     // El TITULAR del grupo invita (administra integrantes). NO exige esResponsablePago: un titular vitalicio no lo tiene
     // y también administra su grupo. Titular = no-dependiente (!titularSocioId). cuentaPropia (denorm) = ya tiene su app.
     const puedeInvitar = !!(socio && !socio.titularSocioId);
+    const btnMini = 'font-size:.62rem;font-weight:800;background:none;border:1px solid var(--linea);border-radius:8px;padding:.15rem .5rem;cursor:pointer';
     const rows = depsDeMiSocio.slice().sort((a,b)=>String(a.numeroAfiliado||'').localeCompare(String(b.numeroAfiliado||''))).map(d=>{
       const baja = d.activo===false;
-      const chip = d.cuentaPropia===true
-        ? `<span style="font-size:.58rem;color:var(--verde,#2E8B57);font-weight:800">tiene su app ✓</span>`
-        : (puedeInvitar&&!baja ? `<button onclick="invitarIntegrante('${esc(d.personaId)}')" style="font-size:.62rem;font-weight:800;color:var(--rojo);background:none;border:1px solid var(--linea);border-radius:8px;padding:.15rem .5rem;cursor:pointer">Invitar</button>` : '');
-      return `<div class="row"><span class="rl" style="color:var(--tinta);font-weight:700">${esc(d.nombreVista||'—')}${baja?` <span style="font-size:.58rem;color:var(--rojo);font-weight:800;letter-spacing:.08em">BAJA</span>`:''}</span><span class="rv" style="display:flex;align-items:center;gap:.5rem;color:var(--gris);font-weight:600">N° ${esc(d.numeroAfiliado||'—')} ${chip}</span></div>`;
+      const inv = (c.invitaciones||[]).find(iv=>iv.personaId===d.personaId); // invitación PENDIENTE del integrante
+      let derecha='', extra='';
+      if(d.cuentaPropia===true){ derecha=`<span style="font-size:.58rem;color:var(--verde,#2E8B57);font-weight:800">tiene su app ✓</span>`; }
+      else if(inv){
+        derecha=`<span style="font-size:.58rem;color:#8a6d1f;font-weight:700">Invitación enviada${invVenceLabel(inv)}</span>`;
+        if(puedeInvitar&&!baja) extra=`<div style="display:flex;gap:.5rem;justify-content:flex-end;padding:.1rem 1rem .35rem"><button onclick="reenviarInvitacion('${esc(d.personaId)}')" style="${btnMini};color:var(--rojo)">Reenviar</button><button onclick="revocarInvitacionUI('${esc(inv.token)}')" style="${btnMini};color:var(--gris)">Revocar</button></div>`;
+      }
+      else if(puedeInvitar&&!baja){ derecha=`<button onclick="invitarIntegrante('${esc(d.personaId)}')" style="${btnMini};color:var(--rojo)">Invitar</button>`; }
+      return `<div class="row"><span class="rl" style="color:var(--tinta);font-weight:700">${esc(d.nombreVista||'—')}${baja?` <span style="font-size:.58rem;color:var(--rojo);font-weight:800;letter-spacing:.08em">BAJA</span>`:''}</span><span class="rv" style="display:flex;align-items:center;gap:.5rem;color:var(--gris);font-weight:600">N° ${esc(d.numeroAfiliado||'—')} ${derecha}</span></div>${extra}`;
     }).join('');
     const msg = S.invMsg?`<div style="font-size:.72rem;color:var(--verde,#2E8B57);padding:.5rem 1rem;border-top:1px solid var(--linea)">${esc(S.invMsg)}</div>`:'';
     grupoSec = `<div class="sec"><div class="sec-h">Mi grupo familiar</div><div class="card">${rows}${msg}${puedeInvitar?`<div style="font-size:.68rem;color:var(--gris);padding:.5rem 1rem;border-top:1px solid var(--linea)">Invitá a cada integrante a su propia cuenta MEDICAR (su credencial, turnos y salud, privados).</div>`:''}</div></div>`;
@@ -1713,23 +1755,7 @@ function homeView(){
     </div>
     ${S.planMsg?`<div class="card" style="border:1.5px solid var(--verde,#2E8B57);color:var(--verde,#2E8B57);padding:.6rem 1rem;font-size:.8rem;font-weight:600;margin-bottom:.6rem">${esc(S.planMsg)} <button onclick="set({planMsg:null})" style="float:right;background:none;border:none;color:var(--gris);cursor:pointer;font-weight:700">✕</button></div>`:''}
 
-    <div class="cred">
-      <svg class="lines-bg" width="130" height="80" viewBox="0 0 120 60"><rect x="6" y="16" width="108" height="6" rx="3" fill="#fff"/><rect x="22" y="30" width="92" height="6" rx="3" fill="#fff"/><rect x="40" y="44" width="74" height="6" rx="3" fill="#fff"/></svg>
-      <div class="cred-top">
-        <div class="cred-brand">${chv(14,'cw')}<span style="margin-left:1px">medicar</span></div>
-        ${estadoLinea}
-      </div>
-      <div class="nom">${esc(nombre)}</div>
-      <div style="margin-top:.9rem;position:relative;z-index:1">
-        <div class="cred-num-lbl">N° de afiliado</div>
-        <div class="cred-num">${esc(numero)}</div>
-      </div>
-      <div class="grid">
-        <div class="cell"><span>DNI</span><b>${esc(fmtDni(per.dni))}</b></div>
-        ${esVit?'':`<div class="cell"><span>Plan</span><b>${esc(plan)}</b></div>`}
-        <div class="cell"><span>Tipo</span><b>${esc(tipo)}</b></div>
-      </div>
-    </div>
+    ${credencialHTML}
 
     <a class="btn-emerg" href="tel:${TEL_EMERG}" style="margin-top:1rem">${IC.phone}<span>EMERGENCIAS<span class="em-sub">Llamar al ${TEL_EMERG}</span></span></a>
 
