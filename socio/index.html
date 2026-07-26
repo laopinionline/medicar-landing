@@ -1156,8 +1156,8 @@ async function doLogin(){
   if(S.busy) return;
   const email=(el('em')?.value||'').trim();
   const pw=el('pw')?.value||'';
-  if(!email || !pw){ set({ err:'Ingresá tu email y contraseña.' }); return; }
-  set({ busy:true, err:'' });
+  if(!email || !pw){ set({ err:'Ingresá tu email y contraseña.', loginEmail:email }); return; } // conserva lo tipeado
+  set({ busy:true, err:'', loginEmail:email });
   try{
     await auth.signInWithEmailAndPassword(email, pw);
     // onAuthStateChanged toma el control.
@@ -1166,7 +1166,7 @@ async function doLogin(){
     const msg = /wrong-password|user-not-found|invalid-credential|invalid-email/.test(code)
       ? 'Email o contraseña incorrectos.'
       : (/too-many-requests/.test(code) ? 'Demasiados intentos. Probá más tarde.' : 'No se pudo ingresar. Revisá tu conexión.');
-    set({ busy:false, err:msg });
+    set({ busy:false, err:msg, loginEmail:email }); // el form NO se borra: el email tipeado se conserva
   }
 }
 function salir(){ auth.signOut(); }
@@ -1204,7 +1204,7 @@ function loginView(){
     <h2>Ingresá con tu cuenta de socio</h2>
     <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
     ${S.okMsg?`<div style="background:#eafaf0;border:1px solid #bfe6cd;color:var(--verde,#2E8B57);border-radius:10px;padding:.55rem .8rem;font-size:.8rem;font-weight:600;margin-bottom:.6rem">${esc(S.okMsg)}</div>`:''}
-    <div class="field"><label>Email</label><input id="em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com"></div>
+    <div class="field"><label>Email</label><input id="em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com" value="${esc(S.loginEmail||'')}"></div>
     <div class="field"><label>Contraseña</label><input id="pw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
     <button class="btn-r" onclick="doLogin()">${S.busy?'Ingresando…':'Ingresar'}${S.busy?'':chv(15,'cw')}</button>
     <button class="linkish" onclick="doResetPassword()" style="margin-top:.7rem;background:none;border:none;color:var(--gris);font-size:.78rem;cursor:pointer;text-decoration:underline;width:100%">Olvidé mi contraseña</button>
