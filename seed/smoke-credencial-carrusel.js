@@ -45,7 +45,7 @@ t('EMERGENCIAS inmediatamente bajo la credencial (no lo empuja el carrusel)', /\
 t('managed excluye independiente (_indepCred) y hereda vitalicio del titular', /_indepCred = \(d\)=> d\.cuentaPropia===true && \(edadDe\(d\.fechaNacimiento\)\|\|0\)>=18/.test(socio) && /esVit:\(d\.vitalicio===true\)\|\|esVit/.test(socio));
 
 // --- gestión de invitaciones ---
-t('cargarCredencial trae invitaciones pendientes del titular', /invitaciones_afiliado.*where\('titularPersonaId','==',personaId\)[\s\S]{0,120}estado==='pendiente'/.test(socio) && /invitaciones, facturas/.test(socio));
+t('cargarCredencial trae invitaciones pendientes del titular', /invitaciones_afiliado.*where\('titularPersonaId','==',personaId\)[\s\S]{0,120}estado==='pendiente'/.test(socio) && /invitaciones,[\s\S]{0,40}facturas/.test(socio));
 t('grupo: invitación pendiente → "Invitación enviada · vence en X días" + Reenviar/Revocar', /Invitación enviada\$\{invVenceLabel\(inv\)\}/.test(socio) && /reenviarInvitacion\('/.test(socio) && /revocarInvitacionUI\('/.test(socio));
 t('funciones invVenceLabel / reenviar / revocar', /function invVenceLabel\(inv\)/.test(socio) && /async function reenviarInvitacion/.test(socio) && /fnsCall\('revocarInvitacion',\{ token \}\)/.test(socio));
 t('invitar recarga la cred (aparece la pendiente)', /await recargarCred\(\); \/\/ refresca c\.invitaciones/.test(socio));

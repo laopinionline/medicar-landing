@@ -999,6 +999,38 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // ===================== PAQUETE QR (credencial verificable + calificación mutua) =====================
+    // accesos_qr/{id}: log de CADA resolución de un QR por el staff (trazabilidad, patrón accesos_sintoma). Solo la CF
+    // resolverQR (Admin SDK) lo escribe; lo lee admin/legal. El qrToken en sí vive en socios/{id}.qrToken (lo mintea la CF).
+    match /accesos_qr/{id} {
+      allow read:  if tienePermiso('configurar_sistema');
+      allow create, update, delete: if false;
+    }
+
+    // calificaciones/{episodioId}: el SOCIO califica SU atención. La CF (al cerrar el episodio) crea el doc 'pendiente'
+    // (Admin SDK); el socio la LEE (personaId propio) y la COMPLETA una sola vez (pendiente→calificada, estrellas 1-5).
+    // El staff la lee (feedback de calidad). Una por episodio, sin borrar (append-only de hecho).
+    match /calificaciones/{episodioId} {
+      allow read:   if esOperativo() || ( isSignedIn() && resource.data.personaId == miPersonaId() );
+      allow create, delete: if false; // solo la CF crea el 'pendiente' al cerrar
+      allow update: if isSignedIn()
+                       && resource.data.personaId == miPersonaId()
+                       && resource.data.estado == 'pendiente'
+                       && request.resource.data.estado == 'calificada'
+                       && tocadas().hasOnly(['estrellas', 'comentario', 'estado', 'calificadoEn'])
+                       && request.resource.data.estrellas is int
+                       && request.resource.data.estrellas >= 1 && request.resource.data.estrellas <= 5;
+    }
+
+    // notas_socio/{id}: calificación/nota INTERNA del médico sobre el socio (asimétrica). SOLO staff la escribe y lee;
+    // el socio JAMÁS la ve. visibleSocio:false por diseño (flag para visibilizar a futuro). Append-only (sin update/delete),
+    // excluida del god-mode → inmutable incluso para el superadmin.
+    match /notas_socio/{id} {
+      allow read:   if esOperativo();
+      allow create: if esOperativo() && request.resource.data.medicoId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // R1.5 — solicitudes_referente/{id}: pedido de vínculo por BÚSQUEDA. read DOS CARAS: el referente que la mandó
     // (referenteUid==uid) y el titular destinatario (titularPersonaId==miPersonaId, para su bandeja). TODO por CF
     // (buscar/solicitar/resolver, Admin SDK) → create/update/delete cerrados. rate_buscar_referente = sin match
@@ -1064,7 +1096,7 @@ service cloud.firestore {
     match /{coleccion}/{resto=**} {
       allow read:  if esSuperadmin();
       allow write: if esSuperadmin()
-                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios', 'reportes_sintomas', 'chequeos_parametros', 'pagos', 'creditos', 'creditos_saldo', 'bitacora', 'invitaciones_afiliado']);
+                      && !(coleccion in ['auditoria', 'respuestas_cuestionario', 'gestiones_contacto', 'usuarios', 'reportes_sintomas', 'chequeos_parametros', 'pagos', 'creditos', 'creditos_saldo', 'bitacora', 'invitaciones_afiliado', 'notas_socio', 'accesos_qr']);
     }
   }
 }

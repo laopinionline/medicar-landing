@@ -32,6 +32,8 @@ const stubs = `
   function fmtFechaRecibo(){return '';} function pagosDeFactura(){return [];} function fechaTurnoLbl(){return '';}
   function solicitudesBandejaBlock(){return '';} function misReferentesBlock(){return '';} function seguirFamiliarBlock(){return '';}
   function cargarSolicitudesTitular(){}
+  // Paquete QR: la credencial (flip+QR) y la card de calificación tienen su propio smoke (credencial-carrusel, qr) → stub a '' acá.
+  function credCardHTML(){return '';} function calificacionCardHTML(){return '';}
 `;
 
 const src = `${esc}\n${socioMoney}\n${periodoLbl}\n${cuentaHelpers}\n${stubs}\n${homeView}\n; homeView();`;
