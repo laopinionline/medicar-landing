@@ -593,8 +593,13 @@ const TEL_EMERG = '443044';
 const ICON = 'icon.svg';
 
 // Estado mínimo de la vista.
-const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null, chk:null, rpt:null, par:null, ia:null };
+const S = { view:'boot', err:'', busy:false, cred:null, deferredPrompt:null, chk:null, rpt:null, par:null, ia:null, tab:'inicio', scroll:{}, tabData:{} };
 const el = id => document.getElementById(id);
+// REPLANTEO Tramo 2 — flag del shell de tabs. Por-dispositivo (localStorage, para test en vivo) o global (configuracion/replanteo.tabs).
+// Con AMBOS off: nada cambia (render() cae al homeView viejo). El shell solo aplica a socio pleno + menor-con-cuenta.
+function tabsBootPref(){ try{ return localStorage.getItem('medicar_tabs')==='1'; }catch(_){ return false; } }
+function tabsOn(){ return tabsBootPref() || S.tabsGlobal===true; }
+function socioShellElegible(){ const c=S.cred; return !!(c && c.estado==='ok' && c.socio); } // pleno o menor-con-cuenta; prospecto NO (conserva prospectoView)
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ── F5 Turnos: Cloud Functions (mismo patrón que el panel), recarga y acciones ── */
@@ -653,6 +658,10 @@ function navRestore(desc){
   // Prospecto (sin credencial): el "atrás" cierra el chat o el puente → vuelve a su home reducida.
   if(esProspectoUI() && S.view==='asistente'){ navRestoring=true; try{ cerrarAsistente(); }finally{ navRestoring=false; } return; }
   if(esProspectoUI() && S.view==='puente'){ navRestoring=true; try{ puenteCerrar(); }finally{ navRestoring=false; } return; }
+  // Tramo 2 — SHELL DE TABS: el back entre tabs restaura el tab + su scroll (determinístico, ya no es parche).
+  if(tabsOn() && socioShellElegible() && S.view==='home' && desc && desc.tabnav){
+    navRestoring=true; try{ S.tab=desc.tabnav; pintarTab(S.tab); } finally{ navRestoring=false; } return;
+  }
   // solo dentro de la app (home + apiladas). login/boot/no-afiliado/sin-vinculo/error los maneja onAuthStateChanged.
   if(!S.cred || !(S.view==='home' || APILADAS.includes(S.view))) return;
   navRestoring=true;
@@ -964,7 +973,7 @@ function calcularNEWS2(fc, sis, temp, spo2){
 }
 
 /* ---------- Carga de datos del socio ---------- */
-async function cargarCredencial(uid){
+async function cargarCredencial(uid, nucleo){ // nucleo:true (flag tabs por-dispositivo) → carga SOLO el núcleo y difiere el resto por tab
   const uDoc = await db.collection('usuarios').doc(uid).get();
   // Sin usuarios doc: puede ser un PROSPECTO autoregistrado (prospectos/{uid}). Si no, sin-vínculo.
   if(!uDoc.exists){
@@ -1015,6 +1024,18 @@ async function cargarCredencial(uid){
   }
 
   // (El socio ya NO ve abonos: la vista de cuenta es por comprobantes/facturas. Se dejó de cargar c.abonos.)
+
+  // REPLANTEO Tramo 2 — flag global del shell de tabs (configuracion/replanteo.tabs). Se lee acá (junto al resto de
+  // configuracion); con flag off no cambia NADA salvo poblar S.tabsGlobal=false. tabsOn() = localStorage || S.tabsGlobal.
+  try{ const rf = await db.collection('configuracion').doc('replanteo').get(); S.tabsGlobal = !!(rf.exists && rf.data().tabs); }catch(_){ S.tabsGlobal = false; }
+  // NÚCLEO: con el flag por-dispositivo, Inicio pinta YA con esto (credencial + estado). El resto lo cargan los tabs.
+  if(nucleo){
+    try{ const cfgIA = await db.collection('configuracion').doc('asistente').get(); S.iaHabilitado = !!(cfgIA.exists && cfgIA.data().habilitado); }catch(_){ S.iaHabilitado=false; }
+    const prefDayN = (typeof u.prefRecordatorio==='number' && u.prefRecordatorio>=0 && u.prefRecordatorio<=6) ? u.prefRecordatorio : 0;
+    return { estado:'ok', u, per, socio, plan, planNombre, dependientes, invitaciones, calificacionesPend, personaId, prefDay:prefDayN, _lazy:true,
+      // defaults de lo diferido (los tabs los completan al abrirse) — evitan undefined en cualquier bloque
+      facturas:[], saldoFavor:0, creditoMovs:[], pagos:[], agenda:[], misTurnos:[], waAtencion:'', cuestionario:null, lastRespMs:null, histCount:0, respLast4wk:0, sintomas:[] };
+  }
 
   // F3: comprobantes — la factura lleva el personaId de la persona facturada (regla F-3 habilita la lectura).
   let facturas = [];
@@ -1130,7 +1151,7 @@ auth.onAuthStateChanged(async user => {
     // → retoma en la entrada de código autenticada para terminar el vínculo.
     if(esModoReferente() && !esRef){ set({ view:'referente-canje', busy:false, err:'' }); return; }
 
-    const cred = await cargarCredencial(user.uid);
+    const cred = await cargarCredencial(user.uid, tabsBootPref()); // Tramo 2: flag por-dispositivo → carga núcleo (Inicio pinta ya)
     // ⚠️ AFILIADO/STAFF PRIMERO (destinoTrasAuth, pura): la identidad de SOCIO tiene prioridad absoluta. Un socio
     // que ADEMÁS es referente NO pierde su credencial — el claim referente jamás lo desvía; solo habilita la vista
     // secundaria "Ver como referente" desde su home. Un socio que entra por error por "acceso de referente" cae
@@ -1607,6 +1628,163 @@ async function renderQRPara(personaId, slot){
 }
 function credCarruselScroll(elm){ if(!elm) return; const idx=Math.round(elm.scrollLeft/Math.max(1,elm.clientWidth)); const dots=document.getElementById('cred-dots'); if(dots){ Array.prototype.forEach.call(dots.children,(b,i)=>{ b.style.background = i===idx ? 'var(--rojo)' : 'var(--linea)'; }); } }
 function credCarruselIr(i){ const elm=document.getElementById('cred-carrusel'); if(elm) elm.scrollTo({ left:i*elm.clientWidth, behavior:'smooth' }); }
+
+/* ===================== REPLANTEO Tramo 2 — SHELL DE TABS =====================
+   Gated por tabsOn(). Solo socio pleno + menor-con-cuenta. homeView viejo INTACTO como fallback (flag off = cero cambio).
+   Header rojo EMERGENCIAS persistente (nunca scrollea) + 5 tabs + tab bar fija. Nav: pushState por tab, scroll por tab,
+   contenido diferido (núcleo pinta Inicio, hydrate en background). Tokens del Tramo 1. Estado "bloqueado" = Tramo 4. */
+const TABS = [
+  { id:'inicio', ic:'🏠', lbl:'Inicio' },
+  { id:'ia',     ic:'💬', lbl:'MEDICAR IA' },
+  { id:'salud',  ic:'🩺', lbl:'Mi salud' },
+  { id:'turnos', ic:'📅', lbl:'Turnos' },
+  { id:'mas',    ic:'☰',  lbl:'Más' },
+];
+function tabShellView(){
+  const t = S.tab || 'inicio';
+  // Header rojo persistente — EMERGENCIAS a un tap desde CUALQUIER tab (tel:, sticky, nunca scrollea).
+  const header = `<a href="tel:${TEL_EMERG}" aria-label="Emergencias ${TEL_EMERG}" style="position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:center;gap:.5rem;background:var(--rojo);color:#fff;font-weight:800;font-size:.92rem;letter-spacing:.03em;padding:.72rem;text-decoration:none">${IC.phone||'🚑'}<span>EMERGENCIAS · ${TEL_EMERG}</span></a>`;
+  const bar = `<nav style="position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;background:var(--blanco);border-top:1px solid var(--linea);padding-bottom:env(safe-area-inset-bottom)">${TABS.map(x=>{
+    const on = x.id===t;
+    return `<button data-tab="${x.id}" onclick="irTab('${x.id}')" style="flex:1;background:none;border:none;padding:.5rem .2rem .55rem;display:flex;flex-direction:column;align-items:center;gap:.12rem;cursor:pointer;color:${on?'var(--rojo)':'var(--gris)'}"><span style="font-size:1.2rem;line-height:1">${x.ic}</span><span data-tablbl="${x.id}" style="font-size:.61rem;font-weight:${on?'800':'600'}">${x.lbl}</span></button>`;
+  }).join('')}</nav>`;
+  return `<div style="min-height:100vh;background:var(--nieve)">${header}<div id="tab-content" style="padding-bottom:76px">${tabContent(t)}</div>${bar}</div>`;
+}
+function tabContent(t){
+  const c=S.cred||{};
+  switch(t){
+    case 'ia':     return tabIA(c);
+    case 'salud':  return tabSalud(c);
+    case 'turnos': return tabTurnos(c);
+    case 'mas':    return tabMas(c);
+    default:       return tabInicio(c);
+  }
+}
+// Cambio de tab: guarda scroll, pushState (back determinístico), re-pinta SOLO el contenedor (tab bar fija), dispara lazy.
+function irTab(t){
+  if(!TABS.some(x=>x.id===t)) t='inicio';
+  const cont=el('tab-content'); if(cont && S.tab) S.scroll[S.tab]=cont.scrollTop;
+  if(S.tab!==t){ try{ history.pushState({tabnav:t},''); }catch(_){} }
+  S.tab=t; pintarTab(t); disparaLazyTab(t);
+}
+function pintarTab(t){
+  const cont=el('tab-content'); if(!cont){ render(); return; }
+  cont.innerHTML=tabContent(t);
+  document.querySelectorAll('[data-tab]').forEach(b=>{ const on=b.dataset.tab===t; b.style.color=on?'var(--rojo)':'var(--gris)'; });
+  document.querySelectorAll('[data-tablbl]').forEach(s=>{ s.style.fontWeight=(s.dataset.tablbl===t)?'800':'600'; });
+  cont.scrollTop=S.scroll[t]||0;
+}
+// Datos diferidos: el núcleo pintó Inicio SIN las ~16 colecciones. Los tabs que necesitan lo diferido disparan un
+// hydrate ÚNICO (carga full una vez y reemplaza S.cred). Inicio/IA no lo necesitan (núcleo + estado propio).
+async function disparaLazyTab(t){
+  if(!S.cred || !S.cred._lazy) return;
+  if(t==='inicio' || t==='ia') return;
+  await hydrateFull(t);
+}
+async function hydrateFull(desdeTab){
+  if(!S.cred || !S.cred._lazy || S._hydrating) return;
+  S._hydrating=true;
+  if(desdeTab && S.tab===desdeTab) pintarTab(desdeTab); // muestra "cargando…" del tab
+  try{
+    const u=auth.currentUser; if(!u) return;
+    const full=await cargarCredencial(u.uid, false);
+    if(full && full.estado==='ok') S.cred=full; // full NO trae _lazy → hydrate completo
+  }catch(_){ }
+  finally{ S._hydrating=false; }
+  if(S.view==='home' && tabsOn() && socioShellElegible()) pintarTab(S.tab);
+}
+const cargandoTab = (msg)=>`<div style="padding:2.4rem 1rem;text-align:center;color:var(--gris);font-size:.85rem">${esc(msg||'Cargando…')}</div>`;
+
+// ---- Contenido por tab ----
+function tabInicio(c){
+  const per=c.per||{}, u=c.u||{}, socio=c.socio||null;
+  const nombre=nombreDe(per,u);
+  const activo = socio ? (socio.activo!==false) : false;
+  const esVit = !!(socio && (socio.vitalicio===true || socio.bonificado===true));
+  const esDependiente = !!(socio && socio.titularSocioId);
+  const plan = esDependiente ? 'Cobertura familiar' : (c.planNombre || '—');
+  const tipo = socio ? tipoLbl(socio.tipoAfiliado) : '—';
+  const depsDeMiSocio = (socio && !socio.titularSocioId ? (c.dependientes||[]) : []);
+  const _indepCred = (d)=> d.cuentaPropia===true && (edadDe(d.fechaNacimiento)||0)>=18;
+  const credManaged = depsDeMiSocio.filter(d=> d.activo!==false && !_indepCred(d)).map(d=>({ personaId:d.personaId, nombre:d.nombreVista||'—', numero:d.numeroAfiliado||'—', dni:null, plan:'Cobertura familiar', tipo:tipoLbl(d.tipoAfiliado), activo:d.activo!==false, esVit:(d.vitalicio===true)||esVit }));
+  const credTitular = { personaId:c.personaId, nombre, numero:(socio&&socio.numeroAfiliado)||'—', dni:per.dni, plan, tipo, activo, esVit };
+  const credCards = [credTitular, ...credManaged];
+  const credHTML = credCards.length<=1
+    ? credCardHTML(credTitular, false)
+    : `<div id="cred-carrusel" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory" onscroll="credCarruselScroll(this)">${credCards.map(d=>credCardHTML(d,true)).join('')}</div>`;
+  const dots = credCards.length>1 ? `<div id="cred-dots" style="display:flex;gap:.4rem;justify-content:center;margin:.55rem 0">${credCards.map((_,i)=>`<button onclick="credCarruselIr(${i})" style="width:8px;height:8px;border-radius:50%;border:none;padding:0;cursor:pointer;background:${i===0?'var(--rojo)':'var(--linea)'}"></button>`).join('')}</div>` : '';
+  return `<div style="padding:1rem 1rem 0">
+    ${credHTML}${dots}
+    ${calificacionCardHTML(c)}
+    ${estadoCardsInicio(c)}
+    ${c._lazy?'<div style="height:.5rem"></div>':''}
+  </div>`;
+}
+// Cards de estado en Inicio (además de la calificación, que trae su propia card). Guardadas: solo salen con dato.
+function estadoCardsInicio(c){
+  let out='';
+  // Chequeo vencido/pendiente (aparece tras el hydrate; en núcleo aún no hay cuestionario)
+  if(c.cuestionario){
+    const nunca = c.lastRespMs==null; const viejo = c.lastRespMs!=null && (Date.now()-c.lastRespMs) > 7*86400000;
+    if(nunca || viejo){
+      out += `<div class="sec"><div class="card" style="border:1.5px solid var(--ambar);padding:.85rem 1rem;cursor:pointer" onclick="irTab('salud')">
+        <div style="font-weight:700;font-size:.86rem;color:var(--tinta)">🩺 Tenés un chequeo pendiente</div>
+        <div style="font-size:.74rem;color:var(--gris);margin-top:.2rem">${nunca?'Todavía no completaste tu chequeo semanal.':'Pasó más de una semana de tu último chequeo.'} Tocá para hacerlo.</div>
+      </div></div>`;
+    }
+  }
+  return out;
+}
+function tabIA(c){
+  if(!S.ia) S.ia={ msgs:[], busy:false, err:'', escalando:false };
+  return asistenteView(); // el chat a pantalla completa (mismo motor; su "cerrar" vuelve al home = shell)
+}
+function tabSalud(c){
+  if(c._lazy) return cargandoTab('Cargando tu salud…');
+  return `<div style="padding:1rem 1rem 0">
+    ${homeChequeoBlock(c)}
+    ${homeReporteBlock(c)}
+    ${homeParamsBlock(c)}
+  </div>`;
+}
+function tabTurnos(c){
+  if(c._lazy) return cargandoTab('Cargando tus turnos…');
+  const mis=(c.misTurnos||[]).filter(t=>t.estado!=='cancelado').sort((a,b)=>((tsMs(a.fecha)||0)-(tsMs(b.fecha)||0)));
+  const misHTML = mis.length ? mis.map(t=>`<div class="card" style="padding:.7rem .9rem;margin-bottom:.5rem"><div style="font-weight:700;font-size:.85rem">${esc(fechaTurno(t.fecha))} · ${esc(t.hora||'')}</div><div style="font-size:.74rem;color:var(--gris)">${esc(t.nombreVista||'')}${t.medicoNombre?(' · '+esc(t.medicoNombre)):''}</div></div>`).join('') : `<div style="font-size:.82rem;color:var(--gris)">No tenés turnos reservados.</div>`;
+  const ag=(c.agenda||[]);
+  const dispHTML = ag.length ? `<div style="font-size:.78rem;color:var(--gris);margin-bottom:.4rem">Hay franjas disponibles para reservar tu videollamada.</div>` : `<div style="font-size:.82rem;color:var(--gris)">Por ahora no hay franjas disponibles.</div>`;
+  return `<div style="padding:1rem">
+    <div class="sec-h">Mis turnos</div>${misHTML}
+    <div class="sec-h" style="margin-top:1rem">Turnos por videollamada</div>${dispHTML}
+    ${c.waAtencion?`<a class="btn-o" href="https://wa.me/${esc(c.waAtencion)}" target="_blank" rel="noopener" style="margin-top:.6rem">Coordinar por WhatsApp</a>`:''}
+  </div>`;
+}
+function tabMas(c){
+  if(c._lazy) return cargandoTab('Cargando…');
+  const item=(ic,lbl,onclick)=>`<button onclick="${onclick}" style="width:100%;display:flex;align-items:center;gap:.7rem;background:var(--blanco);border:none;border-bottom:1px solid var(--linea);padding:.95rem 1rem;font-size:.9rem;color:var(--tinta);cursor:pointer;text-align:left"><span style="font-size:1.05rem">${ic}</span><span style="flex:1;font-weight:600">${lbl}</span><span style="color:var(--ink3)">${chv(11)}</span></button>`;
+  const nFact=(c.facturas||[]).length;
+  return `<div style="padding:1rem 0 0">
+    ${solicitudesBandejaBlock ? solicitudesBandejaBlock(c) : ''}
+    <div style="border-radius:14px;overflow:hidden;margin:0 .8rem;box-shadow:var(--sombra)">
+      ${item('🧾','Mi cuenta y comprobantes'+(nFact?` (${nFact})`:''),"abrirComprobantes()")}
+      ${item('👪','Mi grupo familiar',"irTab('inicio')")}
+      ${item('🤝','Mis referentes',"set({view:'mis-referentes'})")}
+      ${item('👤','Seguir a un familiar',"set({view:'referente-seguir'})")}
+    </div>
+    <div style="margin-top:1rem">${homeFeedBlock(c)}</div>
+    <div class="sec"><div class="sec-h">Mis datos de contacto</div><div class="card" style="padding:.9rem 1rem">
+      ${[['Teléfono',(c.per||{}).telefono],['Domicilio',(c.per||{}).direccion],['Email',(c.per||{}).email||(c.u||{}).email]].filter(r=>r[1]).map(r=>`<div class="row"><span class="rl">${r[0]}</span><span class="rv">${esc(r[1])}</span></div>`).join('')||'<div style="font-size:.8rem;color:var(--gris)">Sin datos cargados</div>'}
+    </div></div>
+    <div style="padding:0 1rem 1.5rem"><button class="btn-o" onclick="salir()">Cerrar sesión</button></div>
+  </div>`;
+}
+// Estado "bloqueado" (Tramo 4 freemium): el shell YA sabe renderizarlo; hoy no se cablea (prospecto usa prospectoView).
+function tabBloqueado(lbl, cta){
+  return `<div style="padding:2.5rem 1.4rem;text-align:center"><div style="font-size:2rem;opacity:.4">🔒</div>
+    <div style="font-weight:700;margin-top:.6rem;color:var(--tinta)">${esc(lbl||'Función para afiliados')}</div>
+    <div style="font-size:.8rem;color:var(--gris);margin:.4rem 0 1rem">Afiliate para desbloquear esta sección.</div>
+    <button class="btn-r" onclick="${cta||"abrirPuente&&abrirPuente()"}">Afiliarme</button></div>`;
+}
 
 // ── Calificación de la atención (post-cierre): el socio completa su calificación pendiente ──
 function calificacionCardHTML(c){
@@ -3168,7 +3346,7 @@ function render(){
     case 'no-afiliado': html=noAfiliadoView(); break;
     case 'sin-vinculo': html=sinVinculoView(); break;
     case 'error-carga': html=errorCargaView(); break;
-    case 'home': html=homeView(); break;
+    case 'home': html=(tabsOn() && socioShellElegible()) ? tabShellView() : homeView(); break; // Tramo 2: shell de tabs gated (flag off → homeView viejo intacto)
     case 'cambiar-plan': html=cambiarPlanView(); break;
     case 'chequeo': html=chequeoFormView(); break;
     case 'reporte': html=reporteFormView(); break;
@@ -3190,6 +3368,11 @@ function render(){
   const rcodv=el('rcodv'); if(rcodv){ rcodv.onkeydown=e=>{ if(e.key==='Enter') doValidarCodigo(); }; }
   const rlpw=el('rlpw'); if(rlpw){ rlpw.onkeydown=e=>{ if(e.key==='Enter') doReferenteLogin(); }; }
   const rlem=el('rlem'); if(rlem){ rlem.onkeydown=e=>{ if(e.key==='Enter') el('rlpw')?.focus(); }; }
+  // Tramo 2 — shell de tabs: restaurar scroll del tab activo + hydrate en background (núcleo → full, sin bloquear Inicio).
+  if(S.view==='home' && tabsOn() && socioShellElegible()){
+    const cc=el('tab-content'); if(cc) cc.scrollTop=S.scroll[S.tab||'inicio']||0;
+    if(S.cred && S.cred._lazy && !S._hydrating && !S._hydrateKick){ S._hydrateKick=1; setTimeout(()=>hydrateFull(null), 60); }
+  }
 }
 
 render();
