@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v45'; // Fix login: el form conserva el email tipeado ante error (doctrina el form no se borra). HTML network-first + purga
+const CACHE = 'medicar-socio-v46'; // Paquete QR: credencial con flip+QR local (qrcode-generator vendorizado) + calificación de la atención
 const SHELL = [
   './',
   './index.html',
@@ -9,7 +9,8 @@ const SHELL = [
   './icon.svg',
   './icon-192.png',
   './icon-512.png',
-  './apple-touch-icon.png'
+  './apple-touch-icon.png',
+  './vendor/qr/qrcode.js'
 ];
 
 // Instala: cachea el shell de forma resiliente (un recurso faltante no rompe el install).

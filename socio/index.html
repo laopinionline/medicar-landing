@@ -19,6 +19,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script src="./vendor/qr/qrcode.js"></script>
 
 <style>
 :root{
@@ -91,6 +92,13 @@ input{font-family:inherit}
 .cred .lines-bg{position:absolute;right:-8px;top:-6px;opacity:.16;pointer-events:none}
 #cred-carrusel{-ms-overflow-style:none;scrollbar-width:none}
 #cred-carrusel::-webkit-scrollbar{display:none}
+.cred-flip{perspective:1000px;box-sizing:border-box;cursor:pointer}
+.cred-flip-inner{position:relative;transition:transform .55s;transform-style:preserve-3d}
+.cred-flip.flipped .cred-flip-inner{transform:rotateY(180deg)}
+.cred-face{backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.cred-face .cred{margin:0}
+.cred-back{position:absolute;inset:0;transform:rotateY(180deg)}
+.cred-flip-hint{position:absolute;bottom:.55rem;right:.75rem;font-size:.56rem;color:#fff;opacity:.55;z-index:1}
 .cred-top{display:flex;justify-content:space-between;align-items:center;position:relative;z-index:1}
 .cred .cred-brand{display:inline-flex;align-items:center;gap:2px;font-style:italic;font-weight:800;font-size:.95rem}
 .cred .est{font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;font-weight:800;color:#25d07a}
@@ -993,9 +1001,11 @@ async function cargarCredencial(uid){
   // F3: grupo familiar — dependientes cuyo titular es esta persona (F2 habilita la lectura por titularPersonaId).
   let dependientes = [];
   let invitaciones = []; // invitaciones que YO (titular) generé — para la gestión en Mi grupo familiar (regla: titularPersonaId==yo)
+  let calificacionesPend = []; // atenciones cerradas pendientes de que YO las califique
   if(personaId){
     try{ const dep = await db.collection('socios').where('titularPersonaId','==',personaId).get(); dependientes = dep.docs.map(d=>({id:d.id, ...d.data()})); }catch(_){}
     try{ const iv = await db.collection('invitaciones_afiliado').where('titularPersonaId','==',personaId).get(); invitaciones = iv.docs.map(d=>({token:d.id, ...d.data()})).filter(x=>x.estado==='pendiente'); }catch(_){}
+    try{ const cq = await db.collection('calificaciones').where('personaId','==',personaId).get(); calificacionesPend = cq.docs.map(d=>({id:d.id, ...d.data()})).filter(x=>x.estado==='pendiente'); }catch(_){}
   }
 
   // (El socio ya NO ve abonos: la vista de cuenta es por comprobantes/facturas. Se dejó de cargar c.abonos.)
@@ -1073,7 +1083,7 @@ async function cargarCredencial(uid){
     sintomas = sc.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>((a.orden||0)-(b.orden||0)));
   }catch(_){}
 
-  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, invitaciones, facturas, saldoFavor, creditoMovs, pagos, agenda, misTurnos, waAtencion, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
+  return { estado:'ok', u, per, socio, plan, planNombre, dependientes, invitaciones, calificacionesPend, facturas, saldoFavor, creditoMovs, pagos, agenda, misTurnos, waAtencion, personaId, cuestionario, lastRespMs, prefDay, histCount, respLast4wk, sintomas };
 }
 
 /* ---------- Auth flow ---------- */
@@ -1544,11 +1554,10 @@ function errorCargaView(){
   </div>`;
 }
 
-// Una tarjeta de credencial. d = {nombre, numero, dni?, plan?, tipo, activo, esVit}. enCarrusel = estilos de slide.
+// Una tarjeta de credencial con FLIP → dorso con QR verificable. d = {personaId, nombre, numero, dni?, plan?, tipo, activo, esVit}.
 function credCardHTML(d, enCarrusel){
   const estadoLinea = d.activo ? `<div class="est">● Afiliado activo</div>` : `<div class="est off">● Inactivo</div>`;
-  const slide = enCarrusel ? 'flex:0 0 100%;scroll-snap-align:start;box-sizing:border-box;' : '';
-  return `<div class="cred" style="${slide}">
+  const front = `<div class="cred">
     <svg class="lines-bg" width="130" height="80" viewBox="0 0 120 60"><rect x="6" y="16" width="108" height="6" rx="3" fill="#fff"/><rect x="22" y="30" width="92" height="6" rx="3" fill="#fff"/><rect x="40" y="44" width="74" height="6" rx="3" fill="#fff"/></svg>
     <div class="cred-top"><div class="cred-brand">${chv(14,'cw')}<span style="margin-left:1px">medicar</span></div>${estadoLinea}</div>
     <div class="nom">${esc(d.nombre)}</div>
@@ -1558,10 +1567,69 @@ function credCardHTML(d, enCarrusel){
       ${d.esVit?'':`<div class="cell"><span>Plan</span><b>${esc(d.plan||'—')}</b></div>`}
       <div class="cell"><span>Tipo</span><b>${esc(d.tipo)}</b></div>
     </div>
+    <div class="cred-flip-hint">tocá para el QR ⟳</div>
   </div>`;
+  const back = `<div class="cred" style="display:flex;flex-direction:column;align-items:center;justify-content:center">
+    <div style="font-size:.66rem;color:#fff;opacity:.85;font-weight:700;letter-spacing:.04em">${esc(d.nombre)}</div>
+    <div class="cred-qr-slot" style="background:#fff;border-radius:12px;padding:.4rem;margin:.6rem 0;min-height:130px;min-width:130px;display:flex;align-items:center;justify-content:center"></div>
+    <div style="font-size:.6rem;color:#fff;opacity:.7;text-align:center">Mostrá este QR en la atención · tocá para volver ⟳</div>
+  </div>`;
+  const slide = enCarrusel ? 'flex:0 0 100%;scroll-snap-align:start;' : '';
+  return `<div class="cred-flip" id="flip-${esc(d.personaId)}" style="${slide}" onclick="credFlip('${esc(d.personaId)}',this)"><div class="cred-flip-inner"><div class="cred-face">${front}</div><div class="cred-face cred-back">${back}</div></div></div>`;
+}
+// FLIP: togglea la clase en el DOM (sin re-render → no pierde el scroll) + renderiza el QR la 1ª vez.
+async function credFlip(personaId, elm){
+  const cont=(elm&&elm.closest)?elm.closest('.cred-flip'):document.getElementById('flip-'+personaId); if(!cont) return;
+  const abriendo=!cont.classList.contains('flipped'); cont.classList.toggle('flipped');
+  if(abriendo){ const slot=cont.querySelector('.cred-qr-slot'); if(slot && !slot.dataset.done){ slot.dataset.done='1'; renderQRPara(personaId, slot); } }
+}
+async function tokenQRde(personaId){
+  if(!S.qr){ try{ S.qr = await fnsCall('miQR',{}); }catch(_){ S.qr={ token:null, deps:[] }; } }
+  if(S.cred && S.cred.personaId===personaId) return S.qr.token||null;
+  const d=(S.qr.deps||[]).find(x=>x.personaId===personaId); return d?d.token:null;
+}
+async function renderQRPara(personaId, slot){
+  slot.innerHTML='<div style="font-size:.7rem;color:var(--gris)">Generando…</div>';
+  try{
+    const tok=await tokenQRde(personaId);
+    if(!tok){ slot.innerHTML='<div style="font-size:.66rem;color:var(--gris)">No disponible</div>'; return; }
+    if(typeof qrcode==='undefined'){ slot.innerHTML='<div style="font-size:.66rem;color:var(--gris)">QR no disponible</div>'; return; }
+    const qr=qrcode(0,'M'); qr.addData(tok); qr.make();
+    slot.innerHTML=qr.createSvgTag({ cellSize:4, margin:1, scalable:true });
+    const svg=slot.querySelector('svg'); if(svg){ svg.style.width='120px'; svg.style.height='120px'; }
+  }catch(_){ slot.innerHTML='<div style="font-size:.66rem;color:var(--gris)">No se pudo generar</div>'; }
 }
 function credCarruselScroll(elm){ if(!elm) return; const idx=Math.round(elm.scrollLeft/Math.max(1,elm.clientWidth)); const dots=document.getElementById('cred-dots'); if(dots){ Array.prototype.forEach.call(dots.children,(b,i)=>{ b.style.background = i===idx ? 'var(--rojo)' : 'var(--linea)'; }); } }
 function credCarruselIr(i){ const elm=document.getElementById('cred-carrusel'); if(elm) elm.scrollTo({ left:i*elm.clientWidth, behavior:'smooth' }); }
+
+// ── Calificación de la atención (post-cierre): el socio completa su calificación pendiente ──
+function calificacionCardHTML(c){
+  const pend=(c&&c.calificacionesPend)||[]; if(!pend.length) return '';
+  const cal=pend[0];
+  const est=S.califSel||0;
+  const f=cal.fecha&&cal.fecha.toDate?cal.fecha.toDate():null;
+  const fstr=f?f.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'}):'';
+  const stars=[1,2,3,4,5].map(n=>`<button type="button" onclick="event.stopPropagation();set({califSel:${n}})" aria-label="${n} estrella${n>1?'s':''}" style="background:none;border:none;font-size:1.7rem;line-height:1;cursor:pointer;padding:.1rem;color:${n<=est?'#F7941E':'#d8d8d8'}">★</button>`).join('');
+  return `<div class="sec"><div class="sec-h">Calificá tu atención</div><div class="card" style="padding:.95rem 1rem">
+    <div style="font-size:.84rem;font-weight:700;color:var(--tinta,#222);margin-bottom:.15rem">¿Cómo fue tu atención${fstr?(' del '+fstr):''}?</div>
+    <div style="font-size:.72rem;color:#888;margin-bottom:.45rem">${cal.medicoNombre?('Te atendió '+esc(cal.medicoNombre)):'Tu opinión nos ayuda a mejorar'}</div>
+    <div style="display:flex;gap:.1rem;margin-bottom:.5rem">${stars}</div>
+    <textarea id="calif-com" rows="2" placeholder="Contanos algo (opcional)" style="width:100%;border:1px solid #e2e2e2;border-radius:8px;padding:.5rem;font-size:.82rem;font-family:inherit;box-sizing:border-box;resize:vertical"></textarea>
+    <button class="btn-r" onclick="doCalificar('${esc(cal.id)}')" ${est?'':'disabled'} style="margin-top:.55rem;width:100%;opacity:${est?'1':'.5'}">Enviar calificación</button>
+    ${S.califMsg?`<div style="font-size:.74rem;color:#2E8B57;margin-top:.5rem;text-align:center">${esc(S.califMsg)}</div>`:''}
+  </div></div>`;
+}
+async function doCalificar(episodioId){
+  const est=S.califSel||0; if(!est) return;
+  const com=((document.getElementById('calif-com')||{}).value||'').trim().slice(0,500);
+  const btn=(typeof event!=='undefined')&&event.target; if(btn){ btn.disabled=true; btn.textContent='Enviando…'; }
+  try{
+    await db.collection('calificaciones').doc(episodioId).set({ estrellas:est, comentario:com, estado:'calificada', calificadoEn:firebase.firestore.FieldValue.serverTimestamp() },{merge:true});
+    S.califSel=0; S.califMsg='¡Gracias por tu calificación!';
+    if(S.cred&&Array.isArray(S.cred.calificacionesPend)) S.cred.calificacionesPend=S.cred.calificacionesPend.filter(x=>x.id!==episodioId);
+    render();
+  }catch(e){ if(btn){ btn.disabled=false; btn.textContent='Enviar calificación'; } S.califMsg='No se pudo enviar. Probá de nuevo.'; render(); }
+}
 function homeView(){
   const c=S.cred||{}; const per=c.per||{}; const u=c.u||{}; const socio=c.socio||null;
   // R1.5: cargar la bandeja de solicitudes una vez (fire-and-forget, guard). Solo un timestamp/nombre, no dato sensible.
@@ -1607,8 +1675,8 @@ function homeView(){
   // CARRUSEL de credenciales: la del titular PRIMERA + una por integrante que TODAVÍA GESTIONA (menores siempre +
   // adultos SIN cuenta propia). Los adultos independientes (cuentaPropia) quedan AFUERA (su credencial vive en su app).
   const _indepCred = (d)=> d.cuentaPropia===true && (edadDe(d.fechaNacimiento)||0)>=18;
-  const credManaged = depsDeMiSocio.filter(d=> d.activo!==false && !_indepCred(d)).map(d=>({ nombre:d.nombreVista||'—', numero:d.numeroAfiliado||'—', dni:null, plan:'Cobertura familiar', tipo:tipoLbl(d.tipoAfiliado), activo:d.activo!==false, esVit:(d.vitalicio===true)||esVit }));
-  const credTitular = { nombre, numero, dni:per.dni, plan, tipo, activo, esVit };
+  const credManaged = depsDeMiSocio.filter(d=> d.activo!==false && !_indepCred(d)).map(d=>({ personaId:d.personaId, nombre:d.nombreVista||'—', numero:d.numeroAfiliado||'—', dni:null, plan:'Cobertura familiar', tipo:tipoLbl(d.tipoAfiliado), activo:d.activo!==false, esVit:(d.vitalicio===true)||esVit }));
+  const credTitular = { personaId:c.personaId, nombre, numero, dni:per.dni, plan, tipo, activo, esVit };
   const credCards = [credTitular, ...credManaged];
   const credencialHTML = credCards.length<=1
     ? credCardHTML(credTitular, false) // socio sin grupo → una tarjeta idéntica a hoy (cero cambio visual)
@@ -1758,6 +1826,8 @@ function homeView(){
     ${credencialHTML}
 
     <a class="btn-emerg" href="tel:${TEL_EMERG}" style="margin-top:1rem">${IC.phone}<span>EMERGENCIAS<span class="em-sub">Llamar al ${TEL_EMERG}</span></span></a>
+
+    ${calificacionCardHTML(c)}
 
     ${sinAfilNota}
 

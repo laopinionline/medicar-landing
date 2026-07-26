@@ -551,6 +551,7 @@ input.sp-cap:focus-visible{outline:2px solid var(--r);outline-offset:2px}
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script src="./vendor/zxing/reader.js"></script>
 <script>
 /* Firebase init. apiKey/firebaseConfig son publicos por diseno (viven en el frontend, no son secreto). */
 const firebaseConfig = {
@@ -1840,6 +1841,7 @@ function dDespBuscar(){
     <div class="field"><label>DNI, N° de afiliado o apellido/nombre</label><input id="dspq" type="text" placeholder="Ej. 30123456 o Pérez" value="${esc(d.q||'')}" autocomplete="off" oninput="dspTypeahead(this.value)"></div>
     <div id="dsperr" class="err" style="display:none;margin-bottom:.6rem"></div>
     <button class="btn-r" id="btnBuscar" onclick="dspBuscar()">Buscar paciente</button>
+    <button class="btn-o" onclick="dspEscanearQR()" style="margin-top:.5rem">📷 Escanear credencial</button>
     <button class="btn-o" onclick="dspAltaDirecta()" style="margin-top:.5rem">Cargar sin DNI</button>
     <div id="dsplista">${dspListaHTML(d)}</div>
   </div>`;
@@ -1908,15 +1910,81 @@ function dspListaHTML(d){
 // Paciente elegido (numérico 1, alfabético 1, o clic en la lista): carga historial y va al form. Igual que hoy.
 async function dspIrAlPaciente(pac){
   const d=dspState();
-  d.paciente=pac; d.noEncontrado=false; d.hist=[]; d.resultados=null; d.otroLugar=false; // arranca en modo AUTO (domiciliaria) si la ficha trae domicilio
+  d.paciente=pac; d.noEncontrado=false; d.hist=[]; d.resultados=null; d.otroLugar=false; d.notasSocio=null; d.activeEp=null; // arranca en modo AUTO (domiciliaria) si la ficha trae domicilio
   try{
     const hs=await db.collection('episodios').where('pacienteId','==',pac.id).limit(20).get();
-    d.hist=hs.docs.map(x=>x.data()).sort((a,b)=>((b.creadoEn&&b.creadoEn.seconds)||0)-((a.creadoEn&&a.creadoEn.seconds)||0));
+    d.hist=hs.docs.map(x=>({ _id:x.id, ...x.data() })).sort((a,b)=>((b.creadoEn&&b.creadoEn.seconds)||0)-((a.creadoEn&&a.creadoEn.seconds)||0));
+    d.activeEp=d.hist.find(e=>['despacho','en_camino','arribo','atencion'].includes(e.estado))||null; // atención en curso
   }catch(_){ d.hist=[]; }
+  // Notas internas del socio (staff-only, append-only) — para el promedio + últimas en la ficha
+  try{
+    const ns=await db.collection('notas_socio').where('personaId','==',pac.id).limit(20).get();
+    d.notasSocio=ns.docs.map(x=>x.data()).sort((a,b)=>((b.en&&b.en.seconds)||0)-((a.en&&a.en.seconds)||0));
+  }catch(_){ d.notasSocio=[]; }
   d.codigo=''; d.stage='form';
   render(); navPush();
 }
 function dspElegirPaciente(id){ const d=dspState(); const pac=(d.resultados||[]).find(p=>p.id===id); if(pac) dspIrAlPaciente(pac); }
+
+// ── Escáner de credencial QR (médico/despachante): cámara + zxing LOCAL (sin CDN) → resolverQR (staff-gated) → ficha ──
+let _qrStream=null, _qrRaf=null, _qrBusy=false, _qrDone=false;
+async function dspEscanearQR(){
+  _qrDone=false;
+  let ov=document.getElementById('qr-scan-ov');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='qr-scan-ov';
+    ov.style.cssText='position:fixed;inset:0;z-index:9999;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center';
+    ov.innerHTML='<video id="qr-video" playsinline muted style="width:100%;max-width:480px;max-height:70vh;object-fit:cover;border-radius:12px"></video>'
+      +'<div id="qr-scan-msg" style="color:#fff;font-size:.9rem;margin-top:1rem;text-align:center;padding:0 1rem">Apuntá al QR de la credencial…</div>'
+      +'<button onclick="dspScanStop()" style="margin-top:1.2rem;background:#fff;color:#000;border:none;border-radius:10px;padding:.7rem 1.6rem;font-weight:700;font-size:.9rem">Cancelar</button>';
+    document.body.appendChild(ov);
+  } else { ov.style.display='flex'; dspScanMsg('Apuntá al QR de la credencial…'); }
+  const vid=document.getElementById('qr-video');
+  try{
+    _qrStream=await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }, audio:false });
+    vid.srcObject=_qrStream; await vid.play();
+  }catch(e){ dspScanMsg('No se pudo abrir la cámara. Revisá los permisos.'); return; }
+  if(typeof ZXingWASM!=='undefined' && ZXingWASM.setZXingModuleOverrides){
+    try{ ZXingWASM.setZXingModuleOverrides({ locateFile:(p)=> (p&&p.endsWith('.wasm')) ? './vendor/zxing/zxing_reader.wasm' : p }); }catch(_){}
+  }
+  const cvs=document.createElement('canvas');
+  const tick=async ()=>{
+    if(_qrDone) return;
+    if(!_qrBusy && vid.readyState>=2 && vid.videoWidth){
+      _qrBusy=true;
+      try{
+        cvs.width=vid.videoWidth; cvs.height=vid.videoHeight;
+        const cx=cvs.getContext('2d'); cx.drawImage(vid,0,0,cvs.width,cvs.height);
+        const img=cx.getImageData(0,0,cvs.width,cvs.height);
+        const res=await ZXingWASM.readBarcodesFromImageData(img, { formats:['QRCode'], tryHarder:true, maxNumberOfSymbols:1 });
+        if(res && res.length && res[0].text){ await dspQRDecodificado(res[0].text); }
+      }catch(_){}
+      _qrBusy=false;
+    }
+    if(!_qrDone) _qrRaf=requestAnimationFrame(tick);
+  };
+  _qrRaf=requestAnimationFrame(tick);
+}
+function dspScanMsg(m){ const el=document.getElementById('qr-scan-msg'); if(el) el.textContent=m; }
+function dspScanStop(){
+  _qrDone=true;
+  if(_qrRaf){ cancelAnimationFrame(_qrRaf); _qrRaf=null; }
+  if(_qrStream){ try{ _qrStream.getTracks().forEach(t=>t.stop()); }catch(_){} _qrStream=null; }
+  const ov=document.getElementById('qr-scan-ov'); if(ov) ov.style.display='none';
+}
+async function dspQRDecodificado(token){
+  if(_qrDone && _qrRaf===null) {} // ya cerrado
+  _qrDone=true;                    // el PRIMER match gana; congela el loop mientras resolvemos
+  dspScanMsg('Credencial leída. Buscando…');
+  let r;
+  try{ r=await fnsCall('resolverQR',{ token }); }
+  catch(e){ _qrDone=false; dspScanMsg('QR no reconocido. Volvé a intentar.'); return; }
+  let pac=null;
+  try{ const p=await db.collection('pacientes').doc(r.personaId).get(); if(p.exists) pac={id:p.id,...p.data()}; }catch(_){}
+  if(!pac) pac={ id:r.personaId, apellido:'', nombre:(r.nombre||'—'), numeroAfiliado:(r.numeroAfiliado||'') };
+  dspScanStop();
+  dspIrAlPaciente(pac);
+}
 
 function dspAltaDirecta(){ const d=dspState(); const q=/^\d+$/.test((d&&d.q)||'')?d.q:''; S.dsp={stage:'form',paciente:null,noEncontrado:true,hist:[],q:q,codigo:''}; render(); navPush(); } // preserva el DNI numérico tipeado -> dAlta lo pre-llena (como Fase 1)
 function dspReset(){ S.dsp={stage:'buscar'}; render(); }
@@ -1974,6 +2042,21 @@ function dCapsula(d){
   const hist = (d.hist&&d.hist.length)
     ? d.hist.map(e=>`<div class="lr"><div class="lrb"><div class="lrn">${codEmoji(e.codigoPresuntivo)} ${e.motivoLlamado||'—'}</div><div class="lrs">${fechaDe(e)} · ${e.estado||'—'}</div></div></div>`).join('')
     : `<div style="font-size:.78rem;color:var(--ink3)">Sin episodios previos</div>`;
+  // Atención en curso → el médico puede asignársela por CF (sin pasar por crear despacho). Si no hay, aviso "Sin atención activa".
+  const ae=d.activeEp;
+  const esMed=S.user&&S.user.rol==='medico';
+  const yaMia = ae && S.user && ae.medicoId===S.user.uid;
+  const asignarBlock = ae
+    ? `<div class="card" style="border:1.5px solid var(--r)">
+        <div class="ch">Atención en curso</div>
+        <div style="font-size:.85rem;font-weight:700">${codEmoji(ae.codigoPresuntivo)} ${esc(ae.motivoLlamado||'—')}</div>
+        <div style="font-size:.76rem;color:var(--ink3);margin:.15rem 0 .6rem">${fechaDe(ae)} · estado: ${esc(ae.estado||'—')}${ae.medicoNombre?(' · '+esc(ae.medicoNombre)):''}</div>
+        ${esMed ? (yaMia
+            ? `<div style="font-size:.8rem;color:var(--ok,#2E8B57);font-weight:700">✓ Ya es tu atención</div>`
+            : `<button class="btn-r" id="btnAsignarme" onclick="dspAsignarme('${esc(ae._id)}')">Asignarme esta atención</button>`)
+          : `<div style="font-size:.76rem;color:var(--ink3)">Un médico puede tomarla desde su sesión.</div>`}
+      </div>`
+    : `<div class="card"><div style="font-size:.82rem;color:var(--ink3)">Sin atención activa. Podés ver la ficha y el historial, o iniciar una atención abajo.</div></div>`;
   return `
   <div class="card card-dk">
     <div class="ch">Paciente identificado</div>
@@ -1981,10 +2064,41 @@ function dCapsula(d){
     <div style="font-size:.95rem;color:#fff;opacity:.85;margin-top:.15rem"><strong style="font-size:1.05rem">${edad} años</strong> · DNI ${p.dni||'—'}</div>
     ${alerta}
   </div>
+  ${asignarBlock}
+  ${notasSocioHTML(d)}
   <div class="card">
     <div class="ch">Historial (${(d.hist||[]).length})</div>
     ${hist}
   </div>`;
+}
+
+// Notas INTERNAS del socio (staff-only, el socio JAMÁS las ve): promedio + últimas del médico.
+function notasSocioHTML(d){
+  const ns=d.notasSocio; if(ns==null) return '';
+  if(!ns.length) return '';
+  const conEstrellas=ns.filter(n=>typeof n.estrellas==='number' && n.estrellas>0);
+  const prom = conEstrellas.length ? (conEstrellas.reduce((s,n)=>s+n.estrellas,0)/conEstrellas.length) : null;
+  const stars = prom!=null ? '★'.repeat(Math.round(prom))+'☆'.repeat(5-Math.round(prom)) : '';
+  const filas = ns.slice(0,4).map(n=>{
+    const f=n.en&&n.en.toDate?n.en.toDate():null;
+    const fstr=f?f.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'}):'';
+    const st=typeof n.estrellas==='number'&&n.estrellas>0?('<span style="color:#F7941E">'+'★'.repeat(n.estrellas)+'</span> '):'';
+    return `<div class="lr"><div class="lrb"><div class="lrn" style="font-size:.82rem">${st}${esc(n.nota||'—')}</div><div class="lrs">${fstr}${n.medicoNombre?(' · '+esc(n.medicoNombre)):''}</div></div></div>`;
+  }).join('');
+  return `<div class="card">
+    <div class="ch">Notas internas del staff ${prom!=null?`· <span style="color:#F7941E">${stars}</span> ${prom.toFixed(1)}`:''}</div>
+    <div style="font-size:.7rem;color:var(--ink3);margin-bottom:.4rem">Uso interno — no visible para el socio.</div>
+    ${filas}
+  </div>`;
+}
+async function dspAsignarme(episodioId){
+  const btn=document.getElementById('btnAsignarme'); if(btn){ btn.disabled=true; btn.textContent='Asignando…'; }
+  try{
+    await fnsCall('asignarmeAtencion',{ episodioId });
+    const d=dspState();
+    if(d.activeEp){ d.activeEp.medicoId=S.user.uid; d.activeEp.medicoNombre=(S.user.nombre||''); }
+    render();
+  }catch(e){ if(btn){ btn.disabled=false; btn.textContent='Asignarme esta atención'; } alert('No se pudo asignar: '+((e&&e.message)||e)); }
 }
 
 function dAlta(d){
@@ -2747,7 +2861,8 @@ const APAR_LBL={}; [...APAR_RESP,...APAR_CV,...APAR_ABD].forEach(o=>{APAR_LBL[o[
 const LBL_ST='display:block;font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);font-weight:600;margin:.6rem 0 .3rem';
 const CHIP_ST='display:inline-flex;align-items:center;gap:.35rem;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:.35rem .6rem;font-size:.8rem;cursor:pointer';
 
-function freshClin(){ return {respiratorio:null,cardiovascular:null,abdomen:[],codigoReal:null,internacion:null,rechaza:null}; }
+function freshClin(){ return {respiratorio:null,cardiovascular:null,abdomen:[],codigoReal:null,internacion:null,rechaza:null,socStars:0}; }
+function clinSocStar(n){ if(!S.ep||!S.ep.clin) return; S.ep.clin.socStars=n; document.querySelectorAll('[data-socstar]').forEach(b=>{ b.style.color=(parseInt(b.dataset.socstar,10)<=n)?'#F7941E':'#d8d8d8'; }); }
 function pillStyle(on,color){
   const bd=color||'var(--border2)', bg=color?color+'1a':'var(--bg)', fg=color||'var(--ink)';
   return `border:2px solid ${bd};background:${bg};color:${fg};border-radius:10px;padding:.5rem .65rem;font-size:.8rem;cursor:pointer;font-weight:${on?'700':'500'};opacity:${on?'1':'.55'};box-shadow:${on?'0 0 0 2px rgba(0,0,0,.18) inset':'none'}`;
@@ -2816,6 +2931,11 @@ function clinForm(ep){
     </div>
     <div class="field" id="clin-cron-otros" style="display:none;margin-top:.4rem"><input id="clin-cron-otros-txt" type="text" placeholder="Otro antecedente crónico" autocomplete="off"></div>
   </div>
+  <div class="card"><div class="ch">Nota interna del socio</div>
+    <div style="font-size:.7rem;color:var(--ink3);margin-bottom:.45rem">Uso interno del staff — el socio NO la ve. Opcional.</div>
+    <div style="display:flex;gap:.1rem;margin-bottom:.5rem">${[1,2,3,4,5].map(n=>`<button type="button" data-socstar="${n}" onclick="clinSocStar(${n})" style="background:none;border:none;font-size:1.6rem;line-height:1;cursor:pointer;padding:.1rem;color:${n<=(c.socStars||0)?'#F7941E':'#d8d8d8'}">★</button>`).join('')}</div>
+    <div class="field" style="margin:0"><textarea id="clin-socnota" placeholder="Observación interna sobre el socio (opcional)…"></textarea></div>
+  </div>
   <div id="ep-err" class="err" style="display:none;margin-bottom:.5rem"></div>
   <button class="btn-r" onclick="clinCerrar()">Cerrar episodio</button>
   <button class="btn-o" onclick="epStage('')" style="margin-top:.5rem">Volver (sin guardar)</button>`;
@@ -2873,6 +2993,23 @@ async function clinCerrar(){
     })
   });
   audit('episodio_cerrado','episodio',(S.ep&&S.ep.data&&S.ep.data.id)||'','clinico'+((desenlace&&desenlace.codigoReal)?(' '+desenlace.codigoReal):''));
+
+  // NOTA INTERNA del socio (staff-only, append-only, JAMÁS visible para el socio). Solo si el médico la cargó.
+  const socNota=g('clin-socnota'), socStars=(c&&c.socStars)||0;
+  if(ep.data.pacienteId && (socNota || socStars)){
+    try{
+      await db.collection('notas_socio').add({
+        personaId: ep.data.pacienteId,
+        episodioId: (ep.data&&ep.data.id)||null,
+        medicoId: S.user.uid,
+        medicoNombre: (S.user.nombre||''),
+        estrellas: socStars||null,
+        nota: socNota||'',
+        visibleSocio: false,
+        en: FV()
+      });
+    }catch(_){ /* la nota interna no bloquea el cierre */ }
+  }
 }
 
 // Reapertura: cerrado -> atencion. Solo médico ASIGNADO o admin (la regla es la defensa real).

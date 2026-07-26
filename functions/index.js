@@ -767,6 +767,76 @@ exports.revocarInvitacion = onCall(async (request) => {
   return { ok: true };
 });
 
+/* ===================== PAQUETE QR — credencial verificable + escaneo + calificación =====================
+   Token opaco estático en socios/{id}.qrToken (lo mintea miQR). resolverQR (staff) lo cambia por la identidad + loguea.
+   asignarmeAtencion: el médico se auto-asigna una atención activa. calificacionAlCerrar: trigger que crea la calificación
+   pendiente del socio al cerrar el episodio. */
+const _rolesDe = (u) => Array.isArray(u && u.roles) ? u.roles : ((u && u.rol) ? [u.rol] : []);
+
+// miQR — el socio pide su token de QR (lazy-mint estático en socios/{id}.qrToken) + los de sus dependientes gestionados
+// (el titular porta los QR del grupo en el carrusel). Solo IDENTIFICA; no viaja PII.
+const _mintQR = async (ref, data) => { let qt = (data || {}).qrToken; if (!qt) { qt = 'q_' + crypto.randomBytes(18).toString('base64url'); await ref.set({ qrToken: qt }, { merge: true }); } return qt; };
+exports.miQR = onCall(async (request) => {
+  const personaId = await assertAfiliado(request);
+  const sq = await db.collection('socios').where('personaId', '==', personaId).get();
+  const sd = sq.docs.find((d) => d.data().activo !== false) || sq.docs[0];
+  if (!sd) throw new HttpsError('failed-precondition', 'Tu cuenta no tiene un socio asociado.');
+  const token = await _mintQR(sd.ref, sd.data());
+  const deps = [];
+  if (!(sd.data() || {}).titularSocioId) { // soy titular → minteo los QR de mis dependientes activos
+    const dq = await db.collection('socios').where('titularPersonaId', '==', personaId).get();
+    for (const d of dq.docs) { if (d.data().activo === false) continue; deps.push({ personaId: d.data().personaId, token: await _mintQR(d.ref, d.data()) }); }
+  }
+  return { token, deps };
+});
+
+// resolverQR — el STAFF escanea un QR: resuelve el token a la identidad (para abrir la ficha) y LOGuea el acceso.
+exports.resolverQR = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid; if (!uid) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const u = (await db.collection('usuarios').doc(uid).get()).data() || {};
+  if (!_rolesDe(u).some((r) => ['medico', 'despachante', 'admin', 'superadmin'].includes(r))) throw new HttpsError('permission-denied', 'Solo el staff puede resolver un QR.');
+  const token = String((request.data || {}).token || '').trim();
+  if (!token) throw new HttpsError('invalid-argument', 'QR inválido.');
+  const sq = await db.collection('socios').where('qrToken', '==', token).limit(1).get();
+  if (sq.empty) throw new HttpsError('not-found', 'QR no reconocido.');
+  const socio = sq.docs[0].data() || {}; const personaId = socio.personaId;
+  await db.collection('accesos_qr').add({ personaId: personaId || null, socioId: sq.docs[0].id, porUid: uid, en: FV() }); // trazabilidad
+  logger.info('[resolverQR]', { porUid: uid, socioId: sq.docs[0].id });
+  return { personaId: personaId || null, socioId: sq.docs[0].id, nombre: socio.nombreVista || '', numeroAfiliado: socio.numeroAfiliado || '' };
+});
+
+// asignarmeAtencion — el MÉDICO se auto-asigna una atención ACTIVA (atajo del escaneo; no relaja la regla de episodios).
+exports.asignarmeAtencion = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid; if (!uid) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const u = (await db.collection('usuarios').doc(uid).get()).data() || {};
+  if (!_rolesDe(u).includes('medico')) throw new HttpsError('permission-denied', 'Solo un médico puede asignarse una atención.');
+  const episodioId = String((request.data || {}).episodioId || '').trim();
+  if (!episodioId) throw new HttpsError('invalid-argument', 'Falta el episodio.');
+  const ref = db.collection('episodios').doc(episodioId);
+  const snap = await ref.get(); if (!snap.exists) throw new HttpsError('not-found', 'Episodio no encontrado.');
+  const ep = snap.data() || {};
+  if (!['despacho', 'en_camino', 'arribo', 'atencion'].includes(ep.estado)) throw new HttpsError('failed-precondition', 'Esa atención no está activa.');
+  await ref.set({ medicoId: uid, medicoNombre: u.nombre || '', asignadoEn: FV(), asignadoPorEscaneo: true }, { merge: true });
+  logger.info('[asignarmeAtencion]', { episodioId, uid });
+  return { ok: true };
+});
+
+// calificacionAlCerrar — trigger: al cerrar un episodio de un SOCIO, crea su calificación 'pendiente' (la completa el socio).
+exports.calificacionAlCerrar = onDocumentUpdated('episodios/{id}', async (event) => {
+  const before = (event.data && event.data.before && event.data.before.data()) || {};
+  const after = (event.data && event.data.after && event.data.after.data()) || {};
+  if (before.estado === 'cerrado' || after.estado !== 'cerrado') return null; // solo la transición → cerrado
+  const episodioId = event.params.id; const personaId = after.pacienteId;
+  if (!personaId) return null;
+  const sq = await db.collection('socios').where('personaId', '==', personaId).limit(1).get();
+  if (sq.empty) return null; // paciente no-socio → sin calificación
+  const ref = db.collection('calificaciones').doc(episodioId);
+  if ((await ref.get()).exists) return null; // idempotente
+  await ref.set({ episodioId, personaId, medicoId: after.medicoId || null, medicoNombre: after.medicoNombre || '', fecha: FV(), estado: 'pendiente', estrellas: null });
+  logger.info('[calificacionAlCerrar]', { episodioId });
+  return null;
+});
+
 // (3) revocarVinculoReferente — el TITULAR corta un código/vínculo. Pasa el código Y el espejo a 'revocado' en
 // un batch atómico → el referente pierde acceso a ESE titular AL INSTANTE (la regla lee estado!='activo'). Sus
 // otros vínculos siguen; el claim NO se toca (marca "es referente", no da acceso por sí solo).
