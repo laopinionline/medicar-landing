@@ -43,10 +43,10 @@ t('b2: vitalicio (planSnapshot.vitalicio) → skip cubierto_vitalicio, aunque no
 t('b2 regresión: socio normal sin la cobertura → cargo fuera_cobertura (NO cubierto)', (cargoDeEpisodio(epBase({ socioId: 's1', planSnapshot: { coberturas: {}, enCarencia: [] } }), 'en', tar, 2026).cargo || {}).regla === 'fuera_cobertura');
 
 // --- 2c) SOCIO PWA (a1/a2/a3): la credencial NO nombra plan/cuota si vitalicio; "Afiliado activo" queda ---
-t('a: esVit derivado del flag en la credencial', /const esVit = !!\(socio && socio\.vitalicio===true\)/.test(socio));
+t('a: esVit derivado del flag en la credencial (vitalicio o bonificado → sin cuota, credencial pelada)', /const esVit = !!\(socio && \(socio\.vitalicio===true \|\| socio\.bonificado===true\)\)/.test(socio));
 t('a1: celda "Plan" oculta si vitalicio (credCardHTML, ${d.esVit?...})', /\$\{d\.esVit\?''\:`<div class="cell"><span>Plan<\/span>/.test(socio));
 t('a2: bloque de cuota NO se renderiza si vitalicio', /if\(socio && socio\.planId && c\.plan && !esVit\)\{/.test(socio));
-t('a3: abrirCambiarPlan no-op defensivo si vitalicio', /vitalicio===true\) return;/.test(socio) && /function abrirCambiarPlan/.test(socio));
+t('a3: abrirCambiarPlan no-op defensivo si sin-cuota (vitalicio o bonificado)', /vitalicio===true \|\| S\.cred\.socio\.bonificado===true\)\) return;/.test(socio) && /function abrirCambiarPlan/.test(socio));
 t('a: "Afiliado activo" sigue siendo la etiqueta neutra', /● Afiliado activo/.test(socio));
 
 // --- 2d) PANEL (a-bis + d): vista "Como afiliado" neutralizada + chip VITALICIO en la lista ---
@@ -54,7 +54,7 @@ t('a-bis: "Como afiliado" neutraliza vitalicio ("Cobertura integral" + "Sin cuot
 t('d: chip VITALICIO para el staff en la lista de Afiliados', /function vitalicioChip/.test(app) && /vitalicioChip\(s\)/.test(app) && />VITALICIO</.test(app));
 
 // --- 3) SERVER: cambiarMiPlan rechaza al vitalicio ("tu plan lo gestiona MEDICAR") ---
-t('cambiarMiPlan: rechaza socio vitalicio', /socio\.vitalicio === true\) throw new HttpsError\('failed-precondition', 'Tu plan lo gestiona MEDICAR\.'\)/.test(fn));
+t('cambiarMiPlan: rechaza socio sin cuota (vitalicio o bonificado)', /socio\.vitalicio === true \|\| socio\.bonificado === true\) throw new HttpsError\('failed-precondition', 'Tu plan lo gestiona MEDICAR\.'\)/.test(fn));
 // checkoutAfiliacion sigue rechazando cualquier key desconocida (no hay plan-vitalicio en el checkout)
 t('checkout sin plan-vitalicio (rechaza key desconocida)', /Plan inválido/.test(fn) && !/plan-vitalicio/.test(fn));
 

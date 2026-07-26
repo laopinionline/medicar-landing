@@ -2247,9 +2247,12 @@ async function resolverAtribucion(personaId, domCanon){
       return Object.assign({ planId, nombre: pl.nombre||'', precio:(pl.precio!=null?pl.precio:0), carenciaDias:(pl.carenciaDias!=null?pl.carenciaDias:0), coberturas: pl.coberturas||{}, enCarencia, vigenteAlMomento: firebase.firestore.Timestamp.now() }, heredado?{heredadoDe:'titular'}:{});
     };
     const vitalicioSnap=()=>({ vitalicio:true, enCarencia:[], vigenteAlMomento: firebase.firestore.Timestamp.now() }); // cobertura TOTAL sin carencia
+    const bonificadoSnap=()=>({ bonificado:true, enCarencia:[], vigenteAlMomento: firebase.firestore.Timestamp.now() }); // BONIFICADO (área): cobertura TOTAL sin cuota, origen distinto y trazable (cubierto_bonificado)
     let planSnapshot=null;
     if(socio.vitalicio===true){
       planSnapshot=vitalicioSnap(); // VITALICIO propio: cubierto_vitalicio, nunca fuera_cobertura
+    } else if(socio.bonificado===true){
+      planSnapshot=bonificadoSnap(); // BONIFICADO propio: cubierto_bonificado (cobertura total como cortesía del área)
     } else if(socio.planId){
       const ps=await db.collection('planes').doc(socio.planId).get();
       if(ps.exists) planSnapshot=buildPlanSnap(ps.data(), socio.planId, false);
@@ -4437,7 +4440,7 @@ async function generarCargos(){
   if(!puede('facturar')) return; // la regla es la defensa real
   facErr('');
   if(!Array.isArray(S.fac.tarifas)){ facErr('Esperá a que carguen las tarifas.'); return; }
-  const rep={ generados:0, sinTarifa:0, sinCargo:0, cubierto_area:0, cubierto_vitalicio:0, yaTenian:0, sinAtribucion:0, errores:0 }; // F3b: cubierto_area = episodios en área protegida; cubierto_vitalicio = socio vitalicio (cobertura total)
+  const rep={ generados:0, sinTarifa:0, sinCargo:0, cubierto_area:0, cubierto_vitalicio:0, cubierto_bonificado:0, yaTenian:0, sinAtribucion:0, errores:0 }; // F3b: cubierto_area = episodios en área protegida; cubierto_vitalicio = socio vitalicio; cubierto_bonificado = socio bonificado por área (ambos sin cuota, orígenes distintos)
   try{
     // SOLO LECTURA de episodios cerrados + cargos existentes (idempotencia por episodioId).
     const [epsSnap, cgSnap] = await Promise.all([
@@ -4458,6 +4461,7 @@ async function generarCargos(){
       const sinAtrib=!atrib;
       if(atrib && atrib.tipo==='lugar'){ rep.cubierto_area=(rep.cubierto_area||0)+1; continue; } // F3b (paridad núcleo): área protegida → NO factura a la persona (contrato = F4)
       if(atrib && atrib.planSnapshot && atrib.planSnapshot.vitalicio===true){ rep.cubierto_vitalicio=(rep.cubierto_vitalicio||0)+1; continue; } // VITALICIO: cobertura total → sin cargo (paridad núcleo)
+      if(atrib && atrib.planSnapshot && atrib.planSnapshot.bonificado===true){ rep.cubierto_bonificado=(rep.cubierto_bonificado||0)+1; continue; } // BONIFICADO (área): cobertura total → sin cargo (esSinCuota, paridad núcleo)
       const socioId=(atrib && atrib.socioId)?atrib.socioId:null;
       const cob=(atrib && atrib.planSnapshot && atrib.planSnapshot.coberturas)?atrib.planSnapshot.coberturas:{};
       const enCar=(atrib && atrib.planSnapshot && Array.isArray(atrib.planSnapshot.enCarencia))?atrib.planSnapshot.enCarencia:[];
@@ -4490,7 +4494,7 @@ async function generarCargos(){
       catch(e){ rep.errores++; console.warn('[generarCargos] fallo al crear cargo de',epId,e); }
     }
     audit('cargos_generados','cargos','',rep.generados+' generados, '+rep.sinTarifa+' sin tarifa');
-    S.fac.report=`Generados: <b>${rep.generados}</b>${rep.enCarencia?(' (en carencia: '+rep.enCarencia+')'):''} · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo}${rep.cubierto_area?(' · Cubierto por área: <b>'+rep.cubierto_area+'</b>'):''}${rep.cubierto_vitalicio?(' · Cubierto (vitalicio): <b>'+rep.cubierto_vitalicio+'</b>'):''} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
+    S.fac.report=`Generados: <b>${rep.generados}</b>${rep.enCarencia?(' (en carencia: '+rep.enCarencia+')'):''} · Salteados sin tarifa: ${rep.sinTarifa} · Sin cargo (cubierto por abono): ${rep.sinCargo}${rep.cubierto_area?(' · Cubierto por área: <b>'+rep.cubierto_area+'</b>'):''}${rep.cubierto_vitalicio?(' · Cubierto (vitalicio): <b>'+rep.cubierto_vitalicio+'</b>'):''}${rep.cubierto_bonificado?(' · Cubierto (bonificado): <b>'+rep.cubierto_bonificado+'</b>'):''} · Ya tenían: ${rep.yaTenian} · Sin atribución (históricos): <b>${rep.sinAtribucion}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
 }
@@ -4510,7 +4514,7 @@ async function generarCargosCF(){
   try{
     const r=await fnsCall('generarCargosCF',{dry:false});
     audit('cargos_generados','cargos','',(r.generados||0)+' generados (CF)');
-    S.fac.report=`Generados: <b>${r.generados||0}</b>${r.enCarencia?(' (en carencia: '+r.enCarencia+')'):''} · Salteados sin tarifa: ${r.sinTarifa||0} · Sin cargo (cubierto por abono): ${r.sinCargo||0}${r.cubierto_area?(' · Cubierto por área: <b>'+r.cubierto_area+'</b>'):''}${r.cubierto_vitalicio?(' · Cubierto (vitalicio): <b>'+r.cubierto_vitalicio+'</b>'):''} · Ya tenían: ${r.yaTenian||0} · Sin atribución (históricos): <b>${r.sinAtribucion||0}</b>${r.errores?(' · Errores: '+r.errores):''} · <i>motor server-side</i>`;
+    S.fac.report=`Generados: <b>${r.generados||0}</b>${r.enCarencia?(' (en carencia: '+r.enCarencia+')'):''} · Salteados sin tarifa: ${r.sinTarifa||0} · Sin cargo (cubierto por abono): ${r.sinCargo||0}${r.cubierto_area?(' · Cubierto por área: <b>'+r.cubierto_area+'</b>'):''}${r.cubierto_vitalicio?(' · Cubierto (vitalicio): <b>'+r.cubierto_vitalicio+'</b>'):''}${r.cubierto_bonificado?(' · Cubierto (bonificado): <b>'+r.cubierto_bonificado+'</b>'):''} · Ya tenían: ${r.yaTenian||0} · Sin atribución (históricos): <b>${r.sinAtribucion||0}</b>${r.errores?(' · Errores: '+r.errores):''} · <i>motor server-side</i>`;
     render();
   }catch(e){ facErr('No se pudieron generar los cargos: '+(e.message||e)); }
 }
@@ -4620,7 +4624,7 @@ async function generarAbonos(){
   facErr('');
   const periodo=(document.getElementById('fac-ab-periodo')?.value||S.fac.periodo||'').trim();
   if(!/^\d{4}-\d{2}$/.test(periodo)){ facErr('Elegí un período válido (AAAA-MM).'); return; }
-  const rep={ generados:0, sinPlan:0, yaTenian:0, planInvalido:0, corpSinDest:0, destFijo:0, vitalicios:0, errores:0 };
+  const rep={ generados:0, sinPlan:0, yaTenian:0, planInvalido:0, corpSinDest:0, destFijo:0, vitalicios:0, bonificados:0, errores:0 };
   try{
     // SOLO LECTURA: socios activos + abonos del período + empresas (E-3: mapa de convenios cacheado UNA vez).
     const [socSnap, abSnap, empSnap] = await Promise.all([
@@ -4633,6 +4637,7 @@ async function generarAbonos(){
     for(const sd of socSnap.docs){
       const socio=sd.data(), socioId=sd.id;
       if(socio.vitalicio===true){ rep.vitalicios++; continue; } // VITALICIO: MEDICAR no cobra → sin abono (ni $0). El motor server también lo saltea.
+      if(socio.bonificado===true){ rep.bonificados++; continue; } // BONIFICADO (Área Protegida): la empresa cubre la cuota → sin abono (esSinCuota = vitalicio || bonificado).
       // E-3 (destino por facturarA, reemplaza la exclusión ciega por tipoAfiliado):
       //  · empresa con convenio FIJO → sin abono per-socio (la empresa paga flat; el ítem lo genera generarFacturas).
       //  · empresa per cápita (o convenio sin cargar) → genera abono normal, rolará a la factura de la empresa.
@@ -4665,7 +4670,7 @@ async function generarAbonos(){
       catch(e){ rep.errores++; console.warn('[generarAbonos] fallo',socioId,e); }
     }
     audit('abonos_generados','abonos',periodo,rep.generados+' generados');
-    S.fac.reportAb=`Período <b>${esc(periodo)}</b> — Generados: <b>${rep.generados}</b> · Sin plan: ${rep.sinPlan} · Ya tenían: ${rep.yaTenian} · Plan inválido: ${rep.planInvalido} · Convenio fijo (sin abono): ${rep.destFijo} · <b>Corporativos sin destinatario configurado — excluidos: ${rep.corpSinDest}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
+    S.fac.reportAb=`Período <b>${esc(periodo)}</b> — Generados: <b>${rep.generados}</b> · Sin plan: ${rep.sinPlan} · Ya tenían: ${rep.yaTenian} · Plan inválido: ${rep.planInvalido} · Convenio fijo (sin abono): ${rep.destFijo}${rep.bonificados?(' · Bonificados (sin abono): '+rep.bonificados):''} · <b>Corporativos sin destinatario configurado — excluidos: ${rep.corpSinDest}</b>${rep.errores?(' · Errores: '+rep.errores):''}`;
     render();
   }catch(e){ facErr('No se pudieron generar los abonos: '+(e.message||e)); }
 }
@@ -5714,7 +5719,7 @@ function afPanel(){
     const invBtn = (!inact && s.cuentaPropia!==true && s.personaId) ? `<button class="${btn}" onclick="afInvitar('${s.personaId}')">Invitar</button>` : '';
     const cuentaChip = s.cuentaPropia===true ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#0F6E56;color:#fff">Con app</span>` : '';
     const acts=`<div style="display:flex;gap:.4rem">${invBtn}<button class="${btn}" onclick="afEditar('${s.id}')">Editar</button><button class="${btn}" onclick="afBaja('${s.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
-    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${vitalicioChip(s)} ${afGrupoChip(s)} ${cuentaChip} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${vitalicioChip(s)} ${bonificadoChip(s)} ${afGrupoChip(s)} ${cuentaChip} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin socios${showInact?'':' activos'}</div>`;
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="afShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
   const head=`<div class="panel-h"><b>Afiliados</b><span class="live-tag">en vivo</span></div>`;
@@ -6046,7 +6051,7 @@ function empAbrir(){ if(!puedeAfil())return; if(S.af) S.af.flash=null; empSet({v
 function empNuevo(fromAlta){ if(!puedeAfil())return; if(fromAlta) afSnapshotDraft(); empSet({view:'new'}); navPush(); }
 function empEditar(id){ if(!puedeAfil())return; empSet({view:'edit',id});
   const e=(S.af&&S.af.empresas||[]).find(x=>x.id===id); // F2: si es área protegida, precargo sus direcciones + el callejero (no bloquea)
-  if(e && e.tipo==='area_protegida'){ afEnsureCalles(); empDirsCargar(id); }
+  if(e && e.tipo==='area_protegida'){ afEnsureCalles(); empDirsCargar(id); empBonifCargar(id); }
   navPush();
 }
 function empCerrar(){ if(S.af) S.af.emp=null; render(); }                   // puro (lo llama navRestore al hacer atrás)
@@ -6077,10 +6082,12 @@ function empFormNew(){
     <div class="field"><label>Tipo</label><select id="emp-tipo"><option value="corporativo">Corporativo</option><option value="area_protegida">Área protegida</option></select></div>
     <div class="field"><label>CUIT (opcional)</label><input id="emp-cuit" placeholder="XX-XXXXXXXX-X"></div>
     <div class="field"><label>Contacto (opcional)</label><input id="emp-contacto"></div>
+    <div class="field"><label>DNI del contacto (opcional)</label><input id="emp-contacto-dni" inputmode="numeric" placeholder="Habilita el bonificado de 1 click"></div>
+    <div class="field"><label>Fecha nac. del contacto (opcional)</label><input id="emp-contacto-fnac" type="date"></div>
     <div class="field"><label>Teléfono (opcional)</label><input id="emp-tel"></div>
     <div class="field"><label>Email (opcional)</label><input id="emp-email"></div>
     <div class="field"><label>Plan por defecto (opcional)</label><select id="emp-plan">${empPlanOpts('')}</select></div>
-    <div style="font-size:.68rem;color:var(--ink3);margin:-.2rem 0 .55rem">El N° de convenio se asigna automático (serie 30xxx corporativo / 40xxx área).</div>
+    <div style="font-size:.68rem;color:var(--ink3);margin:-.2rem 0 .55rem">El N° de convenio se asigna automático (serie 30xxx corporativo / 40xxx área). En Área Protegida, cargar DNI + fecha nac del contacto habilita el alta del dependiente bonificado con un click.</div>
     <button class="btn-r" onclick="empGuardarNuevo()">Crear empresa</button>
     <button class="btn-o" onclick="empSet({view:'list'})">Cancelar</button></div>`;
 }
@@ -6108,12 +6115,14 @@ function empFormEdit(id){
     <div class="field"><label>Razón social</label><input id="emp-razon" value="${esc(e.razonSocial||'')}"></div>
     <div class="field"><label>CUIT</label><input id="emp-cuit" value="${esc(e.cuit||'')}"></div>
     <div class="field"><label>Contacto</label><input id="emp-contacto" value="${esc(e.contacto||'')}"></div>
+    ${e.tipo==='area_protegida'?`<div class="field"><label>DNI del contacto</label><input id="emp-contacto-dni" inputmode="numeric" value="${esc(e.contactoDni||'')}" placeholder="Habilita el bonificado de 1 click"></div>
+    <div class="field"><label>Fecha nac. del contacto</label><input id="emp-contacto-fnac" type="date" value="${esc(e.contactoFechaNac||'')}"></div>`:''}
     <div class="field"><label>Teléfono</label><input id="emp-tel" value="${esc(e.telefono||'')}"></div>
     <div class="field"><label>Email</label><input id="emp-email" value="${esc(e.email||'')}"></div>
     <div class="field"><label>Plan por defecto</label><select id="emp-plan">${empPlanOpts(e.planIdDefault)}</select></div>
     <div class="field"><label>Estado</label><select id="emp-activo"><option value="si" ${e.activo!==false?'selected':''}>Activa</option><option value="no" ${e.activo===false?'selected':''}>Inactiva</option></select></div>
     <button class="btn-r" onclick="empGuardarEdit('${id}')">Guardar cambios</button>
-    ${e.tipo==='area_protegida' ? empVigenciaBlock(e)+empDireccionesBlock(id) : ''}
+    ${e.tipo==='area_protegida' ? empVigenciaBlock(e)+empDireccionesBlock(id)+empBonifBlock(e) : ''}
     ${puedeConfig() ? `
     <div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)">Convenio de cobro <span style="text-transform:none;color:var(--ink3)">(contable)</span></div>
     <div id="emp-conv-err" class="err" style="display:none;margin-bottom:.4rem"></div>
@@ -6193,13 +6202,136 @@ async function empDirQuitar(dirId, empresaId){
     empDirsCargar(empresaId);
   }catch(e){ empDirErr('No se pudo quitar: '+(e.message||e)); }
 }
+
+/* ===================== DEPENDIENTE BONIFICADO (Área Protegida) =====================
+   La compra del área INCLUYE una afiliación personal bonificada (sin cuota) para UNA persona. Es un afiliado DIRECTO
+   con {bonificado:true, origen:'area_protegida', empresaId}. El motor lo saltea (esSinCuota). Setear el flag = admin/
+   superadmin (regla) → las acciones de creación van gateadas a admin. Default 1-click = contacto de la empresa
+   (contactoDni/contactoFechaNac) + domicilio del área (1ª dirección protegida). "Otra persona" = alta completa. */
+function empParseContacto(str){ const s=String(str||'').trim(); if(!s) return {apellido:'',nombre:''}; if(s.includes(',')){ const [a,...n]=s.split(','); return {apellido:a.trim(), nombre:n.join(',').trim()}; } const w=s.split(/\s+/); if(w.length===1) return {apellido:w[0], nombre:''}; return {apellido:w[w.length-1], nombre:w.slice(0,-1).join(' ')}; }
+function empBonifCargar(empresaId){ // lazy get() del bonificado del área (0 o 1 por diseño)
+  S.af.bonif={ empresaId, socio:undefined, mode:'view', err:'' }; render();
+  db.collection('socios').where('empresaId','==',empresaId).where('bonificado','==',true).limit(1).get()
+    .then(s=>{ if(!S.af) return; const d=s.docs[0]; S.af.bonif={ empresaId, socio:d?{id:d.id,...d.data()}:null, mode:'view', err:'' }; render(); })
+    .catch(e=>{ if(S.af) S.af.bonif={ empresaId, socio:null, mode:'view', err:'No se pudo cargar el bonificado: '+(e.message||e) }; render(); });
+}
+function empBonifErr(t){ const el=document.getElementById('emp-bonif-err'); if(el){ el.textContent=t||''; el.style.display=t?'block':'none'; } }
+function empBonifBlock(e){
+  const H=`<div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)">Dependiente bonificado</div>`;
+  const b=S.af&&S.af.bonif;
+  if(!b || b.empresaId!==e.id || b.socio===undefined) return H+`<div style="font-size:.75rem;color:var(--ink3)">Cargando…</div>`;
+  const admin=esAdminOSuper();
+  if(b.socio){ // ya existe: mostrarlo + (admin) degradar
+    const nom=b.socio.nombreVista||afNombre(b.socio.personaId)||'—';
+    const activo=b.socio.activo!==false && b.socio.bonificado===true;
+    // AVISO DE BAJA: el área se dio de baja pero el bonificado sigue activo → hay que resolverlo (degradar).
+    const avisoBaja = (activo && e.activo===false) ? `<div style="background:#a11c1c;color:#fff;border-radius:8px;padding:.5rem .7rem;margin-bottom:.5rem;font-size:.8rem;font-weight:700">⚠️ El área "${esc(e.razonSocial||'')}" está dada de baja, pero su dependiente bonificado sigue SIN cuota. Resolvé: degradá a pagador (empieza a facturar) o reactivá el área.</div>` : '';
+    return H+`<div id="emp-bonif-err" class="err" style="display:none;margin-bottom:.4rem"></div>
+      ${avisoBaja}
+      <div class="card" style="background:var(--bg);padding:.7rem .8rem">
+        <div style="font-weight:700;font-size:.86rem">${esc(nom)} <span class="badge" style="background:#0a7d34;color:#fff;margin-left:.3rem">${activo?'BONIFICADO':'DEGRADADO'}</span></div>
+        <div style="font-size:.72rem;color:var(--ink3);margin-top:.2rem">N° ${esc(b.socio.numeroAfiliado||'—')} · afiliado directo · ${activo?'sin cuota (la cubre esta área)':'ahora facturando (degradado)'}</div>
+        ${activo&&admin?`<button class="btn-o" style="margin-top:.55rem" onclick="empBonifDegradar('${esc(b.socio.id)}','${esc(e.id)}')">Degradar a pagador</button>`:''}
+        ${activo&&!admin?`<div style="font-size:.68rem;color:var(--ink3);margin-top:.4rem">Solo admin/superadmin puede degradar.</div>`:''}
+        ${!activo?`<div style="font-size:.72rem;color:var(--ink3);margin-top:.4rem">Degradado: quedó como afiliado directo pagador. Traza del origen conservada.</div>`:''}
+      </div>`;
+  }
+  // no existe todavía
+  if(!admin) return H+`<div style="font-size:.72rem;color:var(--ink3)">Aún sin dependiente bonificado. Solo admin/superadmin puede crearlo.</div>`;
+  const dirs=(S.af.dirs&&S.af.dirs.empresaId===e.id)?(S.af.dirs.items||[]):[];
+  const tieneDatos=!!(e.contactoDni && e.contactoFechaNac);
+  const tieneDir=dirs.length>0;
+  const cto=empParseContacto(e.contacto);
+  const defHint = tieneDatos ? `${esc((cto.apellido+' '+cto.nombre).trim()||'contacto')} · DNI ${esc(e.contactoDni)}${tieneDir?(' · '+esc(dirs[0].calleTexto||'')+' '+esc(String(dirs[0].altura||''))):' · (sin dirección del área)'}` : 'Falta DNI + fecha nac del contacto (cargalos arriba y guardá).';
+  if(b.mode==='otra') return H+empBonifOtraForm(e, dirs);
+  return H+`<div id="emp-bonif-err" class="err" style="display:none;margin-bottom:.4rem"></div>
+    <div style="font-size:.72rem;color:var(--ink3);margin-bottom:.5rem">Alta personal SIN cuota que viaja con la persona (credencial, turnos, IA). Una por área.</div>
+    <button class="btn-r" ${tieneDatos?'':'disabled'} style="opacity:${tieneDatos?'1':'.5'}" onclick="empBonifCrearDefault('${esc(e.id)}')">Bonificar al contacto (1 click)</button>
+    <div style="font-size:.68rem;color:var(--ink3);margin:.25rem 0 .6rem">${defHint}</div>
+    <button class="btn-o" onclick="empBonifSet('otra')">Otra persona…</button>`;
+}
+function empBonifSet(mode){ if(S.af&&S.af.bonif){ S.af.bonif.mode=mode; render(); } }
+function empBonifOtraForm(e, dirs){
+  const domOpts = dirs.length ? dirs.map((d,i)=>`<option value="${i}">${esc(d.calleTexto||'')} ${esc(String(d.altura||''))}</option>`).join('') : '';
+  return `<div id="emp-bonif-err" class="err" style="display:none;margin-bottom:.4rem"></div>
+    <div class="field"><label>Apellido</label><input id="bonif-ape"></div>
+    <div class="field"><label>Nombre</label><input id="bonif-nom"></div>
+    <div class="field"><label>DNI</label><input id="bonif-dni" inputmode="numeric"></div>
+    <div class="field"><label>Fecha de nacimiento</label><input id="bonif-fnac" type="date"></div>
+    <div class="field"><label>Domicilio</label><select id="bonif-domsel" onchange="empBonifDomToggle(this.value)">
+      ${dirs.length?`<option value="area">Usar domicilio del área</option>`:''}<option value="propio" ${dirs.length?'':'selected'}>Cargar domicilio propio</option></select></div>
+    ${dirs.length?`<div class="field" id="bonif-dom-area"><label>Dirección del área</label><select id="bonif-domidx">${domOpts}</select></div>`:''}
+    <div id="bonif-dom-propio" style="display:${dirs.length?'none':'block'}"><div class="field"><label>Domicilio (calle y altura)</label><input id="bonif-dom" placeholder="Ej. San Martín 1234"></div></div>
+    <button class="btn-r" onclick="empBonifCrearOtra('${esc(e.id)}')">Crear afiliado bonificado</button>
+    <button class="btn-o" onclick="empBonifSet('view')" style="margin-top:.4rem">Cancelar</button>`;
+}
+function empBonifDomToggle(v){ const a=document.getElementById('bonif-dom-area'), p=document.getElementById('bonif-dom-propio'); if(a) a.style.display=(v==='area')?'block':'none'; if(p) p.style.display=(v==='propio')?'block':'none'; }
+// Creación compartida: persona + socio directo bonificado (reusa la maquinaria del alta). Requiere admin (la regla enforza).
+async function empBonifCrear(empresaId, per, direccion, sindir){
+  const perData={ dni:per.dni||'', apellido:per.apellido||'', nombre:per.nombre||'', sexo:'', fechaNacimiento:per.fechaNacimiento||'', telefono:'', email:'', direccion:direccion||'', antecedentesCronicos:[], antecedentesOtros:'', creadoEn:FV() };
+  const pref=await db.collection('personas').add(perData);
+  const personaId=pref.id;
+  const socioRef=db.collection('socios').doc();
+  const r=await asignarNumeroRaiz('directo', socioRef, (correlativo)=>({
+    personaId, tipoAfiliado:'directo', grupoTipo:'directo', numeroAfiliado:correlativo, numeroRaiz:correlativo, ultimoSufijo:0,
+    esResponsablePago:true, vitalicio:false, bonificado:true, origen:'area_protegida', empresaId,
+    planId:null, nombreVista:socioNombreDe(perData), vigenteDesde:FV(), carenciaHasta:null, activo:true, creadoEn:FV()
+  }));
+  try{ await afGeocodePersona(personaId, direccion||'', !direccion); }catch(_){}
+  try{ await afEspejoPaciente(personaId, perData, { tipoAfiliado:'directo', numeroAfiliado:r.correlativo, activo:true }); }catch(_){}
+  audit('bonificado_alta','socio',personaId,'N° '+r.correlativo+' · área '+empresaId);
+  return r.correlativo;
+}
+async function empBonifCrearDefault(empresaId){
+  if(!esAdminOSuper()){ empBonifErr('Solo admin/superadmin puede crear el bonificado.'); return; }
+  const e=(S.af.empresas||[]).find(x=>x.id===empresaId)||{};
+  if(!e.contactoDni || !e.contactoFechaNac){ empBonifErr('Cargá DNI + fecha nac del contacto y guardá la empresa primero.'); return; }
+  const cto=empParseContacto(e.contacto);
+  if(!cto.apellido && !cto.nombre){ empBonifErr('La empresa no tiene un nombre de contacto para el bonificado.'); return; }
+  const dirs=(S.af.dirs&&S.af.dirs.empresaId===empresaId)?(S.af.dirs.items||[]):[];
+  const d0=dirs[0]; const direccion=d0?((d0.calleTexto||'')+' '+(d0.altura||'')).trim():'';
+  empBonifErr('');
+  try{
+    const num=await empBonifCrear(empresaId, { dni:e.contactoDni, apellido:cto.apellido, nombre:cto.nombre, fechaNacimiento:e.contactoFechaNac }, direccion, !direccion);
+    S.af.flash='Dependiente bonificado creado — N° '+num; empBonifCargar(empresaId);
+  }catch(err){ empBonifErr('No se pudo crear: '+((err&&err.message)||err)); }
+}
+async function empBonifCrearOtra(empresaId){
+  if(!esAdminOSuper()){ empBonifErr('Solo admin/superadmin puede crear el bonificado.'); return; }
+  const ape=(document.getElementById('bonif-ape')?.value||'').trim();
+  const nom=(document.getElementById('bonif-nom')?.value||'').trim();
+  const dni=(document.getElementById('bonif-dni')?.value||'').trim();
+  const fnac=(document.getElementById('bonif-fnac')?.value||'').trim();
+  if(!ape && !nom){ empBonifErr('Completá al menos apellido o nombre.'); return; }
+  if(!dni){ empBonifErr('El DNI es obligatorio.'); return; }
+  const dirs=(S.af.dirs&&S.af.dirs.empresaId===empresaId)?(S.af.dirs.items||[]):[];
+  const sel=document.getElementById('bonif-domsel')?.value || (dirs.length?'area':'propio');
+  let direccion='';
+  if(sel==='area' && dirs.length){ const i=parseInt(document.getElementById('bonif-domidx')?.value||'0',10)||0; const d=dirs[i]||dirs[0]; direccion=((d.calleTexto||'')+' '+(d.altura||'')).trim(); }
+  else { direccion=(document.getElementById('bonif-dom')?.value||'').trim(); }
+  empBonifErr('');
+  try{
+    const num=await empBonifCrear(empresaId, { dni, apellido:ape, nombre:nom, fechaNacimiento:fnac }, direccion, !direccion);
+    S.af.flash='Dependiente bonificado creado — N° '+num; empBonifCargar(empresaId);
+  }catch(err){ empBonifErr('No se pudo crear: '+((err&&err.message)||err)); }
+}
+async function empBonifDegradar(socioId, empresaId){
+  if(!esAdminOSuper()){ empBonifErr('Solo admin/superadmin puede degradar.'); return; }
+  if(!confirm('Degradar a pagador: el afiliado deja de ser bonificado y EMPIEZA a facturar. La traza (origen/área) se conserva. ¿Confirmás?')) return;
+  empBonifErr('');
+  try{
+    await db.collection('socios').doc(socioId).set({ bonificado:false, degradadoEn:FV() }, { merge:true }); // origen/empresaId INMUTABLES: quedan como traza histórica
+    audit('bonificado_degradado','socio',socioId,'área '+empresaId);
+    S.af.flash='Bonificado degradado a pagador.'; empBonifCargar(empresaId);
+  }catch(err){ empBonifErr('No se pudo degradar: '+((err&&err.message)||err)); }
+}
 async function empGuardarNuevo(){
   if(!puedeAfil()) return; empErr('');
   const razonSocial=(document.getElementById('emp-razon')?.value||'').trim();
   if(!razonSocial){ empErr('La razón social es requerida.'); return; }
   const tipo=document.getElementById('emp-tipo')?.value||'corporativo';
   const serie=(tipo==='area_protegida')?'area':'corp';
-  const empData={ razonSocial, cuit:(document.getElementById('emp-cuit')?.value||'').trim(), contacto:(document.getElementById('emp-contacto')?.value||'').trim(), telefono:(document.getElementById('emp-tel')?.value||'').trim(), email:(document.getElementById('emp-email')?.value||'').trim(), tipo, planIdDefault:document.getElementById('emp-plan')?.value||null, activo:true, creadoEn:FV() };
+  const empData={ razonSocial, cuit:(document.getElementById('emp-cuit')?.value||'').trim(), contacto:(document.getElementById('emp-contacto')?.value||'').trim(), contactoDni:(document.getElementById('emp-contacto-dni')?.value||'').trim(), contactoFechaNac:(document.getElementById('emp-contacto-fnac')?.value||'').trim(), telefono:(document.getElementById('emp-tel')?.value||'').trim(), email:(document.getElementById('emp-email')?.value||'').trim(), tipo, planIdDefault:document.getElementById('emp-plan')?.value||null, activo:true, creadoEn:FV() };
   try{
     const ref=db.collection('empresas').doc();
     const r=await asignarNumeroRaiz(serie, ref, (correlativo)=>({ ...empData, numeroConvenio:correlativo, ultimoSufijo:0 }));
@@ -6214,10 +6346,18 @@ async function empGuardarEdit(id){
   if(!razonSocial){ empErr('La razón social es requerida.'); return; }
   try{
     const upd={ razonSocial, cuit:(document.getElementById('emp-cuit')?.value||'').trim(), contacto:(document.getElementById('emp-contacto')?.value||'').trim(), telefono:(document.getElementById('emp-tel')?.value||'').trim(), email:(document.getElementById('emp-email')?.value||'').trim(), planIdDefault:document.getElementById('emp-plan')?.value||null, activo:(document.getElementById('emp-activo')?.value||'si')==='si', actualizadoEn:FV() };
+    const dniEl=document.getElementById('emp-contacto-dni'); // presente solo en el form de área protegida (compat: empresas viejas lo completan acá)
+    if(dniEl){ upd.contactoDni=(dniEl.value||'').trim(); upd.contactoFechaNac=(document.getElementById('emp-contacto-fnac')?.value||'').trim(); }
     const vigDesdeEl=document.getElementById('emp-vig-desde'); // F3b: presente solo en el form de área protegida
     if(vigDesdeEl){ upd.vigenciaDesde=arDateToTs(vigDesdeEl.value, false); upd.vigenciaHasta=arDateToTs(document.getElementById('emp-vig-hasta')?.value, true); }
     await db.collection('empresas').doc(id).set(upd, { merge:true });
     audit('empresa_editada','empresa',id,razonSocial);
+    // AVISO DE BAJA: si el área quedó inactiva y tiene un bonificado activo, avisar al admin (sin cascada automática).
+    if(upd.activo===false){
+      try{ const bs=await db.collection('socios').where('empresaId','==',id).where('bonificado','==',true).limit(1).get();
+        if(!bs.empty && bs.docs[0].data().activo!==false){ S.af.flash='⚠️ El área "'+razonSocial+'" quedó de baja y tiene un dependiente bonificado activo. Abrí el área y resolvelo (degradar a pagador).'; }
+      }catch(_){}
+    }
     empSet({view:'list'});
   }catch(e){ empErr('No se pudo guardar: '+(e.message||e)); }
 }
@@ -6271,6 +6411,8 @@ function facturarAChip(fa){ return (fa && fa.tipo==='empresa') ? `<span style="f
 // VITALICIO grupal (diseño B): chip si el flag es PROPIO O heredado del titular del grupo (lookup en la lista en memoria).
 function afTitularDe(s){ return (s && s.titularSocioId) ? (((S.af&&S.af.socios)||[]).find(x=>x.id===s.titularSocioId)||null) : null; }
 function vitalicioChip(s){ const propio=!!(s && s.vitalicio===true); const t=propio?null:afTitularDe(s); const es=propio||!!(t&&t.vitalicio===true); return es ? `<span style="font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.06rem .4rem;border-radius:6px;background:#0F6E56;color:#fff">VITALICIO</span>` : ''; } // condición interna: cobertura integral sin cuota (el socio no la ve)
+// BONIFICADO (Área Protegida): rótulo INTERNO distinto del vitalicio. Nombra el área (empresa) si la resuelve en memoria. El socio NO lo ve.
+function bonificadoChip(s){ if(!(s && s.bonificado===true)) return ''; const emp=(S.af&&S.af.empresas||[]).find(x=>x.id===s.empresaId); const nom=emp?(' '+(emp.razonSocial||'')):''; return `<span style="font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.06rem .4rem;border-radius:6px;background:#0a7d34;color:#fff" title="Bonificado por área${esc(nom)}">BONIFICADO${nom?(' · '+esc((emp.razonSocial||'').slice(0,18))):''}</span>`; }
 function afGrupoChip(s){ const t=afTitularDe(s); return t ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#6B7280;color:#fff">Grupo ${esc(t.nombreVista||afNombre(t.personaId)||'—')}</span>` : ''; }
 // Invitar a un socio a su propia app (mismo generador que el titular; el admin invita a cualquiera sin cuenta).
 async function afInvitar(personaId){

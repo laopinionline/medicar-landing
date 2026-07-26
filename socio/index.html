@@ -1638,7 +1638,7 @@ function homeView(){
   const activo = socio ? (socio.activo!==false) : false;
   const numero = socio && socio.numeroAfiliado ? socio.numeroAfiliado : '—';
   const esDependiente = !!(socio && socio.titularSocioId);
-  const esVit = !!(socio && socio.vitalicio===true); // VITALICIO: cobertura integral sin cuota; de cara al socio NO se nombra (ni plan, ni precio, ni la palabra). "● Afiliado activo" es toda la etiqueta.
+  const esVit = !!(socio && (socio.vitalicio===true || socio.bonificado===true)); // SIN CUOTA (vitalicio O bonificado por área): cobertura integral sin cuota; de cara al socio NO se nombra (ni plan, ni precio, ni área/empresa, ni la palabra). "● Afiliado activo" es toda la etiqueta.
   const plan = esDependiente ? 'Cobertura familiar' : (c.planNombre || '—'); // F3: el dependiente no tiene plan propio (planId:null)
   const tipo = socio ? tipoLbl(socio.tipoAfiliado) : '—';
   const estadoLinea = socio
@@ -3089,7 +3089,7 @@ async function doRevocar(codigo){
    próximo período (sin prorrateo). La carencia diferenciada la grava la CF; acá solo se avisa. */
 const PLAN_EXCLUIDOS_SOCIO=['plan-corporativo','PcB28RvKHEOrZ267ny6Z']; // corporativo(precio 0) + Plan 01 legacy
 async function abrirCambiarPlan(){
-  if(S.cred && S.cred.socio && S.cred.socio.vitalicio===true) return; // VITALICIO: sin autogestión de plan (no-op defensivo; el server rechaza cambiarMiPlan). El botón ya no se renderiza.
+  if(S.cred && S.cred.socio && (S.cred.socio.vitalicio===true || S.cred.socio.bonificado===true)) return; // SIN CUOTA (vitalicio o bonificado): sin autogestión de plan (no-op defensivo; el server rechaza cambiarMiPlan). El botón ya no se renderiza.
   set({ view:'cambiar-plan', planes:undefined, planErr:'', planBusy:false, planSel:null }); navPush();
   try{
     const s=await db.collection('planes').where('activo','==',true).get();

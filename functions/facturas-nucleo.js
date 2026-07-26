@@ -31,19 +31,22 @@ function agruparFacturas({ abonos, cargos, socMap, empMap, empresasYaFacturadas,
     g.items.push(item);
   };
 
-  // VITALICIO (grupal, diseño B): socio sin cuota (lo gestiona MEDICAR). Flag PROPIO O heredado del TITULAR del grupo
-  // (por titularSocioId; el socMap ya trae todos los socios de la corrida → cero reads extra). El motor lo SALTEA —
-  // no genera factura de ningún tipo (ni $0), ni para el titular ni para sus dependientes.
-  const esVitalicio = (socioId) => {
+  // SIN CUOTA = vitalicio || bonificado (dos orígenes, un solo skip). El motor lo SALTEA: no genera factura de ningún
+  // tipo (ni $0), ni para él ni para sus dependientes.
+  //  - VITALICIO (grupal, diseño B): sin cuota (lo gestiona MEDICAR). Flag PROPIO O heredado del TITULAR del grupo
+  //    (por titularSocioId; el socMap ya trae todos los socios de la corrida → cero reads extra).
+  //  - BONIFICADO (Área Protegida): afiliado directo cuya cuota cubre la empresa del área. Es standalone (no titular de
+  //    grupo) → NO se hereda; solo el flag PROPIO del socio.
+  const esSinCuota = (socioId) => {
     const s = socMap && socMap[socioId]; if (!s) return false;
-    if (s.vitalicio === true) return true;
+    if (s.vitalicio === true || s.bonificado === true) return true;
     const t = s.titularSocioId && socMap[s.titularSocioId];
     return !!(t && t.vitalicio === true);
   };
 
   (abonos || []).forEach((a) => {
     if (a.estado === 'anulado') return;
-    if (esVitalicio(a.socioId)) return; // vitalicio → sin cobro
+    if (esSinCuota(a.socioId)) return; // vitalicio || bonificado → sin cobro
     const dest = destinoDe(socMap, empMap, a.socioId); if (!dest) { corpExcl.add(a.socioId); return; }
     if (a.estado !== 'generado' || a.facturaId) return;
     if (dest.tipo === 'persona' && !a.personaId) return;
@@ -55,7 +58,7 @@ function agruparFacturas({ abonos, cargos, socMap, empMap, empresasYaFacturadas,
 
   (cargos || []).forEach((c) => {
     if (c.estado === 'anulado') return;
-    if (esVitalicio(c.socioId)) return; // vitalicio → sin cobro (tampoco cargos por episodio)
+    if (esSinCuota(c.socioId)) return; // vitalicio || bonificado → sin cobro (tampoco cargos por episodio)
     const dest = destinoDe(socMap, empMap, c.socioId); if (!dest) { corpExcl.add(c.socioId); return; }
     if (c.estado !== 'generado' || c.facturaId) return;
     if (dest.tipo === 'persona' && !c.personaId) return;
