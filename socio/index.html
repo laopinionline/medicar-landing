@@ -1199,15 +1199,24 @@ function loginView(){
     </div>
     <h2>Ingresá con tu cuenta de socio</h2>
     <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
+    ${S.okMsg?`<div style="background:#eafaf0;border:1px solid #bfe6cd;color:var(--verde,#2E8B57);border-radius:10px;padding:.55rem .8rem;font-size:.8rem;font-weight:600;margin-bottom:.6rem">${esc(S.okMsg)}</div>`:''}
     <div class="field"><label>Email</label><input id="em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com"></div>
     <div class="field"><label>Contraseña</label><input id="pw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
     <button class="btn-r" onclick="doLogin()">${S.busy?'Ingresando…':'Ingresar'}${S.busy?'':chv(15,'cw')}</button>
-    <button class="linkish" onclick="irReferenteAuth()" style="margin-top:1rem;background:none;border:none;color:var(--rojo);font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">Ingresar como referente</button>
+    <button class="linkish" onclick="doResetPassword()" style="margin-top:.7rem;background:none;border:none;color:var(--gris);font-size:.78rem;cursor:pointer;text-decoration:underline;width:100%">Olvidé mi contraseña</button>
+    <button class="linkish" onclick="irReferenteAuth()" style="margin-top:.6rem;background:none;border:none;color:var(--rojo);font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">Ingresar como referente</button>
     <div style="margin-top:1.3rem;padding-top:1.1rem;border-top:1px solid var(--linea);text-align:center">
       <div style="font-size:.82rem;color:var(--gris);margin-bottom:.5rem">¿Querés consultar con MEDICAR IA?</div>
       <button class="btn-o" onclick="irRegistro()" style="width:100%">Crear una cuenta</button>
     </div>
   </div>`;
+}
+// Restablecer contraseña por email (Firebase Auth). El email sale del campo del login.
+async function doResetPassword(){
+  const email=(el('em')?.value||'').trim();
+  if(!email){ set({ err:'Escribí tu email arriba y volvé a tocar "Olvidé mi contraseña".', okMsg:'' }); return; }
+  try{ await auth.sendPasswordResetEmail(email); set({ err:'', okMsg:'Te enviamos un email para restablecer tu contraseña. Revisá tu casilla (y el correo no deseado).' }); }
+  catch(e){ const code=(e&&e.code)||''; set({ okMsg:'', err: /user-not-found/.test(code)?'No encontramos una cuenta con ese email.' : /invalid-email/.test(code)?'Ese email no es válido.' : 'No se pudo enviar el email. Probá de nuevo en un momento.' }); }
 }
 function irRegistro(){ set({ view:'registro', busy:false, err:'', reg:null }); navPush(); } // reg:null = formulario en blanco al abrir
 function registroView(){
@@ -1321,6 +1330,7 @@ function invitaView(){
     <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
     <div class="field"><label>Email</label><input id="iem" type="email" autocomplete="email" placeholder="tu@email.com"></div>
     <div class="field"><label>Contraseña</label><input id="ipw" type="password" autocomplete="${crear?'new-password':'current-password'}" placeholder="${crear?'Elegí una contraseña (mín. 6)':'••••••••'}"></div>
+    ${crear?`<div class="field"><label>Repetir contraseña</label><input id="ipw2" type="password" autocomplete="new-password" placeholder="Repetí la contraseña"></div>`:''}
     <button class="btn-r" onclick="doCanjearInvita()">${S.busy?'Un momento…':(crear?'Crear mi cuenta':'Entrar')}${S.busy?'':chv(15,'cw')}</button>
     <button class="linkish" onclick="set({invCrear:${crear?'false':'true'},err:''})" style="margin-top:.9rem;background:none;border:none;color:var(--rojo);font-size:.78rem;font-weight:700;cursor:pointer;text-decoration:underline;width:100%">${crear?'Ya tengo una cuenta':'Necesito crear una cuenta'}</button>
     <div class="foot-note" style="margin-top:1.1rem">Ante una emergencia llamá al <b>${TEL_EMERG}</b>.</div>
@@ -1330,6 +1340,11 @@ async function doCanjearInvita(){
   if(S.busy) return;
   const email=(el('iem')?.value||'').trim(); const pw=el('ipw')?.value||'';
   if(!email||!pw){ set({ err:'Ingresá email y contraseña.' }); return; }
+  if(S.invCrear!==false){ // creando cuenta → validar coincidencia de contraseñas
+    const pw2=el('ipw2')?.value||'';
+    if(pw.length<6){ set({ err:'La contraseña debe tener al menos 6 caracteres.' }); return; }
+    if(pw!==pw2){ set({ err:'Las contraseñas no coinciden.' }); return; }
+  }
   const token=(S.invita&&S.invita.token)||invitaTokenDeURL();
   if(!token){ set({ view:'login', err:'La invitación se perdió. Abrí de nuevo el link.' }); return; }
   S.invitaCanjePendiente=token; set({ busy:true, err:'' });
@@ -1606,8 +1621,11 @@ function homeView(){
     const fromMin = m => pad2(Math.floor(m/60))+':'+pad2(m%60);
     const franjas = (c.agenda||[]).filter(f=> f.activa!==false && f.fecha>=hoyF && f.fecha<=finF)
       .slice().sort((a,b)=> (a.fecha+a.horaInicio).localeCompare(b.fecha+b.horaInicio));
-    // ¿Para quién? (solo titular con dependientes activos)
-    const activeDeps = depsDeMiSocio.filter(d=> d.activo!==false && d.personaId);
+    // ¿Para quién? (solo titular con dependientes activos). Excluye a los INDEPENDIENTES (adulto con cuenta propia):
+    // gestionan sus turnos desde su app (espejo del ruedaAlTitular del server, que igual rechaza). Un MENOR con cuenta
+    // sigue acá (el titular conserva lo asistencial).
+    const esIndependienteDep = (d)=> d.cuentaPropia===true && (edadDe(d.fechaNacimiento)||0) >= 18;
+    const activeDeps = depsDeMiSocio.filter(d=> d.activo!==false && d.personaId && !esIndependienteDep(d));
     const paraActual = S.turnoPara || c.personaId;
     const paraSel = (!esDependiente && activeDeps.length)
       ? `<div style="padding:.6rem 1rem;border-bottom:1px solid var(--linea)"><label style="font-size:.75rem;color:var(--gris);display:block;margin-bottom:.25rem">¿Para quién?</label>
