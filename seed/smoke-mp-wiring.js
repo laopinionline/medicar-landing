@@ -25,8 +25,9 @@ t('gate de estado sigue: no re-checkout si ya afiliacion_en_proceso', /estado ==
 // ---- webhook ----
 t('webhookAfiliacionMP: onRequest con ambos secrets', /exports\.webhookAfiliacionMP = onRequest\(\{ secrets: \[MP_ACCESS_TOKEN, MP_WEBHOOK_SECRET\] \}/.test(fn));
 t('webhook: valida FIRMA (nunca confía en el body)', /MP\.validarFirma\(\{ xSignature: req\.get\('x-signature'\)/.test(fn));
-t('webhook: usa firma.valido (objeto) + 401 si no', /if \(!firma\.valido\) \{[\s\S]{0,300}status\(401\)/.test(fn));
-t('webhook: DIAGNÓSTICO temporal (hasRequestId + prefijos HMAC, sin secret/body)', /hasRequestId: firma\.hasRequestId[\s\S]{0,80}calcPrefix: firma\.calcPrefix[\s\S]{0,40}v1Prefix: firma\.v1Prefix/.test(fn));
+t('webhook: usa firma.valido (objeto) + 401 si no', /if \(!firma\.valido\) \{[\s\S]{0,120}status\(401\)/.test(fn));
+t('webhook: secret TRIMEADO (defensa ante whitespace del paste)', /secret: \(MP_WEBHOOK_SECRET\.value\(\) \|\| ''\)\.trim\(\)/.test(fn));
+t('webhook: diagnóstico verbose RETIRADO (warn concisa solo con dataId)', /\[webhookAfiliacionMP\] firma inválida', \{ dataId \}\)/.test(fn) && !/calcPrefix: firma\.calcPrefix/.test(fn));
 t('webhook: CONSULTA la API por el estado real', /MP\.consultarPago\(\{ accessToken: MP_ACCESS_TOKEN\.value\(\), paymentId: dataId \}\)/.test(fn));
 t('webhook: solo APPROVED promueve (rejected/pending no)', /pago\.status === 'approved' && pago\.externalReference\) \{[\s\S]{0,120}confirmarAfiliacionPago/.test(fn));
 t('webhook: 200 SIEMPRE (idempotencia cubre el reintento)', (fn.match(/res\.status\(200\)\.send\('ok'\)/g) || []).length >= 2);
@@ -52,10 +53,11 @@ t('retorno: no-approved → queda pendiente_pago', /promovido: false, estado: 'p
 
 // ---- socio: handler de retorno ----
 t('socio: afiliacionRetornoCheck disparado en el boot del prospecto', /afiliacionRetornoCheck\(\);/.test(socio) && /destino === 'prospecto'/.test(socio));
-t('socio: detecta ?afiliacionPago y llama confirmarRetornoAfiliacion', /has\('afiliacionPago'\)/.test(socio) && /fnsCall\('confirmarRetornoAfiliacion'/.test(socio));
+t('socio: dispara por ?afiliacionPago O por lead pendiente_pago (robusto si MP no devuelve el param)', /const pendiente=!!\(S\.prospecto && S\.prospecto\.estado==='pendiente_pago'\)/.test(socio) && /if\(!hayParam && !pendiente\) return;/.test(socio));
+t('socio: llama confirmarRetornoAfiliacion', /fnsCall\('confirmarRetornoAfiliacion'/.test(socio));
 t('socio: limpia el param (no re-dispara)', /searchParams\.delete\('afiliacionPago'\)/.test(socio));
 t('socio: UI "Confirmando tu pago…"', /S\.afiliacionConfirmando\)\{/.test(socio) && /Confirmando tu pago…/.test(socio));
-t('socio: SW bumpeado a v39', /medicar-socio-v39/.test(fs.readFileSync(R('socio/sw.js'), 'utf8')));
+t('socio: SW bumpeado (≥ v39)', (() => { const m = /medicar-socio-v(\d+)/.exec(fs.readFileSync(R('socio/sw.js'), 'utf8')); return m && Number(m[1]) >= 39; })());
 
 // ---- panel ----
 t('panel: badge de estado pendiente_pago', /pendiente_pago:\['Pago pendiente'/.test(app) && /pendiente_pago:1/.test(app));
