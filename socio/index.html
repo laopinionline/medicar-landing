@@ -26,7 +26,13 @@
   /* tokens de marca (sistema-visual.html · manual Bidondo) */
   --rojo:#ED1C24; --rojo-hondo:#C8151C; --naranja:#F7941E;
   --tinta:#1A1A1A; --gris:#6B7075; --linea:#E7E9EC; --nieve:#F7F8FA;
-  --blanco:#FFFFFF; --verde:#2E8B57; --ambar:#E6A100;
+  --blanco:#FFFFFF; --verde:#1D9E75; --ambar:#E6A100;
+  /* Semánticos de estado (derivados temáticos — capa tematizable del CORE: Triage/MediPaw cambian valores, no estructura) */
+  --verde-hondo:#1F7A4D; --verde-nube:#EAFAF0;   /* verde texto-oscuro / fondo-claro */
+  --ambar-hondo:#B45309; --ambar-nube:#FFF8E6;   /* ámbar texto-oscuro / fondo-claro */
+  --peligro:#E5484D; --peligro-hondo:#A11C1C; --rojo-nube:#FDECEC; /* rojo de error/peligro (distinto del rojo de MARCA) + fondo-claro */
+  /* Superficie (presentes en las TRES superficies) */
+  --bg2:#EDEFF2; --bg3:#E2E5E9; --dark2:#232527; --border2:#D6DADF;
   --radio:16px;
   --sombra:0 1px 2px rgba(20,22,25,.04), 0 8px 24px rgba(20,22,25,.06);
   --sombra-alta:0 2px 4px rgba(20,22,25,.05), 0 18px 48px rgba(20,22,25,.12);
@@ -68,7 +74,7 @@ input{font-family:inherit}
 .btn-r:hover .chev{transform:translateX(4px)}
 .btn-o{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;background:transparent;color:var(--tinta);font-weight:700;font-size:.95rem;padding:.85rem;border-radius:12px;border:1.5px solid var(--linea)}
 .btn-o:active{background:var(--nieve)}
-.err{display:none;background:#FDECEC;color:var(--rojo-hondo);font-size:.82rem;font-weight:600;padding:.65rem .8rem;border-radius:10px;margin-bottom:.85rem}
+.err{display:none;background:var(--rojo-nube);color:var(--rojo-hondo);font-size:.82rem;font-weight:600;padding:.65rem .8rem;border-radius:10px;margin-bottom:.85rem}
 .err.on{display:block}
 
 /* ---------- HOME ---------- */
@@ -207,8 +213,8 @@ input{font-family:inherit}
 .post .ph-img{height:120px;background-size:cover;background-position:center}
 .post .ph-body{padding:.9rem 1.05rem}
 .post .tagp{display:inline-block;font-size:.6rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:.22rem .6rem;border-radius:999px;margin-bottom:.55rem}
-.tag-medicar{color:var(--rojo);background:#fdecec}
-.tag-salud{color:#1f7a4d;background:#e7f5ee}
+.tag-medicar{color:var(--rojo);background:var(--rojo-nube)}
+.tag-salud{color:var(--verde-hondo);background:#e7f5ee}
 .tag-nutri{color:#b9700a;background:#fdf0dd}
 .tag-vida{color:#5A4BD1;background:#ece9fb}
 .post.tappable{cursor:pointer}
@@ -729,7 +735,7 @@ function vencLineaSocio(f){
   const ms=tsMs(f.venceEl); if(ms==null) return '';
   let venc=''; try{ venc=new Date(ms).toLocaleDateString('es-AR',{timeZone:'America/Argentina/Buenos_Aires'}); }catch(_){ venc=''; }
   return Date.now()>ms
-    ? `<div style="padding:.6rem 1rem;background:#fdecec;border-top:1px solid var(--linea);font-size:.78rem;color:var(--rojo);font-weight:700">Esta cuota venció el ${esc(venc)}.</div>`
+    ? `<div style="padding:.6rem 1rem;background:var(--rojo-nube);border-top:1px solid var(--linea);font-size:.78rem;color:var(--rojo);font-weight:700">Esta cuota venció el ${esc(venc)}.</div>`
     : `<div style="padding:.5rem 1rem;border-top:1px solid var(--linea);font-size:.74rem;color:var(--gris)">Vence el ${esc(venc)}</div>`;
 }
 // ===================== Recibo del pago (socio) =====================
@@ -740,7 +746,7 @@ function pagosDeFactura(fid){ return (S.cred&&S.cred.pagos?S.cred.pagos:[]).filt
 // pago registrado (si hubo parciales, se muestran todos).
 function recibosComprobante(f){
   const ps=pagosDeFactura(f.id); if(!ps.length) return '';
-  return ps.map(p=>`<div style="padding:.55rem 1rem;border-top:1px solid var(--linea);background:#eafaf0;display:flex;justify-content:space-between;align-items:center;gap:.5rem">
+  return ps.map(p=>`<div style="padding:.55rem 1rem;border-top:1px solid var(--linea);background:var(--verde-nube);display:flex;justify-content:space-between;align-items:center;gap:.5rem">
     <div style="font-size:.73rem;color:var(--verde,#2E8B57);line-height:1.35"><b>Pagado el ${esc(fmtFechaRecibo(p.fecha))}</b><br>${esc(p.reciboNro||'—')} · ${socioMoney(p.monto)} · ${esc(medioLabel(p.medio))}</div>
     <button onclick="event.preventDefault();verRecibo('${esc(p.reciboNro||'')}')" style="flex:none;background:var(--verde,#2E8B57);color:#fff;border:none;border-radius:8px;padding:.4rem .6rem;font-size:.7rem;font-weight:800;cursor:pointer">Ver recibo</button>
   </div>`).join('');
@@ -838,7 +844,7 @@ function pagoSimView(){
       <div style="font-size:.8rem;color:var(--tinta)">${esc(p.nro||'Comprobante')}</div>
       <div style="font-size:1.6rem;font-weight:800;color:var(--tinta);margin:.15rem 0 1rem">${socioMoney(p.monto)}</div>
       ${done
-        ? `<div style="background:#eafaf0;color:var(--verde,#2E8B57);border-radius:9px;padding:.75rem;font-weight:800">✓ Pago acreditado</div>
+        ? `<div style="background:var(--verde-nube);color:var(--verde,#2E8B57);border-radius:9px;padding:.75rem;font-weight:800">✓ Pago acreditado</div>
            <button onclick="pagoSimCerrar()" style="width:100%;margin-top:.8rem;background:var(--verde,#2E8B57);color:#fff;border:none;border-radius:9px;padding:.7rem;font-weight:800;cursor:pointer">Volver a mis comprobantes</button>`
         : `${p.msg?`<div style="color:var(--rojo);font-size:.8rem;margin-bottom:.6rem">${esc(p.msg)}</div>`:''}
            <button onclick="simularPagoAprobado()" ${proc?'disabled':''} style="width:100%;background:var(--verde,#2E8B57);color:#fff;border:none;border-radius:9px;padding:.75rem;font-size:.9rem;font-weight:800;cursor:pointer;opacity:${proc?'.6':'1'}">${proc?'Procesando…':'Simular pago aprobado'}</button>`}
@@ -1213,7 +1219,7 @@ function loginView(){
     </div>
     <h2>Ingresá con tu cuenta de socio</h2>
     <div class="err ${S.err?'on':''}">${esc(S.err)}</div>
-    ${S.okMsg?`<div style="background:#eafaf0;border:1px solid #bfe6cd;color:var(--verde,#2E8B57);border-radius:10px;padding:.55rem .8rem;font-size:.8rem;font-weight:600;margin-bottom:.6rem">${esc(S.okMsg)}</div>`:''}
+    ${S.okMsg?`<div style="background:var(--verde-nube);border:1px solid #bfe6cd;color:var(--verde,#2E8B57);border-radius:10px;padding:.55rem .8rem;font-size:.8rem;font-weight:600;margin-bottom:.6rem">${esc(S.okMsg)}</div>`:''}
     <div class="field"><label>Email</label><input id="em" type="email" inputmode="email" autocomplete="email" placeholder="tucorreo@ejemplo.com" value="${esc(S.loginEmail||'')}"></div>
     <div class="field"><label>Contraseña</label><input id="pw" type="password" autocomplete="current-password" placeholder="••••••••"></div>
     <button class="btn-r" onclick="doLogin()">${S.busy?'Ingresando…':'Ingresar'}${S.busy?'':chv(15,'cw')}</button>
@@ -1405,7 +1411,7 @@ function afiliacionCTA(){
       <button class="btn-r" onclick="abrirPuente(null)" style="width:100%">Reintentar el pago</button></div>`;
   }
   if(est==='afiliacion_en_proceso'){
-    return `<div style="margin-top:.9rem;background:#eafaf0;border:1px solid #bfe6cd;border-radius:12px;padding:.9rem">
+    return `<div style="margin-top:.9rem;background:var(--verde-nube);border:1px solid #bfe6cd;border-radius:12px;padding:.9rem">
       <div style="font-weight:800;color:var(--verde,#2E8B57);text-align:center">Afiliación en proceso ✓</div>
       <div style="font-size:.8rem;color:var(--gris);margin:.25rem 0 .3rem;text-align:center">Para activar tu cobertura, subí el <b>DNI (frente y dorso)</b> de cada integrante.</div>
       ${dniChecklistHTML()}
@@ -1413,7 +1419,7 @@ function afiliacionCTA(){
   }
   if(est==='solicito_afiliacion'){
     // La confirmación del asesor NO reemplaza el CTA de compra: el prospecto puede autocomprar online igual.
-    return `<div style="margin-top:.9rem;background:#eafaf0;border:1px solid #bfe6cd;border-radius:12px;padding:.9rem;text-align:center">
+    return `<div style="margin-top:.9rem;background:var(--verde-nube);border:1px solid #bfe6cd;border-radius:12px;padding:.9rem;text-align:center">
       <div style="font-weight:800;color:var(--verde,#2E8B57)">Un asesor te contacta ✓</div>
       <div style="font-size:.8rem;color:var(--gris);margin-top:.25rem">Recibimos tu solicitud. Un asesor de MEDICAR se comunica a la brevedad.</div></div>
     <button class="btn-r" onclick="abrirPuente(null)" style="margin-top:.7rem;width:100%">O afiliate ahora online</button>`;
@@ -1796,9 +1802,9 @@ function homeView(){
       const movsC = (c.creditoMovs||[]).slice().sort((a,b)=>(tsMs(b.creadoEn)||0)-(tsMs(a.creadoEn)||0));
       let saldoLinea='';
       if(saldoC>0){
-        saldoLinea = `<div style="padding:.8rem 1rem;background:#eafaf0;border-bottom:1px solid var(--linea)"><div style="font-size:.72rem;color:var(--verde,#2E8B57);font-weight:700;text-transform:uppercase;letter-spacing:.02em">Saldo a favor</div><div style="font-size:1.05rem;color:var(--verde,#2E8B57);font-weight:800;margin-top:.1rem">Tenés ${socioMoney(saldoC)} a favor</div><div style="font-size:.68rem;color:var(--gris);margin-top:.15rem">Se descontará de tu próximo comprobante.</div>${movimientosCredito(movsC)}</div>`;
+        saldoLinea = `<div style="padding:.8rem 1rem;background:var(--verde-nube);border-bottom:1px solid var(--linea)"><div style="font-size:.72rem;color:var(--verde,#2E8B57);font-weight:700;text-transform:uppercase;letter-spacing:.02em">Saldo a favor</div><div style="font-size:1.05rem;color:var(--verde,#2E8B57);font-weight:800;margin-top:.1rem">Tenés ${socioMoney(saldoC)} a favor</div><div style="font-size:.68rem;color:var(--gris);margin-top:.15rem">Se descontará de tu próximo comprobante.</div>${movimientosCredito(movsC)}</div>`;
       } else if(saldoC<0){
-        saldoLinea = `<div style="padding:.8rem 1rem;background:#fdecec;border-bottom:1px solid var(--linea)"><div style="font-size:.72rem;color:var(--rojo);font-weight:700;text-transform:uppercase;letter-spacing:.02em">Deuda</div><div style="font-size:1.05rem;color:var(--rojo);font-weight:800;margin-top:.1rem">Tenés una deuda de ${socioMoney(-saldoC)}</div><div style="font-size:.68rem;color:var(--gris);margin-top:.15rem">Se coordina con MEDICAR.</div>${movimientosCredito(movsC)}</div>`;
+        saldoLinea = `<div style="padding:.8rem 1rem;background:var(--rojo-nube);border-bottom:1px solid var(--linea)"><div style="font-size:.72rem;color:var(--rojo);font-weight:700;text-transform:uppercase;letter-spacing:.02em">Deuda</div><div style="font-size:1.05rem;color:var(--rojo);font-weight:800;margin-top:.1rem">Tenés una deuda de ${socioMoney(-saldoC)}</div><div style="font-size:.68rem;color:var(--gris);margin-top:.15rem">Se coordina con MEDICAR.</div>${movimientosCredito(movsC)}</div>`;
       } else if(movsC.length){
         saldoLinea = `<div style="padding:.6rem 1rem;border-bottom:1px solid var(--linea)">${movimientosCredito(movsC)}</div>`;
       }
@@ -1887,7 +1893,7 @@ function homeView(){
 /* Categorías de presentación (color/tag). 'cat' viene del doc (asignada por la CF según la fuente). */
 const FEED_CAT = {
   medicar:{ lbl:'MEDICAR',      tag:'tag-medicar', band:'linear-gradient(135deg,#ED1C24,#C8151C)' },
-  salud:  { lbl:'Cuidado',      tag:'tag-salud',   band:'linear-gradient(135deg,#2E8B57,#1f7a4d)' },
+  salud:  { lbl:'Cuidado',      tag:'tag-salud',   band:'linear-gradient(135deg,#2E8B57,var(--verde-hondo))' },
   nutri:  { lbl:'Alimentación', tag:'tag-nutri',   band:'linear-gradient(135deg,#F7941E,#e07d0a)' },
   vida:   { lbl:'Vida',         tag:'tag-vida',    band:'linear-gradient(135deg,#6C5CE7,#5A4BD1)' }
 };
