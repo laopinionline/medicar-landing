@@ -25,6 +25,9 @@ function cargoDeEpisodio(ep, epId, tarifas, anioIncidente) {
   // VITALICIO: cobertura TOTAL — el flag manda sobre el plan. El episodio queda cubierto, sin cargo (mismo patrón que
   // cubierto_area). Va ANTES de la lógica persona → nunca cae en no_socio/fuera_cobertura.
   if (atrib && atrib.planSnapshot && atrib.planSnapshot.vitalicio === true) return { skip: 'cubierto_vitalicio' };
+  // BONIFICADO (Área Protegida): mismo SKIP (esSinCuota = vitalicio || bonificado) pero ORIGEN distinto y trazable.
+  // El socio es un afiliado directo cuya cuota la cubre la empresa que compró el área → sin cargo por episodio.
+  if (atrib && atrib.planSnapshot && atrib.planSnapshot.bonificado === true) return { skip: 'cubierto_bonificado' };
   const socioId = (atrib && atrib.socioId) ? atrib.socioId : null;
   const cob = (atrib && atrib.planSnapshot && atrib.planSnapshot.coberturas) ? atrib.planSnapshot.coberturas : {};
   const enCar = (atrib && atrib.planSnapshot && Array.isArray(atrib.planSnapshot.enCarencia)) ? atrib.planSnapshot.enCarencia : [];

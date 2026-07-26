@@ -1190,7 +1190,7 @@ exports.cambiarMiPlan = onCall(async (request) => {
   if (socSnap.empty) throw new HttpsError('failed-precondition', 'No encontramos tu afiliación activa.');
   const socioRef = socSnap.docs[0].ref;
   const socio = socSnap.docs[0].data() || {};
-  if (socio.vitalicio === true) throw new HttpsError('failed-precondition', 'Tu plan lo gestiona MEDICAR.'); // vitalicio: sin autogestión (cierra el hueco sin PLAN_EXCLUIDOS)
+  if (socio.vitalicio === true || socio.bonificado === true) throw new HttpsError('failed-precondition', 'Tu plan lo gestiona MEDICAR.'); // sin cuota (vitalicio o bonificado por área): sin autogestión (cierra el hueco sin PLAN_EXCLUIDOS)
   if (socio.esResponsablePago !== true || !socio.planId) throw new HttpsError('permission-denied', 'Solo el titular responsable de pago puede cambiar el plan.');
   if (socio.planId === nuevoPlanId) throw new HttpsError('failed-precondition', 'Ya tenés ese plan.');
   if (PLAN_EXCLUIDOS.includes(nuevoPlanId)) throw new HttpsError('permission-denied', 'Ese plan no está disponible para autogestión.');
@@ -1574,7 +1574,7 @@ exports.generarCargosCF = onCall(async (request) => {
   ]);
   const conCargo = new Set(cgSnap.docs.map((d) => d.data().episodioId)); // idempotencia por episodioId (incluye anulados)
   const tarifas = tarSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  const rep = { generados: 0, sinTarifa: 0, sinCargo: 0, cubierto_area: 0, cubierto_vitalicio: 0, yaTenian: 0, sinAtribucion: 0, enCarencia: 0, errores: 0 }; // F3b: cubierto_area = área protegida; cubierto_vitalicio = socio vitalicio (cobertura total). Ambos son skip → rep[skip]++ (deben existir o daría NaN)
+  const rep = { generados: 0, sinTarifa: 0, sinCargo: 0, cubierto_area: 0, cubierto_vitalicio: 0, cubierto_bonificado: 0, yaTenian: 0, sinAtribucion: 0, enCarencia: 0, errores: 0 }; // F3b: cubierto_area = área protegida; cubierto_vitalicio = socio vitalicio; cubierto_bonificado = socio bonificado por área. Todos son skip → rep[skip]++ (deben existir o daría NaN)
   const nuevos = []; // dry: lo que crearía (para la comparación de paridad)
 
   for (const doc of epsSnap.docs) {
@@ -1692,13 +1692,15 @@ exports.asistenteChat = onCall(async (request) => {
     let plan = null, cubre = [];
     // Vitalicio grupal + herencia (diseño B): vitalicio/plan PROPIO, o heredado del TITULAR del grupo si el dependiente
     // no tiene plan propio → el contexto del dependiente-con-cuenta dice lo mismo que el titular ("sin cuota" / su plan).
-    let vitalicio = !!(socio && socio.vitalicio === true);
+    // SIN CUOTA de cara a la IA = vitalicio || bonificado (Área Protegida). El bonificado REUSA el copy vitalicio
+    // ("cobertura completa, sin cuota"): la IA NUNCA nombra el área/empresa/plan. Un solo camino de contexto.
+    let vitalicio = !!(socio && (socio.vitalicio === true || socio.bonificado === true));
     let planId = socio && socio.planId;
     if (socio && !vitalicio && !planId && socio.titularSocioId) {
       try { const ts = await db.collection('socios').doc(socio.titularSocioId).get(); if (ts.exists) { const tit = ts.data(); if (tit.vitalicio === true) vitalicio = true; else if (tit.planId) planId = tit.planId; } } catch (_) {}
     }
     if (vitalicio) {
-      plan = { nombre: 'MEDICAR', precio: 0, vitalicio: true }; // buildContexto rama vitalicio: no nombra plan/precio
+      plan = { nombre: 'MEDICAR', precio: 0, vitalicio: true }; // buildContexto rama sin-cuota (vitalicio o bonificado): no nombra plan/precio/área
     } else if (planId) {
       const ps = await db.collection('planes').doc(planId).get();
       if (ps.exists) { const p = ps.data(); plan = { nombre: p.nombre || 'tu plan', precio: p.precio != null ? p.precio : 0, vitalicio: false };
