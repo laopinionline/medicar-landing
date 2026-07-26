@@ -2125,38 +2125,33 @@ async function resolverAtribucion(personaId, domCanon){
     if(qs.empty) return { tipo:'persona', socioId:null, planSnapshot:null };
     const socioId=qs.docs[0].id;
     const socio=qs.docs[0].data();
+    // Arma el planSnapshot desde un plan (pl) + la carencia del socio ATENDIDO (congela lo que estaba en carencia al
+    // momento del episodio). heredado = vino del titular del grupo (dependiente sin plan propio).
+    const buildPlanSnap=(pl, planId, heredado)=>{
+      const cp=socio.carenciaPorCobertura||{}; const nowMs=Date.now();
+      const enCarencia=Object.keys(pl.coberturas||{}).filter(k=>{ if((pl.coberturas||{})[k]!==true) return false; const h=cp[k]; const hMs=(h&&h.toMillis)?h.toMillis():(typeof h==='number'?h:0); return hMs>nowMs; });
+      return Object.assign({ planId, nombre: pl.nombre||'', precio:(pl.precio!=null?pl.precio:0), carenciaDias:(pl.carenciaDias!=null?pl.carenciaDias:0), coberturas: pl.coberturas||{}, enCarencia, vigenteAlMomento: firebase.firestore.Timestamp.now() }, heredado?{heredadoDe:'titular'}:{});
+    };
+    const vitalicioSnap=()=>({ vitalicio:true, enCarencia:[], vigenteAlMomento: firebase.firestore.Timestamp.now() }); // cobertura TOTAL sin carencia
     let planSnapshot=null;
-    // VITALICIO: cobertura TOTAL, sin límites — el flag manda sobre el planId. El episodio queda cubierto sin carencia;
-    // cargoDeEpisodio saltea (cubierto_vitalicio) → nunca cae en no_socio/fuera_cobertura.
     if(socio.vitalicio===true){
-      planSnapshot={ vitalicio:true, enCarencia:[], vigenteAlMomento: firebase.firestore.Timestamp.now() };
-      return { tipo:'persona', socioId, planSnapshot };
-    }
-    if(socio.planId){
+      planSnapshot=vitalicioSnap(); // VITALICIO propio: cubierto_vitalicio, nunca fuera_cobertura
+    } else if(socio.planId){
       const ps=await db.collection('planes').doc(socio.planId).get();
-      if(ps.exists){
-        const pl=ps.data();
-        // Autogestión de plan: congelar QUÉ coberturas estaban EN CARENCIA en la fecha del episodio (carenciaPorCobertura
-        // [prestacionId] > ahora). generarCargos las cobra (no las cubre). Snapshot al CREAR el episodio → si el socio
-        // cambia de plan después, el episodio "sabe" lo que estaba en carencia en SU momento.
-        const cp=socio.carenciaPorCobertura||{}; const nowMs=Date.now();
-        const enCarencia=Object.keys(pl.coberturas||{}).filter(k=>{
-          if((pl.coberturas||{})[k]!==true) return false;
-          const h=cp[k]; const hMs=(h&&h.toMillis)?h.toMillis():(typeof h==='number'?h:0);
-          return hMs>nowMs;
-        });
-        planSnapshot={
-          planId: socio.planId,
-          nombre: pl.nombre||'',
-          precio: (pl.precio!=null?pl.precio:0),
-          carenciaDias: (pl.carenciaDias!=null?pl.carenciaDias:0),
-          coberturas: pl.coberturas||{},
-          enCarencia, // prestacionIds cubiertas por el plan PERO en carencia al momento del episodio
-          vigenteAlMomento: firebase.firestore.Timestamp.now() // congelado (client Timestamp: valor plano, seguro en map anidado)
-        };
-      }
+      if(ps.exists) planSnapshot=buildPlanSnap(ps.data(), socio.planId, false);
+    } else if(socio.titularSocioId){
+      // GAP GENERAL (diseño B / negocio): el dependiente SIN plan propio HEREDA el del TITULAR del grupo (+1 read/episodio).
+      // Titular vitalicio → cobertura plena; titular normal → las coberturas de SU plan (como si el episodio fuera del grupo).
+      // Antes: planSnapshot null → fuera_cobertura = cobro indebido al dependiente. Ahora queda cubierto por el grupo.
+      try{
+        const ts=await db.collection('socios').doc(socio.titularSocioId).get();
+        if(ts.exists){ const tit=ts.data();
+          if(tit.vitalicio===true) planSnapshot=vitalicioSnap();
+          else if(tit.planId){ const tps=await db.collection('planes').doc(tit.planId).get(); if(tps.exists) planSnapshot=buildPlanSnap(tps.data(), tit.planId, true); }
+        }
+      }catch(_){}
     }
-    return { tipo:'persona', socioId, planSnapshot }; // socio sin plan (o plan inexistente) => socioId seteado, planSnapshot null
+    return { tipo:'persona', socioId, planSnapshot }; // planSnapshot null solo si no hay plan ni grupo resoluble
   }catch(e){
     console.warn('[resolverAtribucion] degradado a null (la atención sigue):', e);
     return { tipo:'persona', socioId:null, planSnapshot:null };
@@ -5582,7 +5577,7 @@ function afPanel(){
     const invBtn = (!inact && s.cuentaPropia!==true && s.personaId) ? `<button class="${btn}" onclick="afInvitar('${s.personaId}')">Invitar</button>` : '';
     const cuentaChip = s.cuentaPropia===true ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#0F6E56;color:#fff">Con app</span>` : '';
     const acts=`<div style="display:flex;gap:.4rem">${invBtn}<button class="${btn}" onclick="afEditar('${s.id}')">Editar</button><button class="${btn}" onclick="afBaja('${s.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
-    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${vitalicioChip(s)} ${cuentaChip} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${vitalicioChip(s)} ${afGrupoChip(s)} ${cuentaChip} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin socios${showInact?'':' activos'}</div>`;
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="afShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
   const head=`<div class="panel-h"><b>Afiliados</b><span class="live-tag">en vivo</span></div>`;
@@ -6136,7 +6131,10 @@ function leerFacturarA(prefix){
   return { tipo:'empresa', empresaId:empId, razonSocial:(emp&&emp.razonSocial)||'' }; // razonSocial denorm al momento
 }
 function facturarAChip(fa){ return (fa && fa.tipo==='empresa') ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:var(--ink,#333);color:#fff">Factura a: ${esc(fa.razonSocial||'empresa')}</span>` : ''; }
-function vitalicioChip(s){ return (s && s.vitalicio===true) ? `<span style="font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.06rem .4rem;border-radius:6px;background:#0F6E56;color:#fff">VITALICIO</span>` : ''; } // condición interna: cobertura integral sin cuota (el socio no la ve)
+// VITALICIO grupal (diseño B): chip si el flag es PROPIO O heredado del titular del grupo (lookup en la lista en memoria).
+function afTitularDe(s){ return (s && s.titularSocioId) ? (((S.af&&S.af.socios)||[]).find(x=>x.id===s.titularSocioId)||null) : null; }
+function vitalicioChip(s){ const propio=!!(s && s.vitalicio===true); const t=propio?null:afTitularDe(s); const es=propio||!!(t&&t.vitalicio===true); return es ? `<span style="font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.06rem .4rem;border-radius:6px;background:#0F6E56;color:#fff">VITALICIO</span>` : ''; } // condición interna: cobertura integral sin cuota (el socio no la ve)
+function afGrupoChip(s){ const t=afTitularDe(s); return t ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#6B7280;color:#fff">Grupo ${esc(t.nombreVista||afNombre(t.personaId)||'—')}</span>` : ''; }
 // Invitar a un socio a su propia app (mismo generador que el titular; el admin invita a cualquiera sin cuenta).
 async function afInvitar(personaId){
   try{ const r=await fnsCall('generarInvitacionAfiliado',{ personaId }); const link=r.link||'';

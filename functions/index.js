@@ -1620,9 +1620,18 @@ exports.asistenteChat = onCall(async (request) => {
     const socioSnap = await db.collection('socios').where('personaId', '==', personaId).where('activo', '==', true).limit(1).get();
     const socio = socioSnap.empty ? null : socioSnap.docs[0].data();
     let plan = null, cubre = [];
-    if (socio && socio.planId) {
-      const ps = await db.collection('planes').doc(socio.planId).get();
-      if (ps.exists) { const p = ps.data(); plan = { nombre: p.nombre || 'tu plan', precio: p.precio != null ? p.precio : 0, vitalicio: socio.vitalicio === true };
+    // Vitalicio grupal + herencia (diseño B): vitalicio/plan PROPIO, o heredado del TITULAR del grupo si el dependiente
+    // no tiene plan propio → el contexto del dependiente-con-cuenta dice lo mismo que el titular ("sin cuota" / su plan).
+    let vitalicio = !!(socio && socio.vitalicio === true);
+    let planId = socio && socio.planId;
+    if (socio && !vitalicio && !planId && socio.titularSocioId) {
+      try { const ts = await db.collection('socios').doc(socio.titularSocioId).get(); if (ts.exists) { const tit = ts.data(); if (tit.vitalicio === true) vitalicio = true; else if (tit.planId) planId = tit.planId; } } catch (_) {}
+    }
+    if (vitalicio) {
+      plan = { nombre: 'MEDICAR', precio: 0, vitalicio: true }; // buildContexto rama vitalicio: no nombra plan/precio
+    } else if (planId) {
+      const ps = await db.collection('planes').doc(planId).get();
+      if (ps.exists) { const p = ps.data(); plan = { nombre: p.nombre || 'tu plan', precio: p.precio != null ? p.precio : 0, vitalicio: false };
         cubre = Object.keys(p.coberturas || {}).filter((k) => p.coberturas[k] === true); }
     }
     // Facturación EXPLÍCITA: pendiente (si hay) + última factura (cualquier estado) → el contexto afirma el estado, no deja hueco.
