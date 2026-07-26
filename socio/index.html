@@ -1356,6 +1356,17 @@ async function afiliacionRetornoCheck(){
 /* ---------- INVITACIÓN de integrante: bienvenida → crear contraseña → canje (cuenta propia de socio) ---------- */
 function invitaTokenDeURL(){ try{ return new URLSearchParams(location.search).get('invita')||null; }catch(_){ return null; } }
 function limpiarParamInvita(){ try{ const u=new URL(location.href); u.searchParams.delete('invita'); history.replaceState(null,'',u.pathname+u.search); }catch(_){} }
+// Atajo por URL para el shell de tabs (Tramo 2): ?tabs=1 ENCIENDE (localStorage medicar_tabs), ?tabs=0 APAGA. Limpia el
+// param (patrón ?invita). Corre en el boot, ANTES del auth flow → tabsBootPref() ya ve el flag. Sin param: no toca nada.
+function aplicarParamTabs(){
+  try{
+    const u=new URL(location.href); const v=u.searchParams.get('tabs');
+    if(v===null) return;
+    if(v==='1') localStorage.setItem('medicar_tabs','1');
+    else if(v==='0') localStorage.removeItem('medicar_tabs');
+    u.searchParams.delete('tabs'); history.replaceState(null,'',u.pathname+u.search);
+  }catch(_){}
+}
 async function mostrarBienvenidaInvita(token){
   set({ view:'boot' });
   try{
@@ -3380,6 +3391,7 @@ function render(){
   }
 }
 
+aplicarParamTabs(); // Tramo 2: ?tabs=1/0 setea/borra el flag ANTES del auth flow (sincrónico, antes del callback de auth)
 render();
 
 /* ---------- Backstop del resumen (B1): si el chat está abierto y la app pasa a segundo plano

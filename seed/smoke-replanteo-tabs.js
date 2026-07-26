@@ -100,6 +100,29 @@ t('navRestore mapea entrada legacy/sin-tab → Inicio (fallback defensivo)', /if
   }catch(e){ t('simulación de nav sin throw', false); console.log('   ', e.message.split('\n')[0]); }
 })();
 
+// ── Atajo por URL ?tabs=1/0 (vm con location/localStorage/history stubbeados) ──
+t('aplicarParamTabs se llama en el boot antes de render()', /aplicarParamTabs\(\); \/\/ Tramo 2[\s\S]{0,120}\nrender\(\);/.test(socio));
+(function(){
+  try{
+    const fn=(/function aplicarParamTabs\(\)\{[\s\S]*?\n\}/.exec(socio)||[])[0];
+    if(!fn) throw new Error('no encontré aplicarParamTabs');
+    const run=(href, seed)=>{
+      const store=Object.assign({}, seed||{}); let cleaned=null;
+      const sb={ URL, location:{href}, localStorage:{ setItem:(k,v)=>{store[k]=String(v);}, removeItem:(k)=>{delete store[k];}, getItem:(k)=>(k in store?store[k]:null) }, history:{ replaceState:(a,b,u)=>{cleaned=u;} } };
+      vm.runInNewContext(fn+'\naplicarParamTabs();', sb, {timeout:3000});
+      return { store, cleaned };
+    };
+    const a=run('https://medicaronline.ar/socio/?tabs=1');
+    t('?tabs=1 → setea medicar_tabs=1', a.store.medicar_tabs==='1');
+    t('?tabs=1 → limpia el param de la URL', typeof a.cleaned==='string' && !/tabs=/.test(a.cleaned));
+    const b=run('https://medicaronline.ar/socio/?tabs=0', { medicar_tabs:'1' });
+    t('?tabs=0 → borra el flag (vuelve al viejo)', !('medicar_tabs' in b.store));
+    t('?tabs=0 → limpia el param', typeof b.cleaned==='string' && !/tabs=/.test(b.cleaned));
+    const c=run('https://medicaronline.ar/socio/', { medicar_tabs:'1' });
+    t('sin ?tabs → NO toca nada (flag ni URL)', c.store.medicar_tabs==='1' && c.cleaned===null);
+  }catch(e){ t('atajo ?tabs (vm) sin throw', false); console.log('   ', e.message.split('\n')[0]); }
+})();
+
 // ── SW bump ──
 t('socio SW bumpeado (≥ v49)', /medicar-socio-v(49|[5-9]\d)/.test(sw));
 
