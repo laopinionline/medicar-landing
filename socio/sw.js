@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v47'; // Bonificado de Área Protegida: credencial "pelada" (esVit = vitalicio || bonificado) sin nombrar cuota/plan/área
+const CACHE = 'medicar-socio-v48'; // Marca a código: tokens semánticos (verde/ámbar/peligro -hondo/-nube) + tokenización value-preserving. Sin cambio de layout.
 const SHELL = [
   './',
   './index.html',

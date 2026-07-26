@@ -7,19 +7,23 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Medicar">
 <title>Medicar</title>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<!-- Tipografía: system-stack (manual de marca) — sin Google Fonts. Bebas Neue + DM Sans retirados en tramo/marca-tokens. -->
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 :root{
   /* Tokens de marca (Bidondo) — mismos que la app del socio (Tramo 1 rediseño panel) */
   --rojo:#ED1C24; --rojo-hondo:#C8151C; --naranja:#F7941E;
   --tinta:#1A1A1A; --gris:#6B7075; --linea:#E7E9EC; --nieve:#F7F8FA;
-  --blanco:#FFFFFF; --verde:#2E8B57; --ambar:#E6A100;
+  --blanco:#FFFFFF; --verde:#1D9E75; --ambar:#E6A100;
+  /* Semánticos de estado (derivados temáticos — capa tematizable del CORE: Triage/MediPaw cambian valores, no estructura) */
+  --verde-hondo:#1F7A4D; --verde-nube:#EAFAF0;   /* verde texto-oscuro / fondo-claro */
+  --ambar-hondo:#B45309; --ambar-nube:#FFF8E6;   /* ámbar texto-oscuro / fondo-claro */
+  --peligro:#E5484D; --peligro-hondo:#A11C1C; --rojo-nube:#FDECEC; /* rojo de error/peligro (distinto del rojo de MARCA) + fondo-claro */
   --radio:16px;
   --sombra:0 1px 2px rgba(20,22,25,.04), 0 8px 24px rgba(20,22,25,.06);
   --sombra-alta:0 2px 4px rgba(20,22,25,.05), 0 18px 48px rgba(20,22,25,.12);
   /* ALIAS: nombres viejos -> tokens nuevos (no-rotura de las vistas aún no rediseñadas) */
-  --r:var(--rojo);--o:var(--naranja);
+  --r:var(--rojo);--o:var(--naranja);--g:var(--verde); /* --g ahora definido → unifica el verde del panel (antes 27× fallback #1D9E75) */
   --bg:var(--nieve);--bg2:#EDEFF2;--bg3:#E2E5E9;
   --card:var(--blanco);--dark:var(--tinta);--dark2:#232527;
   --ink:var(--tinta);--ink2:var(--gris);--ink3:#9AA0A6;
@@ -27,9 +31,9 @@
   --shadow:var(--sombra);
   --rglow:0 4px 20px rgba(237,28,36,.3);
 }
-html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--ink);overflow:hidden;-webkit-font-smoothing:antialiased}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);overflow:hidden;-webkit-font-smoothing:antialiased}
 #app{height:100%;display:flex;flex-direction:column}
-button,input,select,textarea{font-family:'DM Sans',sans-serif;-webkit-appearance:none}
+button,input,select,textarea{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-appearance:none}
 button{cursor:pointer;border:none;background:none}
 svg{display:block;flex-shrink:0}
 .page{animation:pageIn .2s ease both}
@@ -44,10 +48,10 @@ svg{display:block;flex-shrink:0}
 
 /* LOGIN */
 .login-wrap{min-height:100svh;display:flex;flex-direction:column;background:var(--dark)}
-.login-bg{position:absolute;font-family:'Bebas Neue',sans-serif;font-size:45vw;color:rgba(237,28,36,.05);right:-3vw;top:50%;transform:translateY(-60%);line-height:1;user-select:none;pointer-events:none}
+.login-bg{position:absolute;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:45vw;color:rgba(237,28,36,.05);right:-3vw;top:50%;transform:translateY(-60%);line-height:1;user-select:none;pointer-events:none}
 .login-top{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:3rem 2rem 2rem;position:relative;z-index:2}
 .login-logo{height:36px;width:auto;filter:brightness(0) invert(1);margin-bottom:2.5rem}
-.login-h1{font-family:'Bebas Neue',sans-serif;font-size:clamp(2.5rem,12vw,4rem);color:#fff;letter-spacing:.03em;text-align:center;line-height:.93}
+.login-h1{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:clamp(2.5rem,12vw,4rem);color:#fff;letter-spacing:.03em;text-align:center;line-height:.93}
 .login-h1 em{color:var(--r);font-style:normal;display:block}
 .login-sub{font-size:.8rem;color:rgba(255,255,255,.3);margin-top:.75rem;text-align:center;letter-spacing:.06em}
 .sheet{background:var(--bg);border-radius:24px 24px 0 0;padding:2rem 1.5rem calc(2.5rem + env(safe-area-inset-bottom))}
@@ -105,7 +109,7 @@ input.sp-cap:focus-visible{outline:2px solid var(--r);outline-offset:2px}
 .srow{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:.875rem}
 .stat{background:var(--card);border-radius:14px;border:1px solid var(--border);padding:1rem;box-shadow:var(--shadow)}
 .stat.red{background:var(--r);border-color:transparent;box-shadow:var(--rglow)}
-.sn{font-family:'Bebas Neue',sans-serif;font-size:2.6rem;line-height:1;letter-spacing:.02em;color:var(--ink)}
+.sn{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:2.6rem;line-height:1;letter-spacing:.02em;color:var(--ink)}
 .sn sup{font-size:1.1rem}
 .stat.red .sn{color:#fff}
 .sn.acc{color:var(--r)}
@@ -119,7 +123,7 @@ input.sp-cap:focus-visible{outline:2px solid var(--r);outline-offset:2px}
 .lrn{font-size:.9rem;font-weight:500;color:var(--ink);margin-bottom:.12rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lrs{font-size:.75rem;color:var(--ink3)}
 .badge{display:inline-flex;align-items:center;padding:.18rem .55rem;border-radius:20px;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;font-weight:700;white-space:nowrap}
-.bg{background:rgba(29,158,117,.1);color:#0F6E56}
+.bg{background:rgba(29,158,117,.1);color:var(--verde-hondo)}
 .br{background:rgba(237,28,36,.1);color:var(--r)}
 .ba{background:rgba(186,117,23,.1);color:#7A4200}
 .bb{background:rgba(55,138,221,.1);color:#185FA5}
@@ -128,7 +132,7 @@ input.sp-cap:focus-visible{outline:2px solid var(--r);outline-offset:2px}
 
 /* PROFILE */
 .ptop{text-align:center;padding:1.5rem 0 1rem}
-.av{width:68px;height:68px;border-radius:50%;background:var(--r);color:#fff;font-family:'Bebas Neue',sans-serif;font-size:1.7rem;letter-spacing:.03em;display:flex;align-items:center;justify-content:center;margin:0 auto .875rem;box-shadow:var(--rglow)}
+.av{width:68px;height:68px;border-radius:50%;background:var(--r);color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:1.7rem;letter-spacing:.03em;display:flex;align-items:center;justify-content:center;margin:0 auto .875rem;box-shadow:var(--rglow)}
 .pname{font-size:1.05rem;font-weight:600}
 .psub{font-size:.8rem;color:var(--ink3);margin-top:.2rem}
 .ir{display:flex;justify-content:space-between;align-items:center;padding:.875rem 0;border-bottom:1px solid var(--border)}
@@ -174,7 +178,7 @@ input.sp-cap:focus-visible{outline:2px solid var(--r);outline-offset:2px}
 .card-sub{font-size:.8rem;color:var(--gris);margin-bottom:1rem;line-height:1.55}
 .tile{display:flex;align-items:center;gap:.85rem;width:100%;background:var(--card);border:1px solid var(--linea);border-radius:var(--radio);padding:.95rem 1.05rem;margin-bottom:.7rem;box-shadow:var(--sombra);text-align:left;transition:box-shadow .15s,transform .1s;cursor:pointer}
 .tile:active{transform:scale(.99);box-shadow:var(--sombra-alta)}
-.tile-ic{width:38px;height:38px;flex:none;border-radius:11px;background:#fdecec;color:var(--rojo);display:flex;align-items:center;justify-content:center}
+.tile-ic{width:38px;height:38px;flex:none;border-radius:11px;background:var(--rojo-nube);color:var(--rojo);display:flex;align-items:center;justify-content:center}
 .tile-ic svg{width:20px;height:20px}
 .tile-tx{flex:1;min-width:0}
 .tile-tx b{display:block;font-size:.92rem;font-weight:700;color:var(--tinta)}
@@ -194,7 +198,7 @@ input.sp-cap:focus-visible{outline:2px solid var(--r);outline-offset:2px}
 .rolesel{min-height:100svh;display:flex;align-items:center;justify-content:center;padding:1.5rem;background:var(--nieve)}
 .rolesel-box{width:100%;max-width:420px;background:var(--blanco);border:1px solid var(--linea);border-radius:20px;box-shadow:var(--sombra-alta);padding:2rem 1.5rem;animation:pageIn .2s ease both}
 .rolesel-brand{display:flex;align-items:center;justify-content:center;gap:.5rem;margin-bottom:1.4rem}
-.rolesel-brand span{font-style:italic;font-weight:800;font-size:1.6rem;letter-spacing:-.02em;color:var(--tinta);line-height:1}
+.rolesel-brand span{font-weight:800;font-size:1.6rem;letter-spacing:-.02em;color:var(--tinta);line-height:1}/* wordmark "medicar" minúscula+chevron (producto) — itálica retirada (regla de marca) */
 .rolesel-sub{text-align:center;font-size:.8rem;color:var(--gris);margin:.1rem 0 1.4rem}
 .rolesel .tile{margin-bottom:.65rem}
 </style>
@@ -1174,7 +1178,7 @@ function plan(){
   // reglas nuevas). Sin items o vacío → recién ahí el fallback de texto.
   const items=(pl&&Array.isArray(pl.itemsLanding))?pl.itemsLanding.map(x=>String(x||'').trim()).filter(Boolean):[];
   const coberturas=items.length
-    ? `<div class="card"><div class="ch">Qué incluye tu plan</div>${items.map(it=>`<div class="lr"><div class="lrb"><div class="lrn">${esc(it)}</div></div><span style="color:#0F6E56;width:18px;height:18px">${IC.check}</span></div>`).join('')}</div>`
+    ? `<div class="card"><div class="ch">Qué incluye tu plan</div>${items.map(it=>`<div class="lr"><div class="lrb"><div class="lrn">${esc(it)}</div></div><span style="color:var(--verde-hondo);width:18px;height:18px">${IC.check}</span></div>`).join('')}</div>`
     : `<div class="card"><div class="ch">Coberturas</div><div style="font-size:.82rem;color:var(--ink3);margin-top:.4rem">Consultá el detalle de coberturas de tu plan con MEDICAR.</div></div>`;
 
   return`
@@ -2302,8 +2306,8 @@ async function dspAreaMatch(){
       if(areaVigente(e, nowMs)){ cubre=e.razonSocial||'Área protegida'; break; } // cubre → gana y corta
       else if(!sinVig) sinVig=e.razonSocial||'Área protegida'; }                 // área declarada pero NO vigente
     dspAreaSet(
-      cubre  ? `<div style="background:#0a7d34;color:#fff;border-radius:10px;padding:.5rem .7rem;margin:.15rem 0 .5rem;font-size:.82rem;font-weight:600">🏠 Dirección en Área Protegida: ${esc(cubre)} — cubierto por contrato</div>`
-      : sinVig ? `<div style="background:#a11c1c;color:#fff;border-radius:10px;padding:.5rem .7rem;margin:.15rem 0 .5rem;font-size:.82rem;font-weight:700">⚠️ ${esc(sinVig)}: área SIN vigencia vigente → NO se cubre, se factura a la persona. Revisar el contrato.</div>`
+      cubre  ? `<div style="background:var(--verde-hondo);color:#fff;border-radius:10px;padding:.5rem .7rem;margin:.15rem 0 .5rem;font-size:.82rem;font-weight:600">🏠 Dirección en Área Protegida: ${esc(cubre)} — cubierto por contrato</div>`
+      : sinVig ? `<div style="background:var(--peligro-hondo);color:#fff;border-radius:10px;padding:.5rem .7rem;margin:.15rem 0 .5rem;font-size:.82rem;font-weight:700">⚠️ ${esc(sinVig)}: área SIN vigencia vigente → NO se cubre, se factura a la persona. Revisar el contrato.</div>`
       : '');
   }catch(_){ dspAreaSet(''); }                                             // falla/red → sin banner, el despacho sigue igual
 }
@@ -4239,7 +4243,7 @@ async function agtHintPasiva(){
     const ini=new Date(fecha+'T'+hini).getTime(), fin=new Date(fecha+'T'+hfin).getTime();
     const pasiva=snap.docs.map(d=>d.data()).some(g=> g.modalidad==='pasiva' && gSolapan(ini,fin,g.inicio,g.fin));
     el.innerHTML= pasiva
-      ? '<span style="color:#0F6E56">✓ El médico figura de guardia pasiva en esa franja.</span>'
+      ? '<span style="color:var(--verde-hondo)">✓ El médico figura de guardia pasiva en esa franja.</span>'
       : '<span style="color:#B45309">⚠ El médico no figura de guardia pasiva en esa franja (informativo, no bloquea).</span>';
   }catch(e){ el.innerHTML='<span style="color:var(--ink3)">No se pudo comprobar la guardia pasiva.</span>'; }
 }
@@ -5717,7 +5721,7 @@ function afPanel(){
     const inact=s.activo===false;
     const meta=['N° '+esc(s.numeroAfiliado||'—'), '· '+afPlanNom(s.planId), '· desde '+afFmtFecha(s.vigenteDesde), '· '+esc(s.tipoAfiliado||'—'), inact?'· inactivo':''].filter(Boolean).join(' ');
     const invBtn = (!inact && s.cuentaPropia!==true && s.personaId) ? `<button class="${btn}" onclick="afInvitar('${s.personaId}')">Invitar</button>` : '';
-    const cuentaChip = s.cuentaPropia===true ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#0F6E56;color:#fff">Con app</span>` : '';
+    const cuentaChip = s.cuentaPropia===true ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:var(--verde-hondo);color:#fff">Con app</span>` : '';
     const acts=`<div style="display:flex;gap:.4rem">${invBtn}<button class="${btn}" onclick="afEditar('${s.id}')">Editar</button><button class="${btn}" onclick="afBaja('${s.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
     return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${vitalicioChip(s)} ${bonificadoChip(s)} ${afGrupoChip(s)} ${cuentaChip} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin socios${showInact?'':' activos'}</div>`;
@@ -6065,7 +6069,7 @@ function empPanel(){
     const n=(S.af.socios||[]).filter(s=>s.empresaId===e.id).length;
     const tl=(e.tipo==='area_protegida')?'Área protegida':'Corporativo';
     const inact=e.activo===false;
-    const sinVigChip=empSinVigencia(e)?` <span style="font-size:.58rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#a11c1c;color:#fff">SIN VIGENCIA · NO cubre</span>`:''; // F3b: área que no cubre por falta de vigencia
+    const sinVigChip=empSinVigencia(e)?` <span style="font-size:.58rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:var(--peligro-hondo);color:#fff">SIN VIGENCIA · NO cubre</span>`:''; // F3b: área que no cubre por falta de vigencia
     return `<div class="lr"${inact?' style="opacity:.5"':''}><div class="lrb"><div class="lrn">${esc(e.razonSocial||'—')} ${convenioChip(e.convenio)}${sinVigChip}</div><div class="lrs">N° ${esc(e.numeroConvenio||'—')} · ${tl} · ${n} integrante${n===1?'':'s'}${inact?' · inactiva':''}</div></div><button class="${btn}" onclick="empEditar('${e.id}')">Editar</button></div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin empresas todavía.</div>`;
   return `<div class="panel-h"><b>Empresas / convenios</b><span class="live-tag">en vivo</span></div>
@@ -6099,7 +6103,7 @@ function empVigenciaBlock(e){
   const sinVig=!e.vigenciaDesde;
   return `
     <div style="border-top:1px solid var(--border);margin:.9rem 0 .4rem;padding-top:.6rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink3)">Vigencia del contrato</div>
-    ${sinVig?`<div style="background:#a11c1c;color:#fff;border-radius:8px;padding:.5rem .7rem;margin:.15rem 0 .55rem;font-size:.8rem;font-weight:700">⚠️ Sin vigencia cargada: esta área NO cubre ningún episodio. Cargá "Vigente desde" para que empiece a cubrir.</div>`:''}
+    ${sinVig?`<div style="background:var(--peligro-hondo);color:#fff;border-radius:8px;padding:.5rem .7rem;margin:.15rem 0 .55rem;font-size:.8rem;font-weight:700">⚠️ Sin vigencia cargada: esta área NO cubre ningún episodio. Cargá "Vigente desde" para que empiece a cubrir.</div>`:''}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem">
       <div class="field"><label>Vigente desde</label><input id="emp-vig-desde" type="date" value="${tsToArDateInput(e.vigenciaDesde)}"></div>
       <div class="field"><label>Hasta (opcional)</label><input id="emp-vig-hasta" type="date" value="${tsToArDateInput(e.vigenciaHasta)}"></div>
@@ -6225,11 +6229,11 @@ function empBonifBlock(e){
     const nom=b.socio.nombreVista||afNombre(b.socio.personaId)||'—';
     const activo=b.socio.activo!==false && b.socio.bonificado===true;
     // AVISO DE BAJA: el área se dio de baja pero el bonificado sigue activo → hay que resolverlo (degradar).
-    const avisoBaja = (activo && e.activo===false) ? `<div style="background:#a11c1c;color:#fff;border-radius:8px;padding:.5rem .7rem;margin-bottom:.5rem;font-size:.8rem;font-weight:700">⚠️ El área "${esc(e.razonSocial||'')}" está dada de baja, pero su dependiente bonificado sigue SIN cuota. Resolvé: degradá a pagador (empieza a facturar) o reactivá el área.</div>` : '';
+    const avisoBaja = (activo && e.activo===false) ? `<div style="background:var(--peligro-hondo);color:#fff;border-radius:8px;padding:.5rem .7rem;margin-bottom:.5rem;font-size:.8rem;font-weight:700">⚠️ El área "${esc(e.razonSocial||'')}" está dada de baja, pero su dependiente bonificado sigue SIN cuota. Resolvé: degradá a pagador (empieza a facturar) o reactivá el área.</div>` : '';
     return H+`<div id="emp-bonif-err" class="err" style="display:none;margin-bottom:.4rem"></div>
       ${avisoBaja}
       <div class="card" style="background:var(--bg);padding:.7rem .8rem">
-        <div style="font-weight:700;font-size:.86rem">${esc(nom)} <span class="badge" style="background:#0a7d34;color:#fff;margin-left:.3rem">${activo?'BONIFICADO':'DEGRADADO'}</span></div>
+        <div style="font-weight:700;font-size:.86rem">${esc(nom)} <span class="badge" style="background:var(--verde-hondo);color:#fff;margin-left:.3rem">${activo?'BONIFICADO':'DEGRADADO'}</span></div>
         <div style="font-size:.72rem;color:var(--ink3);margin-top:.2rem">N° ${esc(b.socio.numeroAfiliado||'—')} · afiliado directo · ${activo?'sin cuota (la cubre esta área)':'ahora facturando (degradado)'}</div>
         ${activo&&admin?`<button class="btn-o" style="margin-top:.55rem" onclick="empBonifDegradar('${esc(b.socio.id)}','${esc(e.id)}')">Degradar a pagador</button>`:''}
         ${activo&&!admin?`<div style="font-size:.68rem;color:var(--ink3);margin-top:.4rem">Solo admin/superadmin puede degradar.</div>`:''}
@@ -6410,9 +6414,9 @@ function leerFacturarA(prefix){
 function facturarAChip(fa){ return (fa && fa.tipo==='empresa') ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:var(--ink,#333);color:#fff">Factura a: ${esc(fa.razonSocial||'empresa')}</span>` : ''; }
 // VITALICIO grupal (diseño B): chip si el flag es PROPIO O heredado del titular del grupo (lookup en la lista en memoria).
 function afTitularDe(s){ return (s && s.titularSocioId) ? (((S.af&&S.af.socios)||[]).find(x=>x.id===s.titularSocioId)||null) : null; }
-function vitalicioChip(s){ const propio=!!(s && s.vitalicio===true); const t=propio?null:afTitularDe(s); const es=propio||!!(t&&t.vitalicio===true); return es ? `<span style="font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.06rem .4rem;border-radius:6px;background:#0F6E56;color:#fff">VITALICIO</span>` : ''; } // condición interna: cobertura integral sin cuota (el socio no la ve)
+function vitalicioChip(s){ const propio=!!(s && s.vitalicio===true); const t=propio?null:afTitularDe(s); const es=propio||!!(t&&t.vitalicio===true); return es ? `<span style="font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.06rem .4rem;border-radius:6px;background:var(--verde-hondo);color:#fff">VITALICIO</span>` : ''; } // condición interna: cobertura integral sin cuota (el socio no la ve)
 // BONIFICADO (Área Protegida): rótulo INTERNO distinto del vitalicio. Nombra el área (empresa) si la resuelve en memoria. El socio NO lo ve.
-function bonificadoChip(s){ if(!(s && s.bonificado===true)) return ''; const emp=(S.af&&S.af.empresas||[]).find(x=>x.id===s.empresaId); const nom=emp?(' '+(emp.razonSocial||'')):''; return `<span style="font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.06rem .4rem;border-radius:6px;background:#0a7d34;color:#fff" title="Bonificado por área${esc(nom)}">BONIFICADO${nom?(' · '+esc((emp.razonSocial||'').slice(0,18))):''}</span>`; }
+function bonificadoChip(s){ if(!(s && s.bonificado===true)) return ''; const emp=(S.af&&S.af.empresas||[]).find(x=>x.id===s.empresaId); const nom=emp?(' '+(emp.razonSocial||'')):''; return `<span style="font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.06rem .4rem;border-radius:6px;background:var(--verde-hondo);color:#fff" title="Bonificado por área${esc(nom)}">BONIFICADO${nom?(' · '+esc((emp.razonSocial||'').slice(0,18))):''}</span>`; }
 function afGrupoChip(s){ const t=afTitularDe(s); return t ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#6B7280;color:#fff">Grupo ${esc(t.nombreVista||afNombre(t.personaId)||'—')}</span>` : ''; }
 // Invitar a un socio a su propia app (mismo generador que el titular; el admin invita a cualquiera sin cuenta).
 async function afInvitar(personaId){
@@ -6800,7 +6804,7 @@ function prospDniClaves(p){ return ['titular'].concat(((p.integrantes||[])).map(
 function prospDniBadge(p,clave){
   const v=((p.identidadVerificada||{})[clave])===true; const f=((p.fotos||{})[clave])||{};
   const chip=(bg,txt)=>`<span style="font-size:.58rem;font-weight:800;padding:.05rem .4rem;border-radius:6px;background:${bg};color:#fff">${txt}</span>`;
-  if(v) return chip('#0F6E56','DNI verificado ✓');
+  if(v) return chip('var(--verde-hondo)','DNI verificado ✓');
   if(f.frente&&f.dorso) return chip('#B45309','fotos sin verificar');
   if(f.frente||f.dorso) return chip('#9CA3AF','fotos incompletas');
   return chip('#DC2626','sin fotos');
