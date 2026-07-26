@@ -659,8 +659,10 @@ function navRestore(desc){
   if(esProspectoUI() && S.view==='asistente'){ navRestoring=true; try{ cerrarAsistente(); }finally{ navRestoring=false; } return; }
   if(esProspectoUI() && S.view==='puente'){ navRestoring=true; try{ puenteCerrar(); }finally{ navRestoring=false; } return; }
   // Tramo 2 — SHELL DE TABS: el back entre tabs restaura el tab + su scroll (determinístico, ya no es parche).
-  if(tabsOn() && socioShellElegible() && S.view==='home' && desc && desc.tabnav){
-    navRestoring=true; try{ S.tab=desc.tabnav; pintarTab(S.tab); } finally{ navRestoring=false; } return;
+  if(tabsOn() && socioShellElegible() && S.view==='home'){
+    if(desc && desc.tabnav){ navRestoring=true; try{ S.tab=desc.tabnav; pintarTab(S.tab); } finally{ navRestoring=false; } return; }
+    // FALLBACK defensivo: entrada inicial LEGACY {v:1,view:'home'} (o sin tab) → Inicio. Cubre historiales mezclados en la transición.
+    if(!desc || desc.tabnav===undefined){ navRestoring=true; try{ S.tab='inicio'; pintarTab('inicio'); } finally{ navRestoring=false; } return; }
   }
   // solo dentro de la app (home + apiladas). login/boot/no-afiliado/sin-vinculo/error los maneja onAuthStateChanged.
   if(!S.cred || !(S.view==='home' || APILADAS.includes(S.view))) return;
@@ -3370,6 +3372,9 @@ function render(){
   const rlem=el('rlem'); if(rlem){ rlem.onkeydown=e=>{ if(e.key==='Enter') el('rlpw')?.focus(); }; }
   // Tramo 2 — shell de tabs: restaurar scroll del tab activo + hydrate en background (núcleo → full, sin bloquear Inicio).
   if(S.view==='home' && tabsOn() && socioShellElegible()){
+    // Base del historial al esquema PROPIO del shell (la de boot es legacy {v:1,view:'home'} → el back a la 1ª entrada
+    // no volvía a Inicio). replaceState UNA vez, sin pushear: el back entre tabs termina en {tabnav:'inicio'} → Inicio.
+    if(!S._shellBase){ S._shellBase=1; try{ history.replaceState({tabnav:S.tab||'inicio'},''); }catch(_){} }
     const cc=el('tab-content'); if(cc) cc.scrollTop=S.scroll[S.tab||'inicio']||0;
     if(S.cred && S.cred._lazy && !S._hydrating && !S._hydrateKick){ S._hydrateKick=1; setTimeout(()=>hydrateFull(null), 60); }
   }
