@@ -29,7 +29,8 @@ t('cartel "Esta app es solo para socios"', /Esta app es solo para socios/.test(s
 
 // 5) la PWA web sigue intacta (no se rompió el flujo afiliado normal)
 t('flujo afiliado intacto: sigue el home tras cred ok', /set\(\{ view:'home', cred[,)].*navReplace\(\)/.test(socio));
-t('SW bumpeado a v36', /medicar-socio-v36/.test(fs.readFileSync(path.join(root,'socio','sw.js'),'utf8')));
+// version-agnóstico: el scaffold A1 bumpeó a v36; sigue vigente mientras el SW esté en v36 o superior (hoy va por v46+).
+t('SW bumpeado ≥ v36 (baseline nativa A1)', (() => { const m = /medicar-socio-v(\d+)/.exec(fs.readFileSync(path.join(root, 'socio', 'sw.js'), 'utf8')); return !!m && parseInt(m[1], 10) >= 36; })());
 
 console.log(`\n${ok}/${ok+fail} checks OK`);
 process.exit(fail?1:0);

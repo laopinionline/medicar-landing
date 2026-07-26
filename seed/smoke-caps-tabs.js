@@ -7,6 +7,7 @@ const puedes=fns(L,['puede','puedeConfig','puedeCobrar','puedeAfil']), getTabs=f
 const src=`
   const IC={home:'',history:'',plan:'',dispatch:'',user:'',chart:'',users:'',register:'',settings:''};
   function novBadgeAttach(){}
+  function bitBadgeAttach(){}
   ${puedes}
   ${getTabs}
 `;

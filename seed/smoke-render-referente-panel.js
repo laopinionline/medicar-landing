@@ -24,8 +24,10 @@ const stubs = `
   function feedAbrir(){}
   function render(){}
   function set(){}
+  function saludBloque(){ return ''; } // bloque de salud = concern aparte (smoke-sintoma-consent); acá se custodia el panel + feed
 `;
-const code = stubs + '\n' + fn('frasePonderacion') + '\n' + fn('homeFeedBlock') + '\n' + fn('referentePanelView') + '\n';
+// (frasePonderacion se eliminó del panel; ni referentePanelView ni homeFeedBlock la usan → ya no se extrae)
+const code = stubs + '\n' + fn('homeFeedBlock') + '\n' + fn('referentePanelView') + '\n';
 
 function run(label, S, checks) {
   try {

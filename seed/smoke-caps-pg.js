@@ -3,7 +3,8 @@ const vm=require('vm');
 const { lines, fn }=require('./lib/extract'); // extracción POR NOMBRE (robusta a mover código)
 const pgSrc=fn(lines('app/index.html'), 'pg');
 
-const PANELS=['miPerfil','movPanel','cronoPanel','agendaTurnosPanel','catPanel','afPanel','facPanel','cobPanel','novPanel','mktPanel','audPanel','estPanel','monPanel','bandeja','medAlertas','mHome','dDesp','choferHome','superView','adHome'];
+// bitPanel (tab bitácora) va en el capRoute eager → SIEMPRE debe estar stubeado; bandejaAlertas (tab guardia) se llama en varias ramas.
+const PANELS=['miPerfil','movPanel','cronoPanel','agendaTurnosPanel','catPanel','afPanel','facPanel','cobPanel','novPanel','bitPanel','mktPanel','audPanel','estPanel','monPanel','bandeja','bandejaAlertas','medAlertas','mHome','dDesp','choferHome','superView','adHome'];
 const stubs=`
   function pedLimpiarVinculo(){}
   ${PANELS.map(p=>`function ${p}(){return '${p}';}`).join('\n  ')}
@@ -23,6 +24,9 @@ t('★ medico rutea Cobranza',        'medico','cobranza','cobPanel');
 t('★ despachante rutea Afiliados',  'despachante','afiliados','afPanel');
 t('★ contable rutea Monitoreo',     'contable','monitoreo','monPanel');
 t('★ chofer rutea Marketing',       'chofer','marketing','mktPanel');
+t('★ contable rutea Bitácora',      'contable','bitacora','bitPanel');
+t('★ medico guardia → bandejaAlertas','medico','guardia','bandejaAlertas');
+t('★ despachante guardia → bandejaAlertas','despachante','guardia','bandejaAlertas');
 // estructurales del rol intactas
 t('medico home → mHome',            'medico','home','mHome');
 t('medico episodios → bandeja',     'medico','episodios','bandeja');

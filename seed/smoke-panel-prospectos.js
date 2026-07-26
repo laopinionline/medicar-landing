@@ -9,11 +9,14 @@ const t = (l, c) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}`); c ? ok++ :
 // --- Orden del listado (helper puro extraído del panel) ---
 const line = (src, re) => { const m = re.exec(src); if (!m) throw new Error('no encontré ' + re); return m[0]; };
 const P = new Function(line(app, /const PROSP_ORDEN=.*/) + '\n' + line(app, /function prospOrden\(e\)\{.*\}/) + '\nreturn {o:prospOrden};')();
+// Orden vigente (evolucionó: se insertó pendiente_pago entre en-proceso y asesor):
+// afiliacion_en_proceso(0) · pendiente_pago(1) · solicito_afiliacion(2) · nuevo(3) · desconocido(3).
 t('orden: afiliacion_en_proceso PRIMERO (0)', P.o('afiliacion_en_proceso') === 0);
-t('orden: solicito_afiliacion después (1)', P.o('solicito_afiliacion') === 1);
-t('orden: nuevo al final (2)', P.o('nuevo') === 2);
-t('orden: estado desconocido → 3 (último)', P.o('cualquiera') === 3);
-t('orden ES en-proceso < asesor < nuevo', P.o('afiliacion_en_proceso') < P.o('solicito_afiliacion') && P.o('solicito_afiliacion') < P.o('nuevo'));
+t('orden: pendiente_pago segundo (1)', P.o('pendiente_pago') === 1);
+t('orden: solicito_afiliacion (asesor) tercero (2)', P.o('solicito_afiliacion') === 2);
+t('orden: nuevo al final (3)', P.o('nuevo') === 3);
+t('orden: estado desconocido → 3 (último, junto a nuevo)', P.o('cualquiera') === 3);
+t('orden ES en-proceso < pendiente_pago < asesor < nuevo', P.o('afiliacion_en_proceso') < P.o('pendiente_pago') && P.o('pendiente_pago') < P.o('solicito_afiliacion') && P.o('solicito_afiliacion') < P.o('nuevo'));
 
 // --- CLIENTE: sub-sección Prospectos en el tab Marketing ---
 t('sub-tab "Prospectos" agregado al head de Marketing', /tab\('prospectos','Prospectos'\+mktProspBadge\(\)\)/.test(app));
@@ -30,7 +33,8 @@ t('descartados detrás de un toggle (no bloquean la vista activa)', /Ver descart
 t('acciones llaman gestionarProspecto', /fnsCall\('gestionarProspecto',\{prospectoId:id,accion\}\)/.test(app) && /accion:'descartar',motivo/.test(app));
 t('acciones gateadas por puede("marketing")', /function mktProspAccion\(id,accion\)\{ if\(!puede\('marketing'\)\)/.test(app));
 t('descartar exige motivo en el cliente', /Ingresá el motivo del descarte/.test(app));
-t('Activar reusa convPrefill/convOpenAlta (sin marcar convertido)', /function mktActivarProspecto[\s\S]{0,260}S\.convLeadId=null; S\.convPrefill=\{ nombre:p\.nombre/.test(app));
+// (el bloque AVISO-OVERRIDE de DNI se insertó antes del prefill → span ampliado; sigue sin marcar 'convertido')
+t('Activar reusa convPrefill/convOpenAlta (sin marcar convertido)', /function mktActivarProspecto[\s\S]{0,760}S\.convLeadId=null; S\.convPrefill=\{ nombre:p\.nombre/.test(app) && /function mktActivarProspecto[\s\S]{0,900}S\.convOpenAlta=true/.test(app));
 
 // --- SERVER: CF gestionarProspecto ---
 t('CF gestionarProspecto existe', /exports\.gestionarProspecto = onCall/.test(fn));
