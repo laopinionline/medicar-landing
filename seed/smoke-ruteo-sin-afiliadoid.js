@@ -9,6 +9,7 @@ function extract(name) { const re = new RegExp('^(async )?function ' + name + '\
 const funcs = ['getTabs', 'puede', 'puedeConfig', 'puedeCobrar', 'puedeAfil'].map(extract).join('\n');
 const stubs = `
   function novBadgeAttach(){}
+  function bitBadgeAttach(){}
   var S={ novPendCount:0, user:null };
 `;
 // S.user por rol, SIN afiliadoId (lo que construye enterWithFbUser tras el cambio)

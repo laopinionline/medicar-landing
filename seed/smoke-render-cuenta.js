@@ -18,6 +18,8 @@ const stubs=`
   function movimientosCredito(){return '';} function tsMs(){return null;} function badgeDe(){return '';}
   function solicitudesBandejaBlock(){return '';} function misReferentesBlock(){return '';} function seguirFamiliarBlock(){return '';}
   function cargarSolicitudesTitular(){} function pagosDeFactura(){return [];}
+  // Paquete QR: la credencial (flip+QR) y la card de calificación tienen su propio smoke (credencial-carrusel, qr) → stub a '' acá.
+  function credCardHTML(){return '';} function calificacionCardHTML(){return '';}
 `;
 const src=`${esc}\n${socioMoney}\n${periodoLbl}\n${chv}\n${stubs}\n${cuenta}\n${homeView}\n`;
 

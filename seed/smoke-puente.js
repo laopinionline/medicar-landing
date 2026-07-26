@@ -78,7 +78,23 @@ t('paga con grupo[] (comparteDomicilio o domicilio propio)', /grupo=\(P\.grupo\|
 const fn = require('fs').readFileSync(require('path').resolve(__dirname, '../functions/index.js'), 'utf8');
 t('SERVER: PLANES_CHECKOUT joven maxEdad:30', /joven: \{ nombre: 'Plan Joven', base: 20000, maxEdad: 30 \}/.test(fn));
 t('SERVER: enforcement edad > p.maxEdad (30) para Joven', /d\.planKey === 'joven' && edad != null && edad > p\.maxEdad/.test(fn) && /El Plan Joven es hasta 30 años/.test(fn));
-t('SERVER: domCanon persiste pisoDepto (cap 60) + exige calleId+altura>0', /pisoDepto = String\(o\.pisoDepto \|\| ''\)\.trim\(\)\.slice\(0, 60\)/.test(fn) && /texto && calleId && altura > 0/.test(fn));
+// Domicilio server-side: la resolución se MUDÓ a functions/checkout-dom.js (módulo PURO inyectable, ya no `domCanon` en index.js).
+// Se custodia EJECUTÁNDOLO de verdad (recompute-and-use + reject-null + pisoDepto cap 60), no por grep.
+const { resolverDomCheckout } = require('../functions/checkout-dom.js');
+const fakeResolver = (txt) => (/san martin/i.test(txt) ? { calleId: 'c_sm', altura: (Number((/(\d+)/.exec(txt) || [])[1]) || 0) } : {});
+t('SERVER dom: dentro del callejero → usa calleId/altura del SERVER + pisoDepto cap 60', (() => {
+  const r = resolverDomCheckout({ texto: 'San Martin 1234', pisoDepto: 'z'.repeat(80) }, fakeResolver);
+  return !!r.dom && r.dom.calleId === 'c_sm' && r.dom.altura === 1234 && r.dom.pisoDepto.length === 60;
+})());
+t('SERVER dom: fuera del callejero → dom null (RECHAZA)', resolverDomCheckout({ texto: 'Ruta 8 km 5' }, fakeResolver).dom === null);
+t('SERVER dom: sin texto → dom null (RECHAZA)', resolverDomCheckout({ texto: '' }, fakeResolver).dom === null);
+t('SERVER dom: altura 0 (rural/ambiguo) → dom null (exige altura>0)', resolverDomCheckout({ texto: 'San Martin 0' }, fakeResolver).dom === null);
+t('SERVER dom: declarado ≠ recomputado → mismatch:true (persiste el server, NO rechaza)', (() => {
+  const r = resolverDomCheckout({ texto: 'San Martin 1234', calleId: 'otro', altura: 99 }, fakeResolver);
+  return !!r.dom && r.dom.calleId === 'c_sm' && r.dom.altura === 1234 && r.mismatch === true;
+})());
+t('SERVER: index.js importa checkout-dom y lo usa en el checkout (wiring)', /require\('\.\/checkout-dom'\)/.test(fn) && /resolverDomCheckout\(o, CallejeroCore\.resolver\)/.test(fn));
+t('SERVER: integrante fuera del callejero → rechaza (throw "callejero de Pergamino")', /el domicilio debe estar en el callejero de Pergamino/.test(fn));
 
 // --- FIX 1: plausibilidad de fecha de nacimiento (cliente + server) ---
 const yy = new Date().getFullYear();

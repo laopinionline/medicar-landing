@@ -11,8 +11,8 @@ const L=lines('app/index.html');
 const entrarConRol=fn(L,'entrarConRol'), getTabs=fn(L,'getTabs'), pg=fn(L,'pg');
 
 // Vistas y helpers stubeados: cada vista devuelve su propio nombre para poder assertar el ruteo.
-const VIEWS=['miPerfil','movPanel','cronoPanel','agendaTurnosPanel','mHome','bandeja','medAlertas',
-  'catPanel','afPanel','facPanel','cobPanel','novPanel','mktPanel','audPanel','estPanel','monPanel',
+const VIEWS=['miPerfil','movPanel','cronoPanel','agendaTurnosPanel','mHome','bandeja','bandejaAlertas','medAlertas',
+  'catPanel','afPanel','facPanel','cobPanel','novPanel','bitPanel','mktPanel','audPanel','estPanel','monPanel',
   'adHome','superView','choferHome','aHome','hist','plan','turnos','adGuardias','adAtenc'];
 const stubs=`
   const IC={home:'',history:'',plan:'',dispatch:'',user:'',chart:'',users:'',register:'',settings:''};
@@ -22,6 +22,7 @@ const stubs=`
   function puedeCobrar(){return __CAPS__.includes('gestionar_cobranza')||S.user.rol==='admin';}
   function puedeAfil(){return __CAPS__.includes('gestionar_afiliados')||S.user.rol==='admin';}
   function novBadgeAttach(){}
+  function bitBadgeAttach(){}
   function pedLimpiarVinculo(){}
   function set(o){Object.assign(S,o);}
   function navReplace(){}
@@ -61,9 +62,9 @@ const t=(label, cond, extra)=>{ (cond?ok++:fail++); console.log(`${cond?'✓':'�
   const {api,sandbox}=ctx('afiliado','perfil'); sandbox.S.tab='perfil';
   t("pg() afiliado/perfil -> miPerfil (real)", api.pg()==='miPerfil'); }
 
-// pg() admin: guardias/atenciones NO rutean; home/otros sí
+// pg() admin: guardias/atenciones NO tienen vista dedicada → caen al HOME del admin (adHome), nunca a una vista de guardia
 { for(const tab of ['guardias','atenciones']){ const {api,sandbox}=ctx('admin',tab); sandbox.S.tab=tab;
-    t(`pg() admin/${tab} -> '' (mock sin ruta)`, api.pg()==='', JSON.stringify(api.pg())); }
+    t(`pg() admin/${tab} -> adHome (sin vista dedicada, cae al home)`, api.pg()==='adHome', JSON.stringify(api.pg())); }
   for(const [tab,exp] of [['home','adHome'],['afiliados','afPanel'],['cobranza','cobPanel'],['monitoreo','monPanel']]){
     const {api,sandbox}=ctx('admin',tab); sandbox.S.tab=tab;
     t(`pg() admin/${tab} -> ${exp} (real)`, api.pg()===exp, JSON.stringify(api.pg())); } }
