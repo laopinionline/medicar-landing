@@ -1559,8 +1559,10 @@ function homeView(){
 
   const sinAfilNota = socio ? '' : `<div class="foot-note" style="color:var(--o)">No encontramos tu ficha de afiliación. Contactá a MEDICAR para regularizarla.</div>`;
 
-  // F3 — Cuota vigente (estimada) + Mi grupo familiar. Conteo por titularSocioId (criterio EXACTO de generarAbonos).
-  const depsDeMiSocio = (socio ? (c.dependientes||[]).filter(d=>d.titularSocioId===socio.id) : []);
+  // F3 — Cuota vigente (estimada) + Mi grupo familiar. c.dependientes YA viene cargado por titularPersonaId==yo (son MIS
+  // dependientes); el re-filtro por titularSocioId===socio.id era redundante y frágil (rompía p.ej. al titular vitalicio).
+  // Gate único: soy TITULAR (no un dependiente). El servidor igual valida el vínculo al invitar.
+  const depsDeMiSocio = (socio && !socio.titularSocioId ? (c.dependientes||[]) : []);
   let cuotaSec = '';
   if(socio && socio.planId && c.plan && !esVit){ // vitalicio → sin bloque de cuota (ni monto ni "Cambiar mi plan")
     const activos = depsDeMiSocio.filter(d=>d.activo!==false).length;
@@ -1579,8 +1581,9 @@ function homeView(){
   }
   let grupoSec = '';
   if(depsDeMiSocio.length){
-    // Solo el TITULAR responsable de pago invita (administra el grupo). cuentaPropia (denorm en el socio) = ya tiene su app.
-    const puedeInvitar = socio && socio.esResponsablePago===true && !socio.titularSocioId;
+    // El TITULAR del grupo invita (administra integrantes). NO exige esResponsablePago: un titular vitalicio no lo tiene
+    // y también administra su grupo. Titular = no-dependiente (!titularSocioId). cuentaPropia (denorm) = ya tiene su app.
+    const puedeInvitar = !!(socio && !socio.titularSocioId);
     const rows = depsDeMiSocio.slice().sort((a,b)=>String(a.numeroAfiliado||'').localeCompare(String(b.numeroAfiliado||''))).map(d=>{
       const baja = d.activo===false;
       const chip = d.cuentaPropia===true
