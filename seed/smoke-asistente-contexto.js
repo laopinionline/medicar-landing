@@ -1,6 +1,6 @@
 'use strict';
 // Smoke — asistente-prompt.js: buildContexto (MÍNIMO, nunca PII/clínico), stripEscalar, parseBotones.
-const { SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr, gateProspectoEmergencia, quitarOfertaAfiliacionSocio } = require('../functions/asistente-prompt');
+const { SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr, gateProspectoEmergencia, quitarOfertaAfiliacionSocio, BOTONES } = require('../functions/asistente-prompt');
 let ok = 0, fail = 0;
 const t = (l, c) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}`); c ? ok++ : fail++; };
 
@@ -50,9 +50,9 @@ const ctxFull = buildContexto({
   signos: { fecha: '2026-07-23', fc: 72, sis: 120, temp: 36.5, spo2: 98, news2Score: 9, news2Nivel: 'ROJO' },
   tel: '443044',
 });
-t('turno: próximo con fecha DD/MM + hora + médico', /Próximo turno: 24\/07 a las 15:30 con Dra\. Gómez/.test(ctxFull));
+t('turno: próximo con fecha DD/MM + hora + médico', /Próxima consulta: 24\/07 a las 15:30 con Dra\. Gómez/.test(ctxFull));
 t('turno: aclara videollamada por WhatsApp', /videollamada es por WhatsApp/.test(ctxFull));
-t('turno: lista los siguientes', /Siguientes turnos: 01\/08 a las 09:00/.test(ctxFull));
+t('turno: lista los siguientes', /Siguientes consultas: 01\/08 a las 09:00/.test(ctxFull));
 t('turno: formatea DD/MM (no ISO crudo)', !/2026-07-24/.test(ctxFull));
 t('chequeo: estado real (no respondió) + día de recordatorio', /Chequeo semanal: todavía no lo respondiste esta semana\. Tu recordatorio está configurado los lunes/.test(ctxFull));
 t('signos: valores crudos con unidades', /pulso 72 lpm/.test(ctxFull) && /presión \(sistólica\) 120 mmHg/.test(ctxFull) && /temperatura 36\.5 °C/.test(ctxFull) && /oxígeno 98%/.test(ctxFull));
@@ -60,7 +60,7 @@ t('signos: fecha DD/MM + leyenda "sin interpretación"', /Últimos signos que re
 t('signos N3: NUNCA filtra news2/nivel/ROJO al contexto', !/news2|NEWS2|ROJO/i.test(ctxFull));
 // Ausencias AFIRMADAS (lección facturas): sin turnos → se afirma; chequeo respondido sin día → sin recordatorio.
 const ctxSinTurno = buildContexto({ nombre: 'Ana', plan: null, factura: null, ultimaFactura: null, turnos: [], chequeo: { respondioSemana: true, diaRecordatorio: null }, tel: '443044' });
-t('sin turnos: afirma "no tenés ningún turno reservado"', /Turnos: no tenés ningún turno reservado/.test(ctxSinTurno));
+t('sin turnos: afirma "no tenés ningún turno reservado"', /Consultas: no tenés ninguna consulta reservada/.test(ctxSinTurno));
 t('chequeo respondido: "ya lo respondiste esta semana"', /Chequeo semanal: ya lo respondiste esta semana/.test(ctxSinTurno));
 t('chequeo sin día: no inventa recordatorio', !/recordatorio está configurado/.test(ctxSinTurno));
 t('sin signos: no aparece la línea de signos', !/Últimos signos/.test(ctxSinTurno));
@@ -70,11 +70,18 @@ t('SYSTEM (B3): sin memoria → "no tengo registro de charlas anteriores"', /no 
 
 // --- AUSENCIA de signos afirmada + hueco de recordatorio + 443044 SOLO urgencias + dato-primero ---
 const ctxSinSignos = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', precio: 18000 }, factura: null, ultimaFactura: null, turnos: [], chequeo: { respondioSemana: false, diaRecordatorio: null }, signos: { vacio: true }, tel: '443044' });
-t('signos ausentes: afirma "no tenés signos registrados" + orienta a cargarlos', /Signos: no tenés signos registrados\. Podés cargarlos en "Registrar mis signos"/.test(ctxSinSignos));
+t('signos ausentes: afirma "no tenés signos registrados" + orienta a cargarlos', /Signos: no tenés signos registrados\. Podés cargarlos en "Registrar signos" \(tab Mi salud\)/.test(ctxSinSignos));
 t('recordatorio sin configurar: afirma "No tenés día de recordatorio configurado"', /No tenés día de recordatorio configurado/.test(ctxSinSignos));
 t('signos CON datos NO dispara el texto de ausencia', !/no tenés signos registrados/.test(ctxFull));
-t('SYSTEM: 443044 NO es canal administrativo/call center', /EL 443044 NO ES UN CANAL ADMINISTRATIVO NI UN CALL CENTER/.test(SYSTEM) && /JAMÁS lo ofrezcas para pedir\/gestionar turnos/.test(SYSTEM));
-t('SYSTEM: turno se saca desde la app, no llamando al 443044', /Un turno se saca DESDE LA APP con \[Pedir turno\], no llamando al 443044/.test(SYSTEM));
+t('SYSTEM: 443044 NO es canal administrativo/call center', /EL 443044 NO ES UN CANAL ADMINISTRATIVO NI UN CALL CENTER/.test(SYSTEM) && /JAMÁS lo ofrezcas para reservar\/gestionar una consulta/.test(SYSTEM));
+t('SYSTEM: turno se saca desde la app, no llamando al 443044', /Una consulta se RESERVA DESDE LA APP, en el tab CONSULTAS, no llamando al 443044/.test(SYSTEM));
+t('SYSTEM: FLUJO real de la consulta (videollamada · SOCIO tab Consultas + WhatsApp)', /CÓMO SE HACE UNA CONSULTA \(flujo REAL[\s\S]{0,200}por VIDEOLLAMADA[\s\S]{0,300}a un SOCIO explicale el flujo COMPLETO[\s\S]{0,120}tab CONSULTAS[\s\S]{0,120}por WhatsApp con la línea de atención de MEDICAR/.test(SYSTEM) && /NUNCA hables de "turnos"/.test(SYSTEM));
+// B — carve-out de prospecto: el bloque NO le nombra el tab al prospecto y lo deriva a afiliarse.
+t('SYSTEM (B): carve-out prospecto — NO le nombra el tab, deriva a afiliarse', /A un PROSPECTO NO le nombres el tab CONSULTAS ni el flujo de reserva[\s\S]{0,160}BENEFICIO de los socios[\s\S]{0,60}\[Quiero afiliarme\]/.test(SYSTEM));
+// A — alias tolerado del botón viejo: 'Pedir turno' en el whitelist, misma acción, etiqueta NUEVA.
+t('BOTONES (A): "Reservar una consulta" y alias "Pedir turno" → accion turno', BOTONES['Reservar una consulta'].accion === 'turno' && BOTONES['Pedir turno'].accion === 'turno');
+t('BOTONES (A): el alias "Pedir turno" renderiza con la etiqueta NUEVA', BOTONES['Pedir turno'].label === 'Reservar una consulta');
+t('CONTEXTO: DATOS MEDICAR explica el flujo de consultas (tab Consultas + WhatsApp)', /Las CONSULTAS por videollamada se reservan en el tab CONSULTAS[\s\S]{0,120}por WhatsApp con la línea de MEDICAR/.test(ctxFull));
 t('SYSTEM: EL DATO PRIMERO (dato/ausencia en la primera frase)', /EL DATO PRIMERO: abrí con el dato o la AUSENCIA en la PRIMERA frase/.test(SYSTEM));
 t('SYSTEM: ante ausencia responde la ausencia, no inventa valor', /Si el contexto afirma una ausencia.*NO inventes un valor ni una fecha/.test(SYSTEM));
 
@@ -82,9 +89,11 @@ t('SYSTEM: ante ausencia responde la ausencia, no inventa valor', /Si el context
 const ctxProsp = buildContexto({ tipoUsuario: 'prospecto', nombre: 'Ana', memoria: { temas: [{ t: 'preguntó por planes', fecha: '2026-07-24' }], seguimientos: [], pendientes: [], preferencias: [] }, tel: '443044' });
 t('prospecto: marca que NO es socio', /PROSPECTO — todavía NO es socio/.test(ctxProsp));
 t('prospecto: NO hay bloque TU CUENTA (header de socio)', !/datos de TU cuenta de socio/.test(ctxProsp));
-t('prospecto: NO trae cuota/plan/turnos/facturas del socio', !/Tu plan asignado|Próximo turno|Tu cuota|Facturas:/.test(ctxProsp));
+t('prospecto: NO trae cuota/plan/turnos/facturas del socio', !/Tu plan asignado|Próximo turno|Próxima consulta|Tu cuota|Facturas:/.test(ctxProsp));
+// B — el CONTEXTO del prospecto NO le nombra el tab Consultas ni el flujo de reserva (el gateo de buildContexto lo garantiza).
+t('prospecto (B): el contexto NO nombra el tab Consultas ni "reservar una franja"', !/tab CONSULTAS|tab Consultas|reserv[aá] una franja|reservar una franja/i.test(ctxProsp));
 t('prospecto: catálogo COMPLETO disponible', /Plan Joven \$20\.000/.test(ctxProsp) && /Plan Familiar desde \$40\.000/.test(ctxProsp) && /Plan Senior \$60\.000/.test(ctxProsp));
-t('prospecto: "mi cuota/mis turnos" → todavía no es socio + afiliarse', /Si pregunta por "mi cuota\/mis turnos\/mi plan\/mis facturas", aclarale que todavía no es socio/.test(ctxProsp));
+t('prospecto: "mi cuota/mis turnos" → todavía no es socio + afiliarse', /Si pregunta por "mi cuota\/mis consultas\/mi plan\/mis facturas", aclarale que todavía no es socio/.test(ctxProsp));
 t('prospecto (gate): 443044 es dato INSTITUCIONAL, NO vía para no socios', /su línea 443044 es un dato INSTITUCIONAL.*NO una vía que le ofrezcas a un no socio/.test(ctxProsp));
 t('prospecto (gate): guardia 24hs = beneficio de socios (el prospecto NO la tiene)', /guardia de emergencias 24hs es un BENEFICIO de los socios; el prospecto todavía NO la tiene/.test(ctxProsp));
 t('prospecto: memoria por uid se inyecta igual', /DE CHARLAS ANTERIORES/.test(ctxProsp) && /preguntó por planes/.test(ctxProsp));
@@ -163,7 +172,7 @@ t('SYSTEM: no afirma enfermedad a la persona (no es "no diagnostico" a secas)', 
 t('SYSTEM: orienta y CIERRA sin derivar por reflejo', /ORIENTÁS Y CERRÁS/.test(SYSTEM) && /NO mandes al médico en cada mensaje/.test(SYSTEM));
 t('SYSTEM define la etiqueta [[ESCALAR]]', SYSTEM.includes('[[ESCALAR]]'));
 t('SYSTEM: no ejecuta acciones', /NO EJECUTÁS ACCIONES/.test(SYSTEM));
-t('SYSTEM (fix 3): 443044 SOLO emergencias, no turnos ni molestias leves', /443044 = EMERGENCIAS MÉDICAS/.test(SYSTEM) && /NUNCA para turnos/.test(SYSTEM) && /molestias leves/.test(SYSTEM));
+t('SYSTEM (fix 3): 443044 SOLO emergencias, no turnos ni molestias leves', /443044 = EMERGENCIAS MÉDICAS/.test(SYSTEM) && /NUNCA para consultas/.test(SYSTEM) && /molestias leves/.test(SYSTEM));
 t('SYSTEM: PRIORIDAD ABSOLUTA de bandera roja intacta (firme)', /PRIORIDAD ABSOLUTA/.test(SYSTEM) && /esto no se negocia/.test(SYSTEM));
 t('SYSTEM (fix 1): regla de retractación de síntomas', /CORRIGE o DESMIENTE un síntoma/.test(SYSTEM));
 
@@ -180,9 +189,13 @@ t('parseBotones: detecta Cambiar mi plan', b.some((x) => x.accion === 'plan'));
 t('parseBotones: detecta Ver comprobantes', b.some((x) => x.accion === 'comprobantes'));
 t('parseBotones: ignora texto fuera de whitelist', !b.some((x) => x.label === '[Hackear]'));
 
-// --- taxonomía (punto 2): "hablar con un médico" = pedir turno. El token viejo YA NO es botón; el chip = [Pedir turno]. ---
+// --- taxonomía: la consulta se reserva (turno retirado del lenguaje). El botón = [Reservar una consulta] (acción 'turno' interna). ---
 t('parseBotones: [Hablar con un médico] YA NO genera botón (fuera de whitelist)', parseBotones('Te recomiendo [Hablar con un médico].').length === 0);
-t('parseBotones: [Pedir turno] → accion turno (chip = botón sticky)', parseBotones('Para eso [Pedir turno].').some((x) => x.accion === 'turno'));
+t('parseBotones: [Reservar una consulta] → accion turno (chip contextual hacia Consultas)', parseBotones('Para eso [Reservar una consulta].').some((x) => x.accion === 'turno'));
+// A — la IA emite el token VIEJO [Pedir turno] → sí genera botón (alias), acción 'turno', ETIQUETA NUEVA "Reservar una consulta".
+t('parseBotones (A): [Pedir turno] (inercia) → botón con accion turno + label "Reservar una consulta"', (() => { const b = parseBotones('Para eso [Pedir turno].'); return b.length === 1 && b[0].accion === 'turno' && b[0].label === 'Reservar una consulta'; })());
+t('parseBotones (A): token nuevo + alias juntos → UN solo botón (dedup por acción)', parseBotones('Podés [Reservar una consulta] o [Pedir turno].').filter((x) => x.accion === 'turno').length === 1);
+t('parseBotones (A): el botón NUNCA muestra la etiqueta vieja "Pedir turno"', !parseBotones('Para eso [Pedir turno].').some((x) => x.label === 'Pedir turno'));
 t('limpia el token [Hablar con un médico]: no sobrevive corchete en la prosa', !/\[/.test(limpiarBotonesDelTexto('Podés hablar con [Hablar con un médico].')) && limpiarBotonesDelTexto('Podés hablar con [Hablar con un médico].') === 'Podés hablar.');
 
 console.log(`\n${fail ? '✗' : '✓'} smoke-asistente-contexto: ${ok} ok, ${fail} fallo(s)`);

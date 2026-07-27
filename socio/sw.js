@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v57'; // Fix desborde del chat: burbujas overflow-wrap/word-break + ia-msgs overflow-x hidden (contenido al viewport)
+const CACHE = 'medicar-socio-v58'; // Chat: lenguaje de consulta (no turnos), chip 'Cómo hacer una consulta', botón hacia el tab Consultas
 const SHELL = [
   './',
   './index.html',
