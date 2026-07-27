@@ -1,0 +1,34 @@
+<!DOCTYPE html><html lang="es"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>MEDICAR · retoques a/e (verificación)</title>
+<style>
+:root{--rojo:#ED1C24;--gris:#6B7075;--linea:#E7E9EC;--nieve:#F7F8FA;--blanco:#FFFFFF;--tinta:#1A1A1A;--verde:#1D9E75;--ink3:#9AA0A6}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--nieve);padding:1.2rem;max-width:430px;margin:0 auto;color:var(--tinta)}
+.sec-h{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);font-weight:800;margin:1.2rem 0 .5rem}
+.card{background:var(--blanco);border:1px solid var(--linea);border-radius:14px;padding:1rem;box-shadow:0 1px 2px rgba(20,22,25,.04),0 8px 24px rgba(20,22,25,.06)}
+.rl{color:var(--gris);font-size:.8rem}.rv{font-weight:600;font-size:.85rem}.row{display:flex;justify-content:space-between;padding:.35rem 0}
+</style></head><body>
+<div class="sec-h">a · Chequeo semanal — selector de día (rediseñado)</div>
+<div class="card">
+  <div style="font-weight:800;font-size:.95rem">Tenés tu chequeo semanal</div>
+  <div style="font-size:.8rem;color:var(--gris);margin-top:.2rem">Contanos cómo pasaste la semana — es cortito, casi una charla.</div>
+  <div style="margin-top:.75rem"><div style="font-size:.72rem;color:var(--gris);margin-bottom:.38rem">Día de recordatorio</div><div style="display:flex;gap:.3rem" id="dias"></div></div>
+</div>
+
+<div class="sec-h">d · Mis datos de contacto — foto de perfil</div>
+<div class="card">
+  <div style="display:flex;align-items:center;gap:.9rem;padding-bottom:.85rem;margin-bottom:.35rem;border-bottom:1px solid var(--linea)">
+    <div style="width:60px;height:60px;border-radius:50%;overflow:hidden;background:var(--nieve);border:1.5px solid var(--linea);display:flex;align-items:center;justify-content:center;flex:none"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="var(--ink3)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6"/></svg></div>
+    <label style="display:inline-block;border:1.5px solid var(--rojo);color:var(--rojo);border-radius:10px;padding:.5rem .9rem;font-size:.78rem;font-weight:700;cursor:pointer">Subir o sacar foto</label>
+  </div>
+  <div class="row"><span class="rl">Teléfono</span><span class="rv">2477-000000</span></div>
+  <div class="row"><span class="rl">Email</span><span class="rv">lucia@ejemplo.com</span></div>
+</div>
+
+<div class="sec-h">e · Cerrar sesión (rediseñado)</div>
+<div style="text-align:center;padding:.6rem 0 1.8rem"><button style="border:1.5px solid var(--linea);background:var(--blanco);color:var(--gris);border-radius:11px;padding:.7rem 1.6rem;font-size:.85rem;font-weight:700;font-family:inherit;cursor:pointer">Cerrar sesión</button></div>
+<script>
+const DIAS=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];const D3=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];const prefDay=2;
+document.getElementById('dias').innerHTML=D3.map((d,i)=>{const on=prefDay===i;return `<button aria-label="${DIAS[i]}" style="flex:1;min-width:0;border:1.5px solid ${on?'var(--rojo)':'var(--linea)'};background:${on?'var(--rojo)':'var(--blanco)'};color:${on?'#fff':'var(--gris)'};border-radius:9px;padding:.42rem .1rem;font-size:.66rem;font-weight:${on?'800':'600'};cursor:pointer">${d}</button>`}).join('');
+</script></body></html>
