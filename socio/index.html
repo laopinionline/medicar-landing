@@ -603,6 +603,8 @@ const el = id => document.getElementById(id);
 function tabsBootPref(){ try{ return localStorage.getItem('medicar_tabs')==='1'; }catch(_){ return false; } }
 function tabsOn(){ return tabsBootPref() || S.tabsGlobal===true; }
 function socioShellElegible(){ const c=S.cred; return !!(c && c.estado==='ok' && c.socio); } // pleno o menor-con-cuenta; prospecto NO (conserva prospectoView)
+// Tramo 4 FREEMIUM: el gratuito (prospecto) entra al MISMO shell en modo degradado, gated por el flip de tabs. Flag off → prospectoView legacy intacto (misma doctrina que el socio).
+function esFreemium(){ return tabsOn() && esProspectoUI(); }
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ── F5 Turnos: Cloud Functions (mismo patrón que el panel), recarga y acciones ── */
@@ -1672,16 +1674,32 @@ const TABS = [
 ];
 function tabShellView(){
   const t = S.tab || 'inicio';
-  // Banda EMERGENCIAS variante C (aprobada): banda fina 32px, pulso + "EMERGENCIAS · 443044" centrado. tel:, sticky, nunca scrollea.
-  const header = `<a href="tel:${TEL_EMERG}" aria-label="Emergencias ${TEL_EMERG}" style="position:sticky;top:0;z-index:20;height:32px;display:flex;align-items:center;justify-content:center;gap:.55rem;background:var(--rojo);color:#fff;text-decoration:none">${ICN_PULSO}<span style="font-size:.66rem;font-weight:800;letter-spacing:.13em">EMERGENCIAS</span><span style="opacity:.45">·</span><span style="font-size:.78rem;font-weight:800">${TEL_EMERG}</span></a>`;
+  const fm = esFreemium();
+  // Banda EMERGENCIAS variante C (aprobada): banda fina 32px, pulso + "EMERGENCIAS · 443044" centrado. Sticky, nunca scrollea.
+  // Socio: tel:443044. Gratuito (freemium): idéntica visualmente, SIN tel:, y TODA la superficie abre el cartel de asociate
+  // (sin zonas muertas — el handler va en el contenedor completo, hallazgo de la verificación del mockup).
+  const bandaInner = `${ICN_PULSO}<span style="font-size:.66rem;font-weight:800;letter-spacing:.13em">EMERGENCIAS</span><span style="opacity:.45">·</span><span style="font-size:.78rem;font-weight:800">${TEL_EMERG}</span>`;
+  const bandaCss = `position:sticky;top:0;z-index:20;height:32px;display:flex;align-items:center;justify-content:center;gap:.55rem;background:var(--rojo);color:#fff;text-decoration:none`;
+  const header = fm
+    ? `<div role="button" tabindex="0" aria-label="Emergencias — afiliate para acceder" onclick="abrirCartelAsociate()" style="${bandaCss};cursor:pointer">${bandaInner}</div>`
+    : `<a href="tel:${TEL_EMERG}" aria-label="Emergencias ${TEL_EMERG}" style="${bandaCss}">${bandaInner}</a>`;
   const bar = `<nav style="position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;background:var(--blanco);border-top:1px solid var(--linea);padding-bottom:env(safe-area-inset-bottom)">${TABS.map(x=>{
     const on = x.id===t;
     return `<button data-tab="${x.id}" onclick="irTab('${x.id}')" style="flex:1;background:none;border:none;padding:.5rem .2rem .55rem;display:flex;flex-direction:column;align-items:center;gap:.18rem;cursor:pointer;color:${on?'var(--rojo)':'var(--gris)'}"><span data-tabic="${x.id}" style="width:24px;height:24px;display:inline-flex">${ICN[x.id]}</span><span data-tablbl="${x.id}" style="font-size:.61rem;font-weight:${on?'800':'600'}">${x.lbl}</span></button>`;
   }).join('')}</nav>`;
-  return `<div style="min-height:100vh;background:var(--nieve)">${header}<div id="tab-content" style="padding-bottom:76px">${tabContent(t)}</div>${bar}</div>`;
+  return `<div style="min-height:100vh;background:var(--nieve)">${header}<div id="tab-content" style="padding-bottom:76px">${tabContent(t)}</div>${bar}<div id="cartel-slot"></div></div>`;
 }
 function tabContent(t){
   const c=S.cred||{};
+  if(esFreemium()){ // Tramo 4: tabs degradados del gratuito (leen SOLO S.prospecto). IA abierto; salud/consultas bloqueados.
+    switch(t){
+      case 'ia':     return tabIA(c);                                              // el chat ya distingue prospecto (R4)
+      case 'salud':  return tabBloqueado('Mi salud — chequeo, signos y "no me siento bien"');
+      case 'turnos': return tabBloqueado('Consultas por videollamada');
+      case 'mas':    return tabMasFreemium();
+      default:       return tabInicioFreemium();
+    }
+  }
   switch(t){
     case 'ia':     return tabIA(c);
     case 'salud':  return tabSalud(c);
@@ -1693,6 +1711,7 @@ function tabContent(t){
 // Cambio de tab: guarda scroll, pushState (back determinístico), re-pinta SOLO el contenedor (tab bar fija), dispara lazy.
 function irTab(t){
   if(!TABS.some(x=>x.id===t)) t='inicio';
+  const cs=el('cartel-slot'); if(cs) cs.innerHTML=''; // freemium: el cartel de asociate se cierra al cambiar de tab
   const cont=el('tab-content'); if(cont && S.tab) S.scroll[S.tab]=cont.scrollTop;
   if(S.tab!==t){ try{ history.pushState({tabnav:t},''); }catch(_){} }
   S.tab=t; pintarTab(t); disparaLazyTab(t);
@@ -1839,7 +1858,7 @@ function tabTurnos(c){
 // Foto de perfil (Storage perfiles/{uid}/foto.jpg — la regla ya permite al dueño escribir imágenes <3MB). Sin write a Firestore.
 async function cargarFotoPerfil(){
   if(S.fotoUrl!==undefined) return; S.fotoUrl='';
-  try{ const u=auth.currentUser; if(!u) return; const url=await firebase.storage().ref('perfiles/'+u.uid+'/foto.jpg').getDownloadURL(); S.fotoUrl=url; if(S.view==='home'&&S.tab==='mas') pintarTab('mas'); }catch(_){ /* sin foto cargada */ }
+  try{ const u=auth.currentUser; if(!u) return; const url=await firebase.storage().ref('perfiles/'+u.uid+'/foto.jpg').getDownloadURL(); S.fotoUrl=url; if((S.view==='home'||S.view==='prospecto')&&S.tab==='mas') pintarTab('mas'); }catch(_){ /* sin foto cargada */ }
 }
 async function subirFotoPerfil(input){
   const f=input&&input.files&&input.files[0]; if(!f) return;
@@ -1883,6 +1902,103 @@ function tabBloqueado(lbl, cta){
     <div style="font-weight:700;margin-top:.6rem;color:var(--tinta)">${esc(lbl||'Función para afiliados')}</div>
     <div style="font-size:.8rem;color:var(--gris);margin:.4rem 0 1rem">Afiliate para desbloquear esta sección.</div>
     <button class="btn-r" onclick="${cta||"abrirPuente&&abrirPuente()"}">Afiliarme</button></div>`;
+}
+
+/* ── Tramo 4 FREEMIUM — renderers del gratuito (leen SOLO S.prospecto; sin queries socio-gated, sin CFs assertAfiliado) ── */
+// Credencial GRIS (apagada): nombre del prospecto, sin número/DNI/QR. La CTA (lo más tangible) lleva al puente de afiliación.
+function credGrisHTML(nombre){
+  const chevGris='<svg viewBox="0 0 24 24" stroke="#aab0b8" fill="none" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:18px"><path d="M8 6l6 6-6 6"/></svg>';
+  return `<div style="background:linear-gradient(135deg,#eef0f3,#e2e5e9);border:1.5px dashed #cfd3d9;border-radius:16px;padding:1.1rem 1.1rem 1.2rem;position:relative;overflow:hidden">
+    <div style="position:absolute;top:.9rem;right:1rem;font-size:1.1rem;opacity:.5">🔒</div>
+    <div style="display:flex;align-items:center;gap:.35rem;font-weight:800;font-size:.95rem;color:var(--ink3)">${chevGris}<span>medicar</span></div>
+    <div style="font-size:1.15rem;font-weight:800;margin-top:.7rem;color:#8a9099">${esc(nombre)}</div>
+    <div style="font-size:.56rem;text-transform:uppercase;letter-spacing:.1em;color:#aab0b8;margin-top:.7rem">N° de afiliado</div>
+    <div style="font-family:ui-monospace,monospace;font-size:1.1rem;letter-spacing:.1em;color:#c2c7cd">— — —</div>
+    <div style="margin-top:.9rem;display:flex;align-items:center;justify-content:space-between;gap:.6rem;background:#fff;border:1px solid var(--linea);border-radius:11px;padding:.6rem .8rem">
+      <span style="font-size:.8rem;font-weight:700;color:var(--tinta)">Afiliate para activar tu credencial y tu QR</span>
+      <button class="btn-r" onclick="abrirPuente()">Afiliarme</button>
+    </div>
+    ${yaAfiliadoLink()}
+  </div>`;
+}
+// Inicio del gratuito: credencial gris + feed "Para vos" abierto (feed_posts es legible por autenticado; homeFeedBlock se autocarga). Sin calificación ni card de chequeo.
+function tabInicioFreemium(){
+  const nombre=(S.prospecto&&S.prospecto.nombre)||'Tu credencial';
+  return `<div style="padding:1rem 1rem 0">
+    ${credGrisHTML(nombre)}
+    ${homeFeedBlock()}
+    <div style="height:.6rem"></div>
+  </div>`;
+}
+// Más del gratuito: filas gris (→ puente) + abiertas (foto de perfil real en Storage perfiles/{uid}, datos de contacto del prospecto, cerrar sesión).
+function tabMasFreemium(){
+  if(S.fotoUrl===undefined) setTimeout(cargarFotoPerfil,0); // la foto SÍ está disponible para el prospecto (misma regla Storage, uid propio)
+  const p=S.prospecto||{};
+  const gris=(ic,lbl)=>`<button onclick="abrirPuente()" style="width:100%;display:flex;align-items:center;gap:.7rem;background:var(--blanco);border:none;border-bottom:1px solid var(--linea);padding:.95rem 1rem;font-size:.9rem;cursor:pointer;text-align:left"><span style="font-size:1.05rem;opacity:.5">${ic}</span><span style="flex:1;font-weight:600;color:var(--gris)">${lbl}</span><span style="font-size:.62rem;font-weight:800;color:var(--rojo);background:#fff0f0;border:1px solid #f3c9c9;border-radius:20px;padding:.2rem .5rem;white-space:nowrap">🔒 AFILIATE</span></button>`;
+  const foto=`<div style="display:flex;align-items:center;gap:.9rem;padding-bottom:.85rem;margin-bottom:.35rem;border-bottom:1px solid var(--linea)">
+    <div style="width:60px;height:60px;border-radius:50%;overflow:hidden;background:var(--nieve);border:1.5px solid var(--linea);display:flex;align-items:center;justify-content:center;flex:none">${S.fotoUrl?`<img src="${esc(S.fotoUrl)}" alt="Foto de perfil" style="width:100%;height:100%;object-fit:cover">`:ICN_USER}</div>
+    <label style="display:inline-block;border:1.5px solid var(--rojo);color:var(--rojo);border-radius:10px;padding:.5rem .9rem;font-size:.78rem;font-weight:700;cursor:pointer">${S.fotoBusy?'Subiendo…':(S.fotoUrl?'Cambiar foto':'Subir o sacar foto')}<input type="file" accept="image/*" capture="user" onchange="subirFotoPerfil(this)" style="display:none"></label>
+  </div>`;
+  const contacto=[['Teléfono',p.telefono],['Email',p.email]].filter(r=>r[1]).map(r=>`<div class="row"><span class="rl">${r[0]}</span><span class="rv">${esc(r[1])}</span></div>`).join('')||'<div style="font-size:.8rem;color:var(--gris)">Sin datos cargados</div>';
+  return `<div style="padding:1rem 0 0">
+    <div style="border-radius:14px;overflow:hidden;margin:0 .8rem;box-shadow:var(--sombra)">
+      ${gris('🧾','Mi cuenta y comprobantes')}
+      ${gris('👪','Mi grupo familiar')}
+      ${gris('🤝','Mis referentes')}
+      ${gris('👤','Seguir a un familiar')}
+    </div>
+    <div class="sec"><div class="sec-h">Mis datos de contacto</div><div class="card" style="padding:.9rem 1rem">
+      ${foto}
+      ${contacto}
+    </div></div>
+    <div style="padding:.6rem 1rem 1.8rem;text-align:center"><button onclick="salir()" style="border:1.5px solid var(--linea);background:var(--blanco);color:var(--gris);border-radius:11px;padding:.7rem 1.6rem;font-size:.85rem;font-weight:700;font-family:inherit;cursor:pointer">Cerrar sesión</button></div>
+  </div>`;
+}
+// Cartel de asociate: lo abre la banda EMERGENCIAS del gratuito (que NO disca). Afiliarme → puente. Se inyecta en #cartel-slot; irTab lo limpia al cambiar de tab.
+function abrirCartelAsociate(){
+  if(!esProspectoUI()) return; // guarda: solo el gratuito
+  const s=el('cartel-slot'); if(!s) return;
+  s.innerHTML=`<div onclick="cerrarCartelAsociate()" style="position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:flex;align-items:flex-end">
+    <div onclick="event.stopPropagation()" style="width:100%;background:var(--blanco);border-radius:20px 20px 0 0;padding:1.6rem 1.3rem 1.5rem;text-align:center;box-shadow:0 -8px 30px rgba(0,0,0,.2)">
+      <div style="font-size:2.2rem">🚑</div>
+      <h3 style="font-size:1.15rem;font-weight:800;color:var(--tinta);margin:.5rem 0 .4rem">La cobertura es para socios</h3>
+      <p style="font-size:.86rem;color:var(--gris);line-height:1.5;margin:0 0 1.1rem">Las emergencias 24 hs y las consultas con un médico son parte del servicio de MEDICAR. Afiliate y tenés todo activo.</p>
+      <button class="btn-r" style="width:100%" onclick="cerrarCartelAsociate();abrirPuente()">Afiliarme</button>
+      <button onclick="cerrarCartelAsociate()" style="width:100%;margin-top:.55rem;background:none;border:none;color:var(--gris);font-size:.85rem;font-weight:600;font-family:inherit;padding:.5rem;cursor:pointer">Ahora no</button>
+      ${yaAfiliadoLink()}
+    </div>
+  </div>`;
+}
+function cerrarCartelAsociate(){ const s=el('cartel-slot'); if(s) s.innerHTML=''; }
+
+// Punto 6 — "YA SOY AFILIADO" (autodeclaración, cero-oráculo). Salida para el afiliado existente sin vínculo digital que
+// cae en freemium: NO es el embudo comercial. En 2 puntas (cartel de la banda + credencial gris). Un tap, sin pedir datos.
+// Antes de marcar = link secundario; después = leyenda (reflejo en las 2 puntas). El estado sale de S.prospecto.yaAfiliado.
+function yaAfiliadoLink(){
+  if(S.prospecto && S.prospecto.yaAfiliado) return `<div style="margin-top:.7rem;font-size:.76rem;color:var(--verde);font-weight:600;text-align:center">✓ Registramos tu aviso: nos vamos a comunicar con vos</div>`;
+  return `<button onclick="marcarYaAfiliado()" ${S.yaAfiBusy?'disabled':''} style="margin-top:.7rem;width:100%;background:none;border:none;color:var(--gris);font-size:.8rem;font-weight:600;font-family:inherit;text-decoration:underline;cursor:pointer;padding:.35rem">${S.yaAfiBusy?'Registrando…':'Ya soy afiliado'}</button>`;
+}
+async function marcarYaAfiliado(){
+  if(S.yaAfiBusy) return; S.yaAfiBusy=true;
+  const cs=el('cartel-slot'); if(cs && cs.innerHTML) abrirCartelAsociate(); // si el cartel está abierto, repinta el "Registrando…"
+  try{ await fnsCall('marcarYaAfiliado', {}); }
+  catch(_){ /* cero-oráculo: no exponemos error técnico; la autodeclaración es intención, un humano verifica */ }
+  if(S.prospecto) S.prospecto.yaAfiliado=true; // reflejo local (idempotente en el server)
+  S.yaAfiBusy=false;
+  abrirCartelYaAfiliado(); // confirmación de un solo tap
+  if(S.view==='prospecto' && S.tab!=='mas'){ const c=el('tab-content'); if(c && (S.tab||'inicio')==='inicio') c.innerHTML=tabContent('inicio'); } // refleja la leyenda en la credencial gris
+}
+// Cartel de confirmación (un solo tap, sin pedir datos): reemplaza el contenido del slot; "Entendido" cierra.
+function abrirCartelYaAfiliado(){
+  const s=el('cartel-slot'); if(!s) return;
+  s.innerHTML=`<div onclick="cerrarCartelAsociate()" style="position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.45);display:flex;align-items:flex-end">
+    <div onclick="event.stopPropagation()" style="width:100%;background:var(--blanco);border-radius:20px 20px 0 0;padding:1.6rem 1.3rem 1.5rem;text-align:center;box-shadow:0 -8px 30px rgba(0,0,0,.2)">
+      <div style="font-size:2.2rem">✅</div>
+      <h3 style="font-size:1.15rem;font-weight:800;color:var(--tinta);margin:.5rem 0 .4rem">¡Perfecto!</h3>
+      <p style="font-size:.86rem;color:var(--gris);line-height:1.5;margin:0 0 1.1rem">Próximamente nos comunicaremos con vos para activar tu cuenta.</p>
+      <button class="btn-r" style="width:100%" onclick="cerrarCartelAsociate()">Entendido</button>
+    </div>
+  </div>`;
 }
 
 // ── Calificación de la atención (post-cierre): el socio completa su calificación pendiente ──
@@ -3436,7 +3552,7 @@ function render(){
     case 'login': html=loginView(); break;
     case 'invita': html=invitaView(); break;
     case 'registro': html=registroView(); break;
-    case 'prospecto': html=prospectoView(); break;
+    case 'prospecto': html=esFreemium() ? tabShellView() : prospectoView(); break; // Tramo 4: gratuito al shell freemium (flag off → prospectoView legacy intacto)
     case 'puente': html=puenteView(); break;
     case 'referente-codigo': html=referenteCodigoView(); break;
     case 'referente-login': html=referenteLoginView(); break;

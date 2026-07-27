@@ -20,7 +20,7 @@ t('núcleo hace early-return con _lazy:true (sin las ~16 colecciones)', /if\(nuc
 t('el boot pasa el modo núcleo (tabsBootPref)', /cargarCredencial\(user\.uid, tabsBootPref\(\)\)/.test(socio));
 
 // ── EMERGENCIAS: header rojo persistente (tel:, sticky, nunca scrollea) — NO 6º tab ──
-t('banda EMERGENCIAS variante C: tel: + sticky + pulso + EMERGENCIAS + 443044 (32px)', /href="tel:\$\{TEL_EMERG\}"[\s\S]{0,180}position:sticky[\s\S]{0,60}height:32px[\s\S]{0,200}ICN_PULSO[\s\S]{0,120}EMERGENCIAS[\s\S]{0,160}\$\{TEL_EMERG\}/.test(socio));
+t('banda EMERGENCIAS variante C: tel: + sticky + pulso + EMERGENCIAS + 443044 (32px)', /const bandaInner = `\$\{ICN_PULSO\}[\s\S]{0,120}EMERGENCIAS[\s\S]{0,160}\$\{TEL_EMERG\}/.test(socio) && /const bandaCss = `position:sticky[\s\S]{0,60}height:32px/.test(socio) && /: `<a href="tel:\$\{TEL_EMERG\}"[\s\S]{0,120}style="\$\{bandaCss\}">\$\{bandaInner\}/.test(socio));
 t('EMERGENCIAS usa el rojo de marca (var(--rojo))', /EMERGENCIAS[\s\S]{0,0}|background:var\(--rojo\)[\s\S]{0,400}EMERGENCIAS/.test(socio) || /position:sticky[\s\S]{0,120}background:var\(--rojo\)/.test(socio));
 
 // ── 5 tabs exactos + tab bar fija ──
@@ -29,7 +29,7 @@ t('tab bar fija abajo (position:fixed bottom)', /<nav style="position:fixed;left
 t('tabs con tokens de marca (activo var(--rojo) / inactivo var(--gris))', /on\?'var\(--rojo\)':'var\(--gris\)'/.test(socio));
 
 // ── Nav: pushState por tab + popstate restaura tab (back determinístico) ──
-t('irTab hace history.pushState({tabnav})', /function irTab\(t\)[\s\S]{0,260}history\.pushState\(\{tabnav:t\}/.test(socio));
+t('irTab hace history.pushState({tabnav})', /function irTab\(t\)[\s\S]{0,400}history\.pushState\(\{tabnav:t\}/.test(socio));
 t('navRestore restaura el tab en el back (tabnav)', /desc\.tabnav\)\{[\s\S]{0,120}S\.tab=desc\.tabnav; pintarTab/.test(socio));
 t('pintarTab re-pinta SOLO el contenedor (tab bar fija)', /function pintarTab\(t\)[\s\S]{0,120}el\('tab-content'\)[\s\S]{0,120}innerHTML=tabContent\(t\)/.test(socio));
 
@@ -53,7 +53,7 @@ t('prospecto NO entra al shell (socioShellElegible exige socio)', /c\.estado==='
     const TABS=grab(/const TABS = \[[\s\S]*?\];/);
     const shell=grab(/function tabShellView\(\)\{[\s\S]*?\n\}/);
     const ICNblk=grab(/const _IS=[\s\S]*?const TABS = \[/).replace(/const TABS = \[$/,'');
-    const src=`const TEL_EMERG='443044'; const IC={phone:'📞'}; const S={tab:'inicio',cred:{}}; function tabContent(){return '<!--c-->';} const esc=x=>String(x==null?'':x);\n${ICNblk}\n${TABS}\n${shell}\n; globalThis.__h=tabShellView();`;
+    const src=`const TEL_EMERG='443044'; const IC={phone:'📞'}; const S={tab:'inicio',cred:{}}; function tabContent(){return '<!--c-->';} function esFreemium(){return false;} const esc=x=>String(x==null?'':x);\n${ICNblk}\n${TABS}\n${shell}\n; globalThis.__h=tabShellView();`;
     const sb={ globalThis:{} }; sb.globalThis=sb;
     vm.runInNewContext(src, sb, {timeout:3000});
     const h=sb.__h||'';
@@ -169,6 +169,101 @@ t('iaAccion(turno) lleva al tab Consultas (S.tab=turnos)', /if\(accion==='turno'
 t('C · turnosBlock: "Consultas por videollamada" + "Mis consultas"', /return `<div class="sec"><div class="sec-h">Consultas por videollamada<\/div>[\s\S]{0,180}sec-h" style="margin-top:1rem">Mis consultas</.test(socio));
 t('C · empty states en consultas: "No hay consultas disponibles" + "No tenés consultas reservadas"', /No hay consultas disponibles en los próximos 7 días/.test(socio) && /No tenés consultas reservadas/.test(socio));
 t('C · no se renombró el estado (S.tab=turnos) ni la colección (agenda_turnos intactos)', /S\.tab='turnos'/.test(socio) && /collection\('agenda_turnos'\)/.test(socio));
+
+// ════════════════════ Tramo 4 — FREEMIUM (gratuito al shell degradado) ════════════════════
+// 1 · RUTEO: el prospecto entra al MISMO shell (freemium) SOLO con el flip on; flag off → prospectoView legacy intacto.
+t('T4 · esFreemium = tabsOn() && esProspectoUI()', /function esFreemium\(\)\{ return tabsOn\(\) && esProspectoUI\(\); \}/.test(socio));
+t('T4 · ruteo: case prospecto = esFreemium()? tabShellView : prospectoView (fallback legacy)', /case 'prospecto': html=esFreemium\(\) \? tabShellView\(\) : prospectoView\(\)/.test(socio));
+t('T4 · prospectoView SIGUE existiendo (fallback intacto, NO se tocó)', /function prospectoView\(\)\{/.test(socio));
+t('T4 · socio pleno intacto: case home sigue gated por socioShellElegible', /case 'home': html=\(tabsOn\(\) && socioShellElegible\(\)\) \? tabShellView\(\) : homeView\(\)/.test(socio));
+
+// 2 · LOADER TOLERANTE: los renderers del gratuito leen SOLO S.prospecto (sin queries socio-gated ni CFs assertAfiliado).
+t('T4 · tabInicioFreemium lee S.prospecto.nombre (no S.cred)', /function tabInicioFreemium\(\)\{[\s\S]{0,120}S\.prospecto&&S\.prospecto\.nombre/.test(socio));
+t('T4 · tabMasFreemium lee S.prospecto (telefono/email), NO CFs', /function tabMasFreemium\(\)\{[\s\S]{0,200}S\.prospecto\|\|\{\}[\s\S]{0,1600}p\.telefono[\s\S]{0,60}p\.email/.test(socio));
+
+// 3 · BANDA condicional: gratuito SIN tel:, superficie completa abre el cartel (handler en el contenedor, sin zonas muertas).
+t('T4 · tabShellView bifurca la banda por esFreemium (fm)', /const fm = esFreemium\(\);/.test(socio));
+t('T4 · banda freemium = <div role="button"> onclick abrirCartelAsociate (SIN tel:)', /fm[\s\S]{0,120}role="button"[\s\S]{0,120}onclick="abrirCartelAsociate\(\)"[\s\S]{0,200}: `<a href="tel:\$\{TEL_EMERG\}"/.test(socio));
+t('T4 · banda socio SIGUE siendo tel:443044 (rama else)', /: `<a href="tel:\$\{TEL_EMERG\}" aria-label="Emergencias \$\{TEL_EMERG\}"/.test(socio));
+t('T4 · #cartel-slot inyectado en el shell', /<div id="cartel-slot"><\/div>/.test(socio));
+
+// 4 · TABS del gratuito (tabContent bifurca por esFreemium).
+t('T4 · tabContent bifurca por esFreemium', /function tabContent\(t\)\{[\s\S]{0,120}if\(esFreemium\(\)\)\{/.test(socio));
+t('T4 · freemium: salud → tabBloqueado (label del mockup)', /if\(esFreemium\(\)\)\{[\s\S]{0,260}case 'salud':\s*return tabBloqueado\('Mi salud/.test(socio));
+t('T4 · freemium: consultas → tabBloqueado', /if\(esFreemium\(\)\)\{[\s\S]{0,500}case 'turnos':\s*return tabBloqueado\('Consultas por videollamada'\)/.test(socio));
+t('T4 · freemium: mas → tabMasFreemium, default → tabInicioFreemium', /if\(esFreemium\(\)\)\{[\s\S]{0,600}case 'mas':\s*return tabMasFreemium\(\);[\s\S]{0,80}default:\s*return tabInicioFreemium\(\)/.test(socio));
+t('T4 · freemium: IA abierto tal cual (tabIA)', /if\(esFreemium\(\)\)\{[\s\S]{0,140}case 'ia':\s*return tabIA\(c\)/.test(socio));
+
+// Credencial GRIS: nombre sí, número/DNI/QR NO. CTA → puente.
+t('T4 · credGrisHTML: "Afiliate para activar tu credencial y tu QR" + Afiliarme→abrirPuente', /function credGrisHTML[\s\S]{0,1500}Afiliate para activar tu credencial y tu QR[\s\S]{0,120}onclick="abrirPuente\(\)">Afiliarme/.test(socio));
+t('T4 · credGrisHTML: N° enmascarado "— — —", SIN cred-num real ni QR/DNI', /function credGrisHTML[\s\S]{0,1200}— — —/.test(socio) && !/function credGrisHTML[\s\S]{0,1500}(renderQRPara|cred-qr-slot|fmtDni)/.test(socio));
+
+// Inicio freemium: feed abierto + SIN calificación/card de chequeo.
+t('T4 · tabInicioFreemium: feed abierto (homeFeedBlock) SIN calificación ni estadoCards', /function tabInicioFreemium\(\)\{[\s\S]{0,300}homeFeedBlock\(\)/.test(socio) && !/function tabInicioFreemium\(\)\{[\s\S]{0,300}(calificacionCardHTML|estadoCardsInicio)/.test(socio));
+
+// Más freemium: gris (→ puente + chip AFILIATE) + abiertos (foto real, contacto, cerrar sesión).
+t('T4 · Más freemium: filas gris → abrirPuente con chip "AFILIATE"', /function tabMasFreemium[\s\S]{0,600}onclick="abrirPuente\(\)"[\s\S]{0,700}🔒 AFILIATE/.test(socio));
+t('T4 · Más freemium: 4 filas gris (cuenta/grupo/referentes/seguir)', /function tabMasFreemium[\s\S]{0,2500}Mi cuenta y comprobantes[\s\S]{0,200}Mi grupo familiar[\s\S]{0,200}Mis referentes[\s\S]{0,200}Seguir a un familiar/.test(socio));
+t('T4 · Más freemium: foto de perfil REAL (subirFotoPerfil) + Cerrar sesión (salir)', /function tabMasFreemium[\s\S]{0,1900}onchange="subirFotoPerfil\(this\)"[\s\S]{0,900}onclick="salir\(\)"/.test(socio));
+t('T4 · foto de perfil: guard de repintado ampliado a freemium (view prospecto)', /\(S\.view==='home'\|\|S\.view==='prospecto'\)&&S\.tab==='mas'\) pintarTab\('mas'\)/.test(socio));
+
+// Cartel de asociate: copy aprobado, Afiliarme → puente, se cierra al cambiar de tab.
+t('T4 · abrirCartelAsociate: copy aprobado "La cobertura es para socios"', /function abrirCartelAsociate\(\)\{[\s\S]{0,700}La cobertura es para socios[\s\S]{0,300}Las emergencias 24 hs y las consultas con un médico son parte del servicio de MEDICAR/.test(socio));
+t('T4 · cartel: Afiliarme → cierra + abrirPuente; "Ahora no" → cierra', /onclick="cerrarCartelAsociate\(\);abrirPuente\(\)">Afiliarme[\s\S]{0,300}onclick="cerrarCartelAsociate\(\)"[\s\S]{0,300}Ahora no/.test(socio));
+t('T4 · cartel: guarda esProspectoUI (solo el gratuito lo abre)', /function abrirCartelAsociate\(\)\{\s*if\(!esProspectoUI\(\)\) return;/.test(socio));
+t('T4 · irTab limpia #cartel-slot (el cartel se cierra al cambiar de tab)', /function irTab\(t\)\{[\s\S]{0,120}el\('cartel-slot'\); if\(cs\) cs\.innerHTML=''/.test(socio));
+
+// RENDER (vm): banda freemium sin tel: + abre cartel + 5 tabs intactos.
+(function(){
+  try{
+    const grab=(re)=>{ const m=re.exec(socio); return m?m[0]:''; };
+    const TABS=grab(/const TABS = \[[\s\S]*?\];/);
+    const shell=grab(/function tabShellView\(\)\{[\s\S]*?\n\}/);
+    const ICNblk=grab(/const _IS=[\s\S]*?const TABS = \[/).replace(/const TABS = \[$/,'');
+    const src=`const TEL_EMERG='443044'; const S={tab:'inicio'}; function tabContent(){return '<!--c-->';} function esFreemium(){return true;} const esc=x=>String(x==null?'':x);\n${ICNblk}\n${TABS}\n${shell}\n; globalThis.__h=tabShellView();`;
+    const sb={}; sb.globalThis=sb; vm.runInNewContext(src, sb, {timeout:3000});
+    const h=sb.__h||'';
+    t('T4 render freemium: banda SIN tel: (no disca)', !/tel:443044/.test(h) && /EMERGENCIAS/.test(h) && /443044/.test(h));
+    t('T4 render freemium: banda abre el cartel (abrirCartelAsociate) en toda la superficie', /role="button"[\s\S]{0,140}onclick="abrirCartelAsociate\(\)"/.test(h));
+    t('T4 render freemium: los 5 tabs siguen intactos', (h.match(/data-tab="/g)||[]).length===5);
+    t('T4 render freemium: #cartel-slot presente', /id="cartel-slot"/.test(h));
+  }catch(e){ t('T4 render freemium (vm) sin throw', false); console.log('   ',e.message.split('\n')[0]); }
+})();
+
+// ════════════════════ Punto 6 — "YA SOY AFILIADO" (autodeclaración, cero-oráculo) ════════════════════
+const idx = fs.readFileSync(path.resolve(__dirname, '../functions/index.js'), 'utf8');
+const panel = fs.readFileSync(path.resolve(__dirname, '../app/index.html'), 'utf8');
+
+// ENTRADA: 2 puntas (cartel de la banda + credencial gris), NO en cada módulo gris.
+t('P6 · yaAfiliadoLink presente en la CREDENCIAL GRIS (debajo del CTA)', /onclick="abrirPuente\(\)">Afiliarme<\/button>\s*<\/div>\s*\$\{yaAfiliadoLink\(\)\}/.test(socio));
+t('P6 · yaAfiliadoLink presente en el CARTEL (debajo de "Ahora no")', /Ahora no<\/button>\s*\$\{yaAfiliadoLink\(\)\}/.test(socio));
+t('P6 · exactamente 2 puntas (2 usos de yaAfiliadoLink en render)', (socio.match(/\$\{yaAfiliadoLink\(\)\}/g)||[]).length===2);
+
+// AL TOCAR: cartel de confirmación de UN TAP, sin pedir datos.
+t('P6 · cartel de confirmación "¡Perfecto!" + "Próximamente nos comunicaremos con vos para activar tu cuenta"', /function abrirCartelYaAfiliado\(\)\{[\s\S]{0,600}¡Perfecto![\s\S]{0,200}Próximamente nos comunicaremos con vos para activar tu cuenta/.test(socio));
+t('P6 · confirmación = un solo tap "Entendido" (no pide ningún dato)', /function abrirCartelYaAfiliado[\s\S]{0,900}onclick="cerrarCartelAsociate\(\)">Entendido/.test(socio) && !/function abrirCartelYaAfiliado[\s\S]{0,900}<input/.test(socio));
+
+// PERSISTENCIA vía CF (prospectos sigue write:false → Admin SDK). Idempotente: no pisa el timestamp.
+t('P6 · marcarYaAfiliado llama la CF marcarYaAfiliado (fnsCall)', /async function marcarYaAfiliado\(\)\{[\s\S]{0,400}fnsCall\('marcarYaAfiliado'/.test(socio));
+t('P6 · CF marcarYaAfiliado escribe {yaAfiliado:true, yaAfiliadoEn}', /exports\.marcarYaAfiliado = onCall[\s\S]{0,600}yaAfiliado: true, yaAfiliadoEn: FV\(\)/.test(idx));
+t('P6 · CF IDEMPOTENTE: si ya está marcado, return SIN re-escribir (no pisa timestamp)', /exports\.marcarYaAfiliado[\s\S]{0,500}yaAfiliado === true\) return \{ ok: true, yaMarcado: true \}/.test(idx));
+t('P6 · CF exige prospecto existente (failed-precondition) + auth', /exports\.marcarYaAfiliado[\s\S]{0,300}unauthenticated[\s\S]{0,200}Solo para prospectos/.test(idx));
+t('P6 · CF NO toca estado ni gestion (no es el funnel comercial)', !/exports\.marcarYaAfiliado[\s\S]{0,600}(estado:|gestion:)/.test(idx));
+
+// CERO-ORÁCULO: ningún flujo del socio consulta afiliación por DNI; el error de la CF NO se expone (solo se registra intención).
+t('P6 · cero-oráculo: marcarYaAfiliado NO consulta afiliación por DNI (sin lecturas de socios/padrón)', !/async function marcarYaAfiliado[\s\S]{0,400}(collection\('socios'\)|buscarTitular|padron|dni)/i.test(socio));
+t('P6 · cero-oráculo: el catch NO expone error técnico (intención registrada igual)', /async function marcarYaAfiliado[\s\S]{0,400}catch\(_\)\{[\s\S]{0,120}cero-oráculo/.test(socio));
+
+// UI tras marcar: la MISMA marca reemplaza el link por la leyenda en las 2 puntas.
+t('P6 · post-marca: leyenda "Registramos tu aviso: nos vamos a comunicar con vos" (reemplaza el link)', /function yaAfiliadoLink\(\)\{\s*if\(S\.prospecto && S\.prospecto\.yaAfiliado\)[\s\S]{0,200}Registramos tu aviso: nos vamos a comunicar con vos/.test(socio));
+t('P6 · post-marca: setea S.prospecto.yaAfiliado=true (reflejo local)', /async function marcarYaAfiliado[\s\S]{0,500}S\.prospecto\.yaAfiliado=true/.test(socio));
+
+// PANEL: badge propio "DICE SER AFILIADO", visualmente distinto (chip índigo con borde, no color sólido comercial).
+t('P6 panel · badge prospYaAfiliadoBadge "DICE SER AFILIADO" (chip índigo con borde)', /function prospYaAfiliadoBadge\(p\)\{[\s\S]{0,300}DICE SER AFILIADO[\s\S]{0,60}/.test(panel) && /prospYaAfiliadoBadge[\s\S]{0,200}#EEF0FF[\s\S]{0,80}border:1px solid/.test(panel));
+t('P6 panel · badge inyectado en la FILA del prospecto', /\$\{prospYaAfiliadoBadge\(p\)\}\$\{prospEstBadge\(p\.estado\)\}/.test(panel));
+t('P6 panel · badge/leyenda en la FICHA (autodeclarado + fecha)', /p\.yaAfiliado===true\?`<div[\s\S]{0,200}Dice ser afiliado[\s\S]{0,120}Autodeclarado \$\{prospFecha\(p\.yaAfiliadoEn\)\}/.test(panel));
+t('P6 panel · SIN conteos/proyecciones nuevos (no hay mktYaAfiliadoBadge de conteo)', !/mktYaAfiliadoBadge|yaAfiliado[\s\S]{0,40}\.length/.test(panel));
+t('P6 panel · snapshot trae el doc completo (yaAfiliado llega)', /collection\('prospectos'\)\.onSnapshot[\s\S]{0,120}\{id:d\.id,\.\.\.d\.data\(\)\}/.test(panel));
 
 // ── SW bump ──
 t('socio SW bumpeado (≥ v49)', /medicar-socio-v(49|[5-9]\d)/.test(sw));
