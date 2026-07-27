@@ -157,6 +157,11 @@ t('chat: el pie sticky conserva el input + Enviar (no se rompió el layout)', /p
 t('chat: chips CONTEXTUALES (whitelist del modelo, m.botones) INTACTOS', /const botones = \(m\.botones\|\|\[\]\)\.map\(b=>[\s\S]{0,120}iaAccion\('\$\{b\.accion\}'\)/.test(socio));
 t('chat: una sola superficie (tabIA + view asistente usan asistenteView)', /function tabIA\(c\)\{[\s\S]{0,140}return asistenteView\(\)/.test(socio) && /case 'asistente': html=asistenteView\(\)/.test(socio));
 
+// ── FIX desborde del chat en móvil (burbujas contenidas al viewport) ──
+t('chat: burbuja del USUARIO con overflow-wrap:anywhere + word-break', /m\.role==='user'[\s\S]{0,140}max-width:85%;overflow-wrap:anywhere;word-break:break-word/.test(socio));
+t('chat: burbuja de la IA con overflow-wrap:anywhere + word-break', /align-self:flex-start;max-width:90%;overflow-wrap:anywhere;word-break:break-word/.test(socio));
+t('chat: contenedor #ia-msgs con overflow-x:hidden + min-width:0 (nada empuja horizontal)', /id="ia-msgs"[\s\S]{0,120}overflow-x:hidden;min-width:0/.test(socio));
+
 // ── SW bump ──
 t('socio SW bumpeado (≥ v49)', /medicar-socio-v(49|[5-9]\d)/.test(sw));
 

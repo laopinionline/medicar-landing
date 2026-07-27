@@ -2395,7 +2395,7 @@ function iaResumirSesion(){
   try{ fnsCall('asistenteResumir',{ historia }).catch(()=>{}); }catch(_){}
 }
 function iaBurbuja(m){
-  if(m.role==='user') return `<div style="align-self:flex-end;max-width:85%;background:var(--rojo);color:#fff;border-radius:14px 14px 4px 14px;padding:.55rem .8rem;font-size:.9rem;line-height:1.4">${esc(m.texto)}</div>`;
+  if(m.role==='user') return `<div style="align-self:flex-end;max-width:85%;overflow-wrap:anywhere;word-break:break-word;background:var(--rojo);color:#fff;border-radius:14px 14px 4px 14px;padding:.55rem .8rem;font-size:.9rem;line-height:1.4">${esc(m.texto)}</div>`;
   // Socio: banner-acción 443044 (su guardia). Prospecto: NUNCA el 443044 (es de socios) → aviso de urgencia pública, sin CTA telefónico.
   const banner = m.rojo
     ? (esProspectoUI()
@@ -2403,7 +2403,7 @@ function iaBurbuja(m){
         : `<a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:.55rem;background:var(--rojo);color:#fff;font-weight:800;padding:.6rem;border-radius:10px;text-decoration:none">🚑 Emergencias ${TEL_EMERG}</a>`)
     : '';
   const botones = (m.botones||[]).map(b=>`<button onclick="iaAccion('${b.accion}')" style="display:block;width:100%;margin-top:.4rem;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:700;padding:.5rem;border-radius:10px;cursor:pointer">${esc(b.label)}</button>`).join('');
-  return `<div style="align-self:flex-start;max-width:90%;background:var(--nieve);border:1px solid var(--linea);border-radius:14px 14px 14px 4px;padding:.55rem .8rem;font-size:.9rem;line-height:1.45">${esc(m.texto).replace(/\n/g,'<br>')}${banner}${botones}</div>`;
+  return `<div style="align-self:flex-start;max-width:90%;overflow-wrap:anywhere;word-break:break-word;background:var(--nieve);border:1px solid var(--linea);border-radius:14px 14px 14px 4px;padding:.55rem .8rem;font-size:.9rem;line-height:1.45">${esc(m.texto).replace(/\n/g,'<br>')}${banner}${botones}</div>`;
 }
 let iaWmAnim=true; // la animación de construcción del wordmark corre solo en la 1ª apertura del chat en esta sesión
 function asistenteView(){
@@ -2431,7 +2431,7 @@ function asistenteView(){
   return `<div class="home" style="display:flex;flex-direction:column;min-height:100dvh">
     <div class="topbar">${chv(16)}<div class="ia-wm${anim}" style="margin-left:.4rem">MED<span class="l lI">I</span>C<span class="l lA">A</span>R</div><div class="tb-sp"></div><button class="mini" onclick="cerrarAsistente()">Volver</button></div>
     <div style="background:#fff3f3;border:1px solid #f3c9c9;border-radius:10px;padding:.5rem .7rem;font-size:.72rem;color:#7a1f1f;margin:.1rem 0 .6rem;line-height:1.4">Este chat funciona con inteligencia artificial. Orienta, pero no reemplaza a un médico. ${prosp?'Ante una urgencia, buscá atención médica de inmediato en una guardia u hospital.':`Ante una urgencia, llamá al <b>${TEL_EMERG}</b>.`}</div>
-    <div id="ia-msgs" style="flex:1;display:flex;flex-direction:column;gap:.5rem;padding-bottom:.5rem;overflow-y:auto">${msgs}${empty}</div>
+    <div id="ia-msgs" style="flex:1;display:flex;flex-direction:column;gap:.5rem;padding-bottom:.5rem;overflow-y:auto;overflow-x:hidden;min-width:0">${msgs}${empty}</div>
     ${ia.busy?`<div style="color:var(--gris);font-size:.82rem;padding:.3rem .2rem">Escribiendo…</div>`:''}
     ${ia.err?`<div class="err on" style="margin:.3rem 0">${esc(ia.err)}</div>`:''}
     <div style="position:sticky;bottom:0;background:var(--fondo,#fff);padding:.5rem 0 .3rem">
