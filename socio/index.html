@@ -101,9 +101,12 @@ input{font-family:inherit}
 .cred-flip{perspective:1000px;box-sizing:border-box;cursor:pointer}
 .cred-flip-inner{position:relative;transition:transform .55s;transform-style:preserve-3d}
 .cred-flip.flipped .cred-flip-inner{transform:rotateY(180deg)}
-.cred-face{backface-visibility:hidden;-webkit-backface-visibility:hidden}
-.cred-face .cred{margin:0}
-.cred-back{position:absolute;inset:0;transform:rotateY(180deg)}
+/* FIX móvil: (1) backface-visibility TAMBIÉN en el card hijo (.cred) — si no, en móvil el hijo pinta su cara trasera y
+   las letras del frente sangran sobre el QR; (2) rotateY explícito en cada cara = plano 3D consistente. El FRENTE queda
+   en flujo (da la altura); el DORSO absolute cubre esa misma altura + overflow:hidden (nada desborda el card). */
+.cred-face{backface-visibility:hidden;-webkit-backface-visibility:hidden;transform:rotateY(0deg);-webkit-transform:rotateY(0deg)}
+.cred-face .cred{margin:0;height:100%;overflow:hidden;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.cred-back{position:absolute;top:0;left:0;width:100%;height:100%;transform:rotateY(180deg);-webkit-transform:rotateY(180deg)}
 .cred-flip-hint{position:absolute;bottom:.55rem;right:.75rem;font-size:.56rem;color:#fff;opacity:.55;z-index:1}
 .cred-top{display:flex;justify-content:space-between;align-items:center;position:relative;z-index:1}
 .cred .cred-brand{display:inline-flex;align-items:center;gap:2px;font-style:italic;font-weight:800;font-size:.95rem}
@@ -1646,20 +1649,32 @@ function credCarruselIr(i){ const elm=document.getElementById('cred-carrusel'); 
    Gated por tabsOn(). Solo socio pleno + menor-con-cuenta. homeView viejo INTACTO como fallback (flag off = cero cambio).
    Header rojo EMERGENCIAS persistente (nunca scrollea) + 5 tabs + tab bar fija. Nav: pushState por tab, scroll por tab,
    contenido diferido (núcleo pinta Inicio, hydrate en background). Tokens del Tramo 1. Estado "bloqueado" = Tramo 4. */
+// Set de íconos PROPIO (aprobado por Lucas) — line-icons 24x24, trazo del chevrón (stroke 2, round caps/joins,
+// mismo lenguaje que IC). Monocromos (currentColor → --rojo activo / --gris inactivo). "Más" = doble chevrón » de Bidondo.
+const _IS='stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+const ICN = {
+  inicio:`<svg viewBox="0 0 24 24" ${_IS}><path d="M4 11.3 12 5l8 6.3"/><path d="M6 10.2V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-8.8"/><path d="M10 20v-4.2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1V20"/></svg>`,
+  ia:`<svg viewBox="0 0 24 24" ${_IS}><path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4 3v-3H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/><path d="M10 9.5 12.5 11 10 12.5"/></svg>`,
+  salud:`<svg viewBox="0 0 24 24" ${_IS}><path d="M12 20s-6.6-4-6.6-9A3.4 3.4 0 0 1 12 8.2 3.4 3.4 0 0 1 18.6 11c0 5-6.6 9-6.6 9Z"/><path d="M7.5 12h2l1.3-2.2 1.8 4 1-1.8h1.9"/></svg>`,
+  turnos:`<svg viewBox="0 0 24 24" ${_IS}><rect x="4" y="5.5" width="16" height="14.5" rx="2.5"/><path d="M4 9.5h16"/><path d="M8.5 3.2v4M15.5 3.2v4"/></svg>`,
+  mas:`<svg viewBox="0 0 24 24" ${_IS}><path d="M7 8l4 4-4 4"/><path d="M13 8l4 4-4 4"/></svg>`,
+};
+// Pulso de la banda EMERGENCIAS (variante C aprobada) — línea de latido, blanco sobre rojo.
+const ICN_PULSO='<svg viewBox="0 0 24 24" width="17" height="13" stroke="#fff" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l2-5 3 10 2.5-7 1.5 2h5"/></svg>';
 const TABS = [
-  { id:'inicio', ic:'🏠', lbl:'Inicio' },
-  { id:'ia',     ic:'💬', lbl:'MEDICAR IA' },
-  { id:'salud',  ic:'🩺', lbl:'Mi salud' },
-  { id:'turnos', ic:'📅', lbl:'Turnos' },
-  { id:'mas',    ic:'☰',  lbl:'Más' },
+  { id:'inicio', lbl:'Inicio' },
+  { id:'ia',     lbl:'MEDICAR IA' },
+  { id:'salud',  lbl:'Mi salud' },
+  { id:'turnos', lbl:'Turnos' },
+  { id:'mas',    lbl:'Más' },
 ];
 function tabShellView(){
   const t = S.tab || 'inicio';
-  // Header rojo persistente — EMERGENCIAS a un tap desde CUALQUIER tab (tel:, sticky, nunca scrollea).
-  const header = `<a href="tel:${TEL_EMERG}" aria-label="Emergencias ${TEL_EMERG}" style="position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:center;gap:.5rem;background:var(--rojo);color:#fff;font-weight:800;font-size:.92rem;letter-spacing:.03em;padding:.72rem;text-decoration:none">${IC.phone||'🚑'}<span>EMERGENCIAS · ${TEL_EMERG}</span></a>`;
+  // Banda EMERGENCIAS variante C (aprobada): banda fina 32px, pulso + "EMERGENCIAS · 443044" centrado. tel:, sticky, nunca scrollea.
+  const header = `<a href="tel:${TEL_EMERG}" aria-label="Emergencias ${TEL_EMERG}" style="position:sticky;top:0;z-index:20;height:32px;display:flex;align-items:center;justify-content:center;gap:.55rem;background:var(--rojo);color:#fff;text-decoration:none">${ICN_PULSO}<span style="font-size:.66rem;font-weight:800;letter-spacing:.13em">EMERGENCIAS</span><span style="opacity:.45">·</span><span style="font-size:.78rem;font-weight:800">${TEL_EMERG}</span></a>`;
   const bar = `<nav style="position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;background:var(--blanco);border-top:1px solid var(--linea);padding-bottom:env(safe-area-inset-bottom)">${TABS.map(x=>{
     const on = x.id===t;
-    return `<button data-tab="${x.id}" onclick="irTab('${x.id}')" style="flex:1;background:none;border:none;padding:.5rem .2rem .55rem;display:flex;flex-direction:column;align-items:center;gap:.12rem;cursor:pointer;color:${on?'var(--rojo)':'var(--gris)'}"><span style="font-size:1.2rem;line-height:1">${x.ic}</span><span data-tablbl="${x.id}" style="font-size:.61rem;font-weight:${on?'800':'600'}">${x.lbl}</span></button>`;
+    return `<button data-tab="${x.id}" onclick="irTab('${x.id}')" style="flex:1;background:none;border:none;padding:.5rem .2rem .55rem;display:flex;flex-direction:column;align-items:center;gap:.18rem;cursor:pointer;color:${on?'var(--rojo)':'var(--gris)'}"><span data-tabic="${x.id}" style="width:24px;height:24px;display:inline-flex">${ICN[x.id]}</span><span data-tablbl="${x.id}" style="font-size:.61rem;font-weight:${on?'800':'600'}">${x.lbl}</span></button>`;
   }).join('')}</nav>`;
   return `<div style="min-height:100vh;background:var(--nieve)">${header}<div id="tab-content" style="padding-bottom:76px">${tabContent(t)}</div>${bar}</div>`;
 }
@@ -1730,6 +1745,7 @@ function tabInicio(c){
     ${credHTML}${dots}
     ${calificacionCardHTML(c)}
     ${estadoCardsInicio(c)}
+    ${homeFeedBlock(c)}
     ${c._lazy?'<div style="height:.5rem"></div>':''}
   </div>`;
 }
@@ -1784,7 +1800,6 @@ function tabMas(c){
       ${item('🤝','Mis referentes',"set({view:'mis-referentes'})")}
       ${item('👤','Seguir a un familiar',"set({view:'referente-seguir'})")}
     </div>
-    <div style="margin-top:1rem">${homeFeedBlock(c)}</div>
     <div class="sec"><div class="sec-h">Mis datos de contacto</div><div class="card" style="padding:.9rem 1rem">
       ${[['Teléfono',(c.per||{}).telefono],['Domicilio',(c.per||{}).direccion],['Email',(c.per||{}).email||(c.u||{}).email]].filter(r=>r[1]).map(r=>`<div class="row"><span class="rl">${r[0]}</span><span class="rv">${esc(r[1])}</span></div>`).join('')||'<div style="font-size:.8rem;color:var(--gris)">Sin datos cargados</div>'}
     </div></div>
