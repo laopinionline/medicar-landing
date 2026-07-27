@@ -1895,6 +1895,20 @@ exports.solicitarAfiliacion = onCall(async (request) => {
   logger.info('[solicitarAfiliacion] lead marcado', { uid: request.auth.uid });
   return { ok: true };
 });
+/* Punto 6 T4 — marcarYaAfiliado: el prospecto AUTODECLARA "ya soy afiliado" (un tap, sin pedir ningún dato — el contacto
+   ya está en su doc). CERO-ORÁCULO: no confirma ni niega la afiliación de nadie; solo registra la autodeclaración para que
+   un humano del panel la verifique. IDEMPOTENTE: si ya está marcado, NO re-escribe ni pisa el timestamp. prospectos sigue
+   write:false → todo pasa por esta CF (Admin SDK). NO toca estado (no es el funnel comercial) ni gestion. */
+exports.marcarYaAfiliado = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const ref = db.collection('prospectos').doc(request.auth.uid);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError('failed-precondition', 'Solo para prospectos.');
+  if ((snap.data() || {}).yaAfiliado === true) return { ok: true, yaMarcado: true }; // idempotente: re-taps no duplican ni actualizan yaAfiliadoEn
+  await ref.set({ yaAfiliado: true, yaAfiliadoEn: FV() }, { merge: true });
+  logger.info('[marcarYaAfiliado] autodeclaración registrada', { uid: request.auth.uid });
+  return { ok: true, yaMarcado: false };
+});
 
 /* PANEL — gestionarProspecto: acciones del STAFF sobre un lead del funnel (contactado / descartar / reactivar). La
    colección prospectos sigue write:false → todo pasa por esta CF (Admin SDK). Gate: cap 'marketing' o superadmin. */
