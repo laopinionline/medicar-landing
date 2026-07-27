@@ -75,9 +75,15 @@ t('recordatorio sin configurar: afirma "No tenés día de recordatorio configura
 t('signos CON datos NO dispara el texto de ausencia', !/no tenés signos registrados/.test(ctxFull));
 t('SYSTEM: 443044 NO es canal administrativo/call center', /EL 443044 NO ES UN CANAL ADMINISTRATIVO NI UN CALL CENTER/.test(SYSTEM) && /JAMÁS lo ofrezcas para reservar\/gestionar una consulta/.test(SYSTEM));
 t('SYSTEM: turno se saca desde la app, no llamando al 443044', /Una consulta se RESERVA DESDE LA APP, en el tab CONSULTAS, no llamando al 443044/.test(SYSTEM));
-t('SYSTEM: FLUJO real de la consulta (videollamada · SOCIO tab Consultas + WhatsApp)', /CÓMO SE HACE UNA CONSULTA \(flujo REAL[\s\S]{0,200}por VIDEOLLAMADA[\s\S]{0,300}a un SOCIO explicale el flujo COMPLETO[\s\S]{0,120}tab CONSULTAS[\s\S]{0,120}por WhatsApp con la línea de atención de MEDICAR/.test(SYSTEM) && /NUNCA hables de "turnos"/.test(SYSTEM));
-// B — carve-out de prospecto: el bloque NO le nombra el tab al prospecto y lo deriva a afiliarse.
-t('SYSTEM (B): carve-out prospecto — NO le nombra el tab, deriva a afiliarse', /A un PROSPECTO NO le nombres el tab CONSULTAS ni el flujo de reserva[\s\S]{0,160}BENEFICIO de los socios[\s\S]{0,60}\[Quiero afiliarme\]/.test(SYSTEM));
+t('SYSTEM: FLUJO real de la consulta (videollamada · SOCIO tab Consultas + WhatsApp)', /CÓMO SE HACE UNA CONSULTA \(flujo REAL[\s\S]{0,200}por VIDEOLLAMADA[\s\S]{0,300}SOCIO — explicale el flujo[\s\S]{0,120}tab CONSULTAS[\s\S]{0,120}por WhatsApp con la línea de atención de MEDICAR/.test(SYSTEM) && /NUNCA hables de "turnos"/.test(SYSTEM));
+// R1 — emisión IMPERATIVA del botón: regla dura con el token literal (el fraseo suave no lograba emisión).
+t('SYSTEM R1: regla DURA — respuesta del socio DEBE TERMINAR con [Reservar una consulta]', /REGLA DURA \(OBLIGATORIA\)[\s\S]{0,240}DEBE TERMINAR con el token literal \[Reservar una consulta\][\s\S]{0,80}No es opcional/.test(SYSTEM));
+// R2 — planes absolutos: cero lenguaje de plata alrededor de la consulta.
+t('SYSTEM R2: planes absolutos — PROHIBIDO gratis/sin costo/sin info de costos; INCLUIDA en el plan', /PLANES ABSOLUTOS[\s\S]{0,160}PROHIBIDO decir "gratuita", "gratis", "sin costo adicional", "sin cargo", ni "no tengo información sobre costos/.test(SYSTEM) && /La consulta por videollamada está INCLUIDA en el plan/.test(SYSTEM));
+// R3 — no inventar UI.
+t('SYSTEM R3: NO inventar UI (nada de "barra…", "ícono del reloj"); solo el nombre del tab', /NO INVENTES LA UI: NUNCA describas la posición, los íconos ni el aspecto[\s\S]{0,120}"ícono del reloj"/.test(SYSTEM));
+// R4 — carve-out prospecto REFORZADO: vende (invitación + planes + afiliarme), sin nombrar el tab.
+t('SYSTEM R4 (B): prospecto en POSITIVO — planes del catálogo + [Quiero afiliarme], sin nombrar el tab', /PROSPECTO \(o usuario sin plan\)[\s\S]{0,120}tono de INVITACIÓN[\s\S]{0,200}PLANES disponibles del catálogo[\s\S]{0,80}\[Quiero afiliarme\][\s\S]{0,120}NO le nombres el tab CONSULTAS/.test(SYSTEM));
 // A — alias tolerado del botón viejo: 'Pedir turno' en el whitelist, misma acción, etiqueta NUEVA.
 t('BOTONES (A): "Reservar una consulta" y alias "Pedir turno" → accion turno', BOTONES['Reservar una consulta'].accion === 'turno' && BOTONES['Pedir turno'].accion === 'turno');
 t('BOTONES (A): el alias "Pedir turno" renderiza con la etiqueta NUEVA', BOTONES['Pedir turno'].label === 'Reservar una consulta');
