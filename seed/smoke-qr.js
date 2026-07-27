@@ -61,6 +61,50 @@ t('fns: asignarmeAtencion médico-only + estado activo + asignadoPorEscaneo', /e
 t('fns: calificacionAlCerrar solo en la transición → cerrado', /exports\.calificacionAlCerrar[\s\S]{0,240}before\.estado === 'cerrado' \|\| after\.estado !== 'cerrado'/.test(fns));
 t('fns: calificacionAlCerrar idempotente + solo socios', /exports\.calificacionAlCerrar[\s\S]{0,700}socios'\)\.where\('personaId'[\s\S]{0,200}exists\) return null; \/\/ idempotente/.test(fns));
 
+// ════════════════════ ENGANCHE QR — el médico entra al escáner (tramo/qr-medico-enganche) ════════════════════
+// 1 · Entrada en la superficie del médico (mHome): botón prominente, un tap, reusa dspEscanearQR.
+t('ENG · botón "Escanear credencial" en el Inicio del médico (aria-label propio)', /aria-label="Escanear credencial del socio"[\s\S]{0,300}onclick="dspEscanearQR\(\)"|onclick="dspEscanearQR\(\)"[\s\S]{0,300}aria-label="Escanear credencial del socio"/.test(app));
+t('ENG · el botón vive DENTRO de mHome (Inicio del médico), arriba', /function mHome\(\)\{[\s\S]{0,4000}aria-label="Escanear credencial del socio"/.test(app));
+t('ENG · escáner REUSADO sin fork: una sola definición de dspEscanearQR', (app.match(/function dspEscanearQR\(/g)||[]).length===1);
+t('ENG · dos puntos de entrada al MISMO escáner (despacho + médico)', (app.match(/onclick="dspEscanearQR\(\)"/g)||[]).length===2);
+
+// 2 · Destino del escaneo: el router del médico renderiza la ficha del escaneo (misma vista que el despachante).
+t('ENG · router médico: t==home && dsp.stage!=buscar → dDesp() (ficha del escaneo)', /r==='medico'\)\{if\(t==='home' && S\.dsp && S\.dsp\.stage && S\.dsp\.stage!=='buscar'\)return dDesp\(\)/.test(app));
+t('ENG · NO se tocó asignarmeAtencion (la ficha sigue ofreciéndolo por episodio activo)', /function dspAsignarme[\s\S]{0,260}fnsCall\('asignarmeAtencion'/.test(app) && /esMed \? \(yaMia/.test(app));
+
+// 3+4 · Nav: el "atrás" cierra la ficha del escaneo también para el médico (aditivo, despachante intacto).
+t('ENG · navDesc captura el stage también para el médico', /\(S\.tab==='despacho' \|\| S\.user\.rol==='medico'\) && S\.dsp && S\.dsp\.stage\)\{ d\.stage=S\.dsp\.stage;/.test(app));
+t('ENG · navRestore resetea la ficha del escaneo en el back (médico)', /\(S\.tab==='despacho' \|\| S\.user\.rol==='medico'\) && S\.dsp && S\.dsp\.stage && S\.dsp\.stage!=='buscar'[\s\S]{0,80}dspReset\(\)/.test(app));
+
+// Fricción de cámara (celular real): mensajes claros + reintentar + cancelar (nada de error mudo/spinner eterno).
+t('ENG · cámara denegada → mensaje de permiso + Reintentar (dspScanErr)', /catch\(e\)\{ dspScanErr\('Necesitás permitir el acceso a la cámara[\s\S]{0,120}'\); return; \}/.test(app) && /function dspScanErr[\s\S]{0,120}dspScanRetryShow\(true\)/.test(app));
+t('ENG · fallo de red al resolver → "Sin conexión — …reintentá" (distinto de "QR no reconocido")', /navigator\.onLine===false\)\|\|\(e&&\['unavailable','deadline-exceeded','internal'\]\.includes\(e\.code\)\)[\s\S]{0,80}Sin conexión[\s\S]{0,80}QR no reconocido/.test(app));
+t('ENG · overlay con botón Reintentar (oculto) + Cancelar', /id="qr-scan-retry" onclick="dspScanReintentar\(\)"[\s\S]{0,200}display:none/.test(app) && /onclick="dspScanStop\(\)"[\s\S]{0,250}Cancelar/.test(app));
+t('ENG · dspScanReintentar reabre cámara (reusa dspEscanearQR)', /function dspScanReintentar\(\)\{ dspScanRetryShow\(false\); dspEscanearQR\(\); \}/.test(app));
+
+// 5 · Regresión: despacho intacto (su escáner sigue en dDespBuscar + su router).
+t('REG · despacho: el botón del escáner sigue en dDespBuscar (buscador del despachante)', /function dDespBuscar[\s\S]{0,1100}onclick="dspEscanearQR\(\)"/.test(app));
+t('REG · router despachante intacto (t==despacho → dDesp)', /r==='despachante'\)\{if\(t==='despacho'\)return dDesp\(\)/.test(app));
+
+// ════════════════════ GATE DE PUERTA — app/ es el SISTEMA (staff), no la app del socio ════════════════════
+// afiliado PURO (sin rol staff) → NO entra: rebote con mensaje + link al PWA (antes: redirect silencioso).
+t('GATE · afiliado puro → S.reboteStaff=true + signOut (NO redirect silencioso)', /const roles=rolesRaw\.filter\(r=>r!=='afiliado'\);\s*if\(!roles\.length\)\{[\s\S]{0,220}S\.reboteStaff=true;[\s\S]{0,220}await auth\.signOut\(\)/.test(app));
+t('GATE · el redirect silencioso window.location.replace(../socio/) YA NO está en la rama afiliado-puro', !/if\(!roles\.length\)\{[\s\S]{0,200}window\.location\.replace\('\.\.\/socio\/'\)/.test(app));
+t('GATE · solo queda 1 replace(../socio/) (la defensa muerta de entrarConRol, no la puerta)', (app.match(/window\.location\.replace\('\.\.\/socio\/'\)/g)||[]).length===1);
+
+// render dispatch: el rebote se muestra ANTES que login (aunque S.user quedó null tras el signOut).
+t('GATE · render dispatch: S.reboteStaff → reboteStaffView() antes que login', /S\.reboteStaff\?reboteStaffView\(\):\(S\.user\?/.test(app));
+t('GATE · resetSession PRESERVA el rebote a través del signOut', /const reb=keepErr\?S\.reboteStaff:false;/.test(app) && /if\(reb\) S\.reboteStaff=reb;/.test(app));
+
+// El mensaje + link (doctrina de Lucas).
+t('GATE · reboteStaffView: "Este es el acceso del sistema" + "Los socios usan la app de MEDICAR"', /function reboteStaffView\(\)\{[\s\S]{0,900}Este es el acceso del sistema[\s\S]{0,200}Los socios usan la app de MEDICAR/.test(app));
+t('GATE · reboteStaffView: link/botón al PWA de socios (../socio/)', /function reboteStaffView[\s\S]{0,900}href="\.\.\/socio\/" class="btn-r"[\s\S]{0,120}Ir a la app de MEDICAR/.test(app));
+t('GATE · salirRebote limpia el flag y vuelve al login', /function salirRebote\(\)\{ S\.reboteStaff=false; render\(\); \}/.test(app));
+
+// Doble sombrero + regresión del no-rol/prospecto (SIN cambios).
+t('GATE · doble sombrero: filtra afiliado y conserva los roles staff → entra como staff', /const roles=rolesRaw\.filter\(r=>r!=='afiliado'\)/.test(app));
+t('REG · no-rol/prospecto: sigue con el mensaje genérico + signOut (sin cambios)', /if\(!rolesRaw\.length\)\{\s*S\.loginErr='Tu cuenta no tiene rol asignado\. Contactá al administrador\.';\s*await auth\.signOut\(\)/.test(app));
+
 // ── SW bump ──
 t('socio SW bumpeado (≥ v46) + qrcode.js en el shell', /medicar-socio-v(4[6-9]|[5-9]\d)/.test(sw) && /\.\/vendor\/qr\/qrcode\.js/.test(sw));
 
