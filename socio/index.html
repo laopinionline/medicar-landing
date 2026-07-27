@@ -1711,6 +1711,7 @@ function tabContent(t){
 // Cambio de tab: guarda scroll, pushState (back determinístico), re-pinta SOLO el contenedor (tab bar fija), dispara lazy.
 function irTab(t){
   if(!TABS.some(x=>x.id===t)) t='inicio';
+  if(S.tab==='ia' && t!=='ia'){ try{ iaResumirSesion(); }catch(_){} } // backstop tab: salir del chat-tab con hilo vivo resume (idempotente por 'resumido')
   const cs=el('cartel-slot'); if(cs) cs.innerHTML=''; // freemium: el cartel de asociate se cierra al cambiar de tab
   const cont=el('tab-content'); if(cont && S.tab) S.scroll[S.tab]=cont.scrollTop;
   if(S.tab!==t){ try{ history.pushState({tabnav:t},''); }catch(_){} }
@@ -2502,6 +2503,13 @@ function cerrarAsistente(){ iaResumirSesion(); if(S.ia) S.ia.escalando=false; S.
 // Cierre explícito (B1): al salir del chat resume la sesión en segundo plano (fire-and-forget). El resumidor (CF,
 // SIEMPRE claude) destila el transcript y escribe la memoria por socio. No bloquea la UI; UNA vez por sesión;
 // suprimido si el socio pidió "olvidate" (ya borró en server). El backstop de visibilitychange usa la misma función.
+// El chat está ACTIVO con hilo real (para el backstop de resumen): la vista dedicada 'asistente' O el tab IA del shell
+// (S.view 'home'|'prospecto' + S.tab 'ia'), con al menos un intercambio. Cubre el modo tab, donde S.view NUNCA es 'asistente'.
+function enChatVivo(){
+  const enChat = (S.view==='asistente') || (S.tab==='ia' && (S.view==='home'||S.view==='prospecto'));
+  const m=(S.ia&&S.ia.msgs)||[];
+  return enChat && m.some(x=>x.role==='user') && m.some(x=>x.role==='ia');
+}
 function iaResumirSesion(){
   const ia=S.ia; if(!ia||ia.resumido||ia.olvidado) return;
   const msgs=ia.msgs||[];
@@ -3603,7 +3611,7 @@ render();
 /* ---------- Backstop del resumen (B1): si el chat está abierto y la app pasa a segundo plano
    (cambio de app / bloqueo / cierre), resume antes de perder el transcript. iaResumirSesion es idempotente
    por sesión (flag resumido) y el server debouncea el doble disparo. ---------- */
-document.addEventListener('visibilitychange', ()=>{ if(document.hidden && S && S.view==='asistente') { try{ iaResumirSesion(); }catch(_){} } });
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden && S && enChatVivo()) { try{ iaResumirSesion(); }catch(_){} } }); // enChatVivo cubre el modo tab (S.view nunca es 'asistente' en el shell)
 
 /* ---------- Service worker ---------- */
 if('serviceWorker' in navigator){

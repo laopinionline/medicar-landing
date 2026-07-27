@@ -57,5 +57,35 @@ t('PROSPECTO: resto → claude (forzado)', ramas('resto', undefined, true)[0] ==
 t('PROSPECTO: salud → claude', ramas('salud', undefined, true)[0] === 'claude');
 t('SOCIO: resto → ollama (sin forzar)', ramas('resto', undefined, false)[0] === 'ollama');
 
+// ── tramo/chat-recall: RECUERDO de sesiones previas → claude (carve determinista) ──
+const catH = (txt, hay) => clasificar(txt, escanear(txt), { hayHistoria: hay }).categoria;
+const ramaH = (txt, hay) => ramas(catH(txt, hay))[0];
+const claudeH = (l, txt, hay) => { const r = ramaH(txt, hay); const p = r === 'claude'; console.log(`${p ? '✓' : '✗ FALLO'} claude  ${l} [${catH(txt, hay)}]${p ? '' : ' → dio ' + r}`); p ? ok++ : fail++; };
+const ollamaH = (l, txt, hay) => { const r = ramaH(txt, hay); const p = r === 'ollama'; console.log(`${p ? '✓' : '✗ FALLO'} ollama  ${l} [${catH(txt, hay)}]${p ? '' : ' → dio ' + r}`); p ? ok++ : fail++; };
+
+console.log('\n— RECUERDO FUERTE (marcador de otra sesión) → claude, haya o no hilo —');
+claudeH('de qué hablamos', '¿de qué hablamos la última vez?', false);
+claudeH('de qué hablamos (con hilo abierto igual)', '¿de qué hablamos la última vez?', true);
+claudeH('la otra vez', '¿te acordás de lo que te dije la otra vez?', false);
+claudeH('conversación anterior', '¿podés recordarme la conversación anterior?', false);
+claudeH('lo que veníamos hablando', 'seguimos con lo que veníamos hablando', false);
+claudeH('hablamos ayer', 'lo que hablamos ayer, ¿lo tenés?', false);
+
+console.log('\n— RECUERDO AMBIGUO ("te acordás" sin marcador): sesión fresca → claude · hilo vivo → ollama —');
+claudeH('te acordás X (sesión fresca)', '¿te acordás lo de la humedad?', false);
+ollamaH('te acordás X (hilo vivo → intra-hilo, ollama)', '¿te acordás lo de la humedad?', true);
+ollamaH('te acordás X (hilo vivo, otra)', '¿te acordás lo del tobillo?', true);
+
+console.log('\n— REGRESIÓN: casual sigue en ollama; salud/comercial intactos —');
+esOllama('casual sin recuerdo', 'contame un chiste');
+esOllama('turno (agenda)', '¿cómo pido un turno?');
+esClaude('salud intacta', 'me duele la cabeza hace dos días');
+esClaude('comercial intacto', '¿cuánto sale el Plan Joven?');
+t('MAPA: recuerdo → claude', ramas('recuerdo')[0] === 'claude');
+t('recuerdo → cascada [claude, ollama]', JSON.stringify(ramas('recuerdo')) === JSON.stringify(['claude', 'ollama']));
+t('rollback DATA: recuerdo→ollama por override', ramas('recuerdo', { mapa: { recuerdo: 'ollama' } })[0] === 'ollama');
+t('CF pasa hayHistoria a clasificar', /iaClasificar\(mensaje, scan, \{ hayHistoria: historia\.length > 0 \}\)/.test(require('fs').readFileSync(require('path').resolve(__dirname, '../functions/index.js'), 'utf8')));
+t('CF loguea inyección de memoria ([ia:memoria])', /\[ia:memoria\] bloque inyectado/.test(require('fs').readFileSync(require('path').resolve(__dirname, '../functions/index.js'), 'utf8')));
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-asistente-ruteo: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);

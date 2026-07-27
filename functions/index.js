@@ -1680,6 +1680,8 @@ exports.asistenteChat = onCall(async (request) => {
   let memoria = null;
   try { const mSnap = await db.collection('asistente_memoria').doc(memKey).get(); if (mSnap.exists) { const m = mSnap.data(); if (tieneContenido(m)) memoria = { temas: m.temas || [], seguimientos: m.seguimientos || [], pendientes: m.pendientes || [], preferencias: m.preferencias || [] }; } }
   catch (e) { logger.warn('[asistenteChat] no se pudo leer memoria', { err: e.message }); }
+  // Log determinista de inyección: cierra el edge de lectura del recall (¿el bloque "DE CHARLAS ANTERIORES" viajó?).
+  logger.info('[ia:memoria] bloque inyectado ' + (memoria ? 'si' : 'no') + (memoria ? ' · temas=' + (memoria.temas || []).length + ' seguimientos=' + (memoria.seguimientos || []).length + ' pendientes=' + (memoria.pendientes || []).length : ''));
   if (esProspecto) {
     let nombre = 'la persona';
     try { const pSnap = await db.collection('prospectos').doc(uid).get(); if (pSnap.exists && (pSnap.data() || {}).nombre) nombre = String(pSnap.data().nombre).trim().split(' ')[0]; } catch (_) {}
@@ -1764,7 +1766,7 @@ exports.asistenteChat = onCall(async (request) => {
   // 4) adaptador del modelo (DEGRADA LIMPIO si no responde: túnel caído / compu apagada / timeout).
   const cfgSnap = await db.collection('asistente_secreto').doc('config').get();
   const cfg = cfgSnap.exists ? cfgSnap.data() : { proveedor: 'ollama' };
-  const { categoria } = iaClasificar(mensaje, scan);            // semáforo determinista (rojo/urgencia/salud/comercial/resto)
+  const { categoria } = iaClasificar(mensaje, scan, { hayHistoria: historia.length > 0 }); // semáforo determinista (rojo/urgencia/salud/comercial/recuerdo/resto); hayHistoria desambigua recuerdo intra-hilo vs inter-sesión
   const orden = iaRamas(categoria, cfg.ruteo, esProspecto);     // orden de ramas; prospecto → claude forzado (funnel + sin cuenta)
   let raw;
   try {

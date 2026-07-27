@@ -224,5 +224,13 @@ t('C · CF (index.js): saneo a los últimos 12, mismo límite 1000 chars/turno',
 t('C · cliente ya NO usa slice(-6) para la historia del payload', !/map\(m=>\(\{ role:\(m\.role==='user'\?'user':'assistant'\), content:m\.texto \}\)\)\.slice\(-6\)/.test(socio));
 t('C · SW socio bumpeado (≥ v60)', /medicar-socio-v(6[0-9]|[7-9]\d)/.test(sw));
 
+// ── tramo/chat-recall · pieza 3: backstop de resumen en modo tab ──
+t('BACKSTOP · enChatVivo cubre la vista dedicada Y el tab IA del shell (S.view home|prospecto)', /function enChatVivo\(\)\{[\s\S]{0,220}S\.view==='asistente'[\s\S]{0,140}S\.tab==='ia' && \(S\.view==='home'\|\|S\.view==='prospecto'\)/.test(socio));
+t('BACKSTOP · enChatVivo exige intercambio real (user + ia)', /function enChatVivo\(\)[\s\S]{0,320}some\(x=>x\.role==='user'\) && m\.some\(x=>x\.role==='ia'\)/.test(socio));
+t('BACKSTOP · visibilitychange usa enChatVivo (no S.view===asistente)', /visibilitychange'[\s\S]{0,120}document\.hidden && S && enChatVivo\(\)[\s\S]{0,60}iaResumirSesion/.test(socio));
+t('BACKSTOP · irTab resume al salir del tab IA con hilo vivo', /function irTab\(t\)\{[\s\S]{0,160}S\.tab==='ia' && t!=='ia'\)\{ try\{ iaResumirSesion\(\); \}catch/.test(socio));
+t('BACKSTOP · anti-doble: iaResumirSesion idempotente por sesión (guard resumido)', /function iaResumirSesion\(\)\{\s*const ia=S\.ia; if\(!ia\|\|ia\.resumido\|\|ia\.olvidado\) return;/.test(socio));
+t('BACKSTOP · SW v61', /medicar-socio-v(6[1-9]|[7-9]\d)/.test(sw));
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-asistente-contexto: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);
