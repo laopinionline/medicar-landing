@@ -1641,7 +1641,7 @@ exports.asistenteChat = onCall(async (request) => {
   const mensaje = String((request.data || {}).mensaje || '').slice(0, 1000).trim();
   if (!mensaje) throw new HttpsError('invalid-argument', 'Mensaje vacío.');
   const historia = Array.isArray((request.data || {}).historia)
-    ? (request.data.historia).slice(-6).filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    ? (request.data.historia).slice(-12).filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
         .map((m) => ({ role: m.role, content: String(m.content).slice(0, 1000) }))
     : [];
 

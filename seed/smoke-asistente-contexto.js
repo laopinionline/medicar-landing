@@ -1,6 +1,9 @@
 'use strict';
 // Smoke — asistente-prompt.js: buildContexto (MÍNIMO, nunca PII/clínico), stripEscalar, parseBotones.
 const { SYSTEM, buildContexto, stripEscalar, parseBotones, limpiarBotonesDelTexto, voseoAr, gateProspectoEmergencia, quitarOfertaAfiliacionSocio, BOTONES } = require('../functions/asistente-prompt');
+const fs = require('fs'), path = require('path');
+const R = (p) => fs.readFileSync(path.resolve(__dirname, '..', p), 'utf8');
+const adapter = R('functions/asistente-adapter.js'), socio = R('socio/index.html'), fnsIdx = R('functions/index.js'), sw = R('socio/sw.js');
 let ok = 0, fail = 0;
 const t = (l, c) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}`); c ? ok++ : fail++; };
 
@@ -66,7 +69,13 @@ t('chequeo sin día: no inventa recordatorio', !/recordatorio está configurado/
 t('sin signos: no aparece la línea de signos', !/Últimos signos/.test(ctxSinTurno));
 // SYSTEM: registro profesional (B2) + caso sin-memoria (B3).
 t('SYSTEM (B2): registro profesional, sin muletillas playeras ("qué onda")', /REGISTRO PROFESIONAL/.test(SYSTEM) && /qué onda/.test(SYSTEM));
-t('SYSTEM (B3): sin memoria → "no tengo registro de charlas anteriores"', /no tengo registro de charlas anteriores, contame de nuevo/.test(SYSTEM) && /NUNCA digas que sos "un asistente nuevo"/.test(SYSTEM));
+t('SYSTEM (B3): "no tengo registro de charlas anteriores" (frase conservada)', /no tengo registro de charlas anteriores, contame de nuevo/.test(SYSTEM) && /NUNCA digas que sos "un asistente nuevo"/.test(SYSTEM));
+
+// ── tramo/chat-memoria · A: distinguir el HILO ACTUAL del largo plazo ──
+t('A · SYSTEM: el HILO ACTUAL siempre disponible (referencias/repreguntas/seguimiento)', /MEMORIA DEL HILO ACTUAL[\s\S]{0,320}SIEMPRE está disponible/.test(SYSTEM));
+t('A · SYSTEM: PROHIBIDO desmentir lo que ya está en el hilo actual', /PROHIBIDO decir "no tengo registro"[\s\S]{0,160}este hilo/.test(SYSTEM) && /empezando a conversar/i.test(SYSTEM));
+t('A · SYSTEM: el desmentido acota a SESIONES PREVIAS sin bloque "DE CHARLAS ANTERIORES"', /SIN MEMORIA DE SESIONES PREVIAS[\s\S]{0,220}OTRAS sesiones[\s\S]{0,160}DE CHARLAS ANTERIORES/.test(SYSTEM));
+t('A · SYSTEM: conserva la subordinación (largo plazo SECUNDARIO a TU CUENTA)', /SECUNDARIO a TU CUENTA/.test(SYSTEM));
 
 // --- AUSENCIA de signos afirmada + hueco de recordatorio + 443044 SOLO urgencias + dato-primero ---
 const ctxSinSignos = buildContexto({ nombre: 'Juan', plan: { nombre: 'Plan 01', precio: 18000 }, factura: null, ultimaFactura: null, turnos: [], chequeo: { respondioSemana: false, diaRecordatorio: null }, signos: { vacio: true }, tel: '443044' });
@@ -203,6 +212,17 @@ t('parseBotones (A): [Pedir turno] (inercia) → botón con accion turno + label
 t('parseBotones (A): token nuevo + alias juntos → UN solo botón (dedup por acción)', parseBotones('Podés [Reservar una consulta] o [Pedir turno].').filter((x) => x.accion === 'turno').length === 1);
 t('parseBotones (A): el botón NUNCA muestra la etiqueta vieja "Pedir turno"', !parseBotones('Para eso [Pedir turno].').some((x) => x.label === 'Pedir turno'));
 t('limpia el token [Hablar con un médico]: no sobrevive corchete en la prosa', !/\[/.test(limpiarBotonesDelTexto('Podés hablar con [Hablar con un médico].')) && limpiarBotonesDelTexto('Podés hablar con [Hablar con un médico].') === 'Podés hablar.');
+
+// ── tramo/chat-memoria · B: ventana ollama (num_ctx) + medición ──
+t('B · adapter ollama: num_ctx en el body (default 12288, override por cfg.numCtx)', /const NUM_CTX = Number\(cfg\.numCtx\) \|\| 12288/.test(adapter) && /options: \{ temperature: 0\.1, num_ctx: NUM_CTX \}/.test(adapter));
+t('B · adapter: solo la rama OLLAMA fija num_ctx (claude usa 200k, no lo necesita)', (adapter.match(/num_ctx/g) || []).length >= 1 && !/viaClaude[\s\S]{0,600}num_ctx/.test(adapter));
+t('B · adapter: log de tokens estimados del prompt armado (vigilar truncado)', /\[ia:ollama\] prompt ~' \+ estTokens \+ ' tokens/.test(adapter) && /promptChars \/ 4/.test(adapter));
+
+// ── tramo/chat-memoria · C: tope de historia 6→12 coherente en cliente y CF ──
+t('C · cliente (socio): historia slice(-12) en el payload', /const historia = S\.ia\.msgs\.slice\(0,-1\)[\s\S]{0,140}\.slice\(-12\);/.test(socio));
+t('C · CF (index.js): saneo a los últimos 12, mismo límite 1000 chars/turno', /\(request\.data\.historia\)\.slice\(-12\)\.filter\([\s\S]{0,200}String\(m\.content\)\.slice\(0, 1000\)/.test(fnsIdx));
+t('C · cliente ya NO usa slice(-6) para la historia del payload', !/map\(m=>\(\{ role:\(m\.role==='user'\?'user':'assistant'\), content:m\.texto \}\)\)\.slice\(-6\)/.test(socio));
+t('C · SW socio bumpeado (≥ v60)', /medicar-socio-v(6[0-9]|[7-9]\d)/.test(sw));
 
 console.log(`\n${fail ? '✗' : '✓'} smoke-asistente-contexto: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);

@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v59'; // Tramo 4 FREEMIUM: gratuito al shell degradado (credencial gris, banda sin tel:+cartel, salud/consultas bloqueados, Más mixto) + punto 6 "Ya soy afiliado" (autodeclaración cero-oráculo)
+const CACHE = 'medicar-socio-v60'; // Chat memoria: fix del olvido conversacional — tope de historia 6→12 en el payload (num_ctx ollama + prompt del hilo son server-side)
 const SHELL = [
   './',
   './index.html',
