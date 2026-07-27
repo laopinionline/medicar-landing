@@ -48,5 +48,43 @@ t('CF valida que el prospecto exista', /Prospecto inexistente/.test(fn));
 t('regresión: Leads/Campañas/Métricas siguen en el head', /tab\('leads','Leads'\)/.test(app) && /tab\('campanas','Campañas'\)/.test(app) && /tab\('metricas','Métricas'\)/.test(app));
 t('regresión: mktDetach limpia el listener (incluye prospectos)', /function mktDetach\(\)\{ if\(S\.mktUnsub\)/.test(app));
 
+// ════════════════════ tramo/vinculacion-autodeclarados ════════════════════
+const socio = fs.readFileSync(path.resolve(__dirname, '../socio/index.html'), 'utf8');
+const sw = fs.readFileSync(path.resolve(__dirname, '../socio/sw.js'), 'utf8');
+
+// 1 · CF vincularProspectoASocio — reusa el CORE de canjearInvitacion (mismos guards) con cap gestionar_afiliados.
+t('VINC · CF vincularProspectoASocio existe', /exports\.vincularProspectoASocio = onCall/.test(fn));
+t('VINC · cap gestionar_afiliados || superadmin', /exports\.vincularProspectoASocio[\s\S]{0,500}roles\.includes\('superadmin'\)[\s\S]{0,80}gestionar_afiliados === true[\s\S]{0,8}throw new HttpsError\('permission-denied'/.test(fn));
+t('VINC · guard: uid ya vinculado a otro socio → rechaza', /exports\.vincularProspectoASocio[\s\S]{0,1400}uData\.personaId !== personaId\) throw new HttpsError\('failed-precondition', 'Esa cuenta ya está vinculada a otro socio\.'\)/.test(fn));
+t('VINC · guard: persona ya tiene login (personaTieneLogin) → rechaza', /exports\.vincularProspectoASocio[\s\S]{0,1500}personaTieneLogin\(personaId\) &&[\s\S]{0,80}throw new HttpsError\('failed-precondition', 'Esa persona ya tiene su cuenta\.'\)/.test(fn));
+t('VINC · exige que el uid sea un PROSPECTO (no pisa socio/staff)', /exports\.vincularProspectoASocio[\s\S]{0,1000}prospectos'\)\.doc\(prospectoUid\)\.get\(\);[\s\S]{0,80}Ese prospecto no existe/.test(fn));
+t('VINC · liga usuarios/{uid}.personaId + rol afiliado (idéntico a canje)', /usuarios'\)\.doc\(prospectoUid\)\.set\(\{ personaId, roles: rolesU, bienvenidaVinculacion: true \}/.test(fn) && /rol: 'afiliado', roles: \['afiliado'\], email, nombre, activo: true, bienvenidaVinculacion: true/.test(fn));
+t('VINC · denorm cuentaPropia/cuentaUid en el socio (calco de canje 748)', /exports\.vincularProspectoASocio[\s\S]{0,3000}cuentaPropia: true, cuentaUid: prospectoUid/.test(fn));
+t('VINC · higiene: marca prospectos/{uid} vinculado + vinculadoPersonaId', /vinculado: true, vinculadoEn: FV\(\), vinculadoPersonaId: personaId, docPedida: false/.test(fn));
+t('VINC · cero-oráculo: la CF NO devuelve datos del padrón (solo {ok:true})', /\[vincularProspectoASocio\][\s\S]{0,80}return \{ ok: true \}/.test(fn));
+
+// gestionarProspecto extendido: pedir_doc / quitar_doc (cap marketing intacta).
+t('DOC · gestionarProspecto acción pedir_doc (docPedida + docNota)', /accion === 'pedir_doc'[\s\S]{0,220}docPedida: true, docPedidaEn: FV\(\), docPedidaPor: quien, docNota: nota \|\| null/.test(fn));
+t('DOC · gestionarProspecto acción quitar_doc (reversible)', /accion === 'quitar_doc'[\s\S]{0,120}docPedida: false, docPedidaEn: null, docNota: null/.test(fn));
+
+// 2 · Ficha: acciones solo con badge yaAfiliado + gateo por cap; confirmación fuerte; alta desplazada.
+t('FICHA · vincBloque/docBloque solo en fichas yaAfiliado', /function vincBloque\(p\)\{\s*if\(p\.yaAfiliado!==true\) return '';/.test(app) && /function docBloque\(p\)\{\s*if\(p\.yaAfiliado!==true \|\| p\.vinculado===true \|\| !puede\('marketing'\)\) return '';/.test(app));
+t('FICHA · "Vincular a su socio" gateado por gestionar_afiliados', /function vincBloque[\s\S]{0,400}!puede\('gestionar_afiliados'\)\) return `<div[\s\S]{0,140}habilidad <b>Afiliados<\/b>/.test(app));
+t('FICHA · buscador por DNI (personas where dni) + socio por personaId', /function mktVincBuscar[\s\S]{0,400}collection\('personas'\)\.where\('dni','==',dni\)[\s\S]{0,260}collection\('socios'\)\.where\('personaId','==',personaId\)/.test(app));
+t('FICHA · CONFIRMACIÓN FUERTE: nombre + DNI + N° socio + titular/dependiente', /Confirmá la vinculación[\s\S]{0,400}DNI <b>\$\{esc\(r\.dni\)\}<\/b> · N° socio <b>\$\{esc\(r\.numero\)\}<\/b> · \$\{r\.esTitular\?'Titular del grupo':'Dependiente'\}/.test(app));
+t('FICHA · confirmación muestra los integrantes que porta si es titular', /Portará su grupo \(\$\{r\.integrantes\.length\}\)/.test(app) && /r\.integrantes\.map\(esc\)\.join/.test(app));
+t('FICHA · confirmación deshabilita el botón si el socio YA tiene login', /Ese socio YA tiene una cuenta/.test(app) && /onclick="mktVincConfirmar\(\)" \$\{\(V\.busy\|\|r\.tieneLogin\)\?'disabled':''\}/.test(app));
+t('FICHA · Confirmar → CF vincularProspectoASocio {prospectoUid, personaId}', /function mktVincConfirmar[\s\S]{0,220}fnsCall\('vincularProspectoASocio',\{ prospectoUid:V\.pid, personaId:V\.r\.personaId \}\)/.test(app));
+t('FICHA · "Pedir documentación" → gestionarProspecto pedir_doc con nota', /function mktPedirDoc[\s\S]{0,220}fnsCall\('gestionarProspecto',\{prospectoId:id,accion:'pedir_doc',nota\}\)/.test(app));
+t('FICHA · alta precargada DESPLAZADA en yaAfiliado (btn-o + advertencia, no eliminada)', /altaEsSecundaria=p\.yaAfiliado===true/.test(app) && /altaEsSecundaria\?'btn-o':'btn-r'/.test(app) && /usá <b>Vincular a su socio<\/b>/.test(app));
+
+// 3 · Mensaje in-app (socio freemium) + bienvenida única.
+t('MSG · docPedida en yaAfiliadoLink — mensaje sin datos del padrón', /function yaAfiliadoLink[\s\S]{0,220}S\.prospecto\.docPedida===true\) return[\s\S]{0,220}necesitamos documentación\. Comunicate con MEDICAR/.test(socio));
+t('MSG · yaAfiliadoLink en las 2 puntas (cartel + credencial gris)', (socio.match(/\$\{yaAfiliadoLink\(\)\}/g) || []).length === 2);
+t('MSG · bienvenida única: gate usuarios.bienvenidaVinculacion + flag local por uid', /function bienvenidaVincHTML\(c\)\{[\s\S]{0,180}u\.bienvenidaVinculacion!==true\) return ''[\s\S]{0,220}localStorage\.getItem\('medicar_bienv_'\+uid\)==='1'/.test(socio));
+t('MSG · bienvenida se descarta con flag local (cerrarBienvenidaVinc)', /function cerrarBienvenidaVinc\(\)\{[\s\S]{0,140}localStorage\.setItem\('medicar_bienv_'\+uid,'1'\)/.test(socio));
+t('MSG · bienvenida montada en el Inicio del socio (tabInicio)', /return `<div style="padding:1rem 1rem 0">\s*\$\{bienvenidaVincHTML\(c\)\}/.test(socio));
+t('MSG · SW socio v62', /medicar-socio-v(6[2-9]|[7-9]\d)/.test(sw));
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-panel-prospectos: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);
