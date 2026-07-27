@@ -1811,7 +1811,7 @@ function turnosBlock(c){
         : `<button onclick="reservarSlot('${esc(f.id)}','${h}')" ${S.turnoBusy?'disabled':''} style="padding:.4rem .55rem;border-radius:8px;border:1.5px solid var(--rojo);background:#fff;color:var(--rojo);font-size:.78rem;font-weight:700;cursor:pointer">${h}</button>`;
     }
     return `<div style="padding:.7rem 1rem;border-bottom:1px solid var(--linea)"><div style="font-weight:700;font-size:.85rem;color:var(--tinta)">${esc(fechaTurno(f.fecha))} · ${esc(f.horaInicio)}–${esc(f.horaFin)}</div><div style="font-size:.72rem;color:var(--gris);margin-bottom:.45rem">${esc(f.medicoNombre||'Médico de guardia')}</div><div style="display:flex;flex-wrap:wrap;gap:.35rem">${slots}</div></div>`;
-  }).join('') : `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">No hay turnos disponibles en los próximos 7 días.</div>`;
+  }).join('') : `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">No hay consultas disponibles en los próximos 7 días.</div>`;
   const mis = (c.misTurnos||[]).filter(t=>!['ausente','sin_registrar'].includes(t.estado)).slice().sort((a,b)=> (b.fecha+b.hora).localeCompare(a.fecha+a.hora));
   const wa = waLink(c.waAtencion||'');
   const misHTML = mis.length ? mis.map(t=>{
@@ -1821,14 +1821,14 @@ function turnosBlock(c){
     const estadoLbl = activo ? 'Reservado' : (t.estado==='atendido' ? '<span style="color:var(--verde)">Atendida ✓</span>' : 'Cancelada');
     const acciones = activo ? `<div style="display:flex;flex-direction:column;gap:.35rem;align-items:flex-end">${wa?`<a href="${wa}" target="_blank" rel="noopener" style="font-size:.75rem;color:#fff;background:#25D366;padding:.3rem .6rem;border-radius:8px;text-decoration:none;font-weight:700">Iniciar videollamada</a>`:''}<button onclick="cancelarTurnoUI('${esc(t.id)}')" ${S.turnoBusy?'disabled':''} style="font-size:.75rem;color:var(--rojo);background:none;border:none;font-weight:700;cursor:pointer">Cancelar</button></div>` : '';
     return `<div class="row"><div><div style="font-weight:700;font-size:.85rem;color:var(--tinta)">${esc(fechaTurno(t.fecha))} · ${esc(t.hora)}${deQuien}</div><div style="font-size:.72rem;color:var(--gris)">${esc(t.medicoNombre||'Médico de guardia')} · ${estadoLbl}</div></div>${acciones}</div>`;
-  }).join('') : `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">No tenés turnos reservados.</div>`;
+  }).join('') : `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">No tenés consultas reservadas.</div>`;
   const msgHTML = S.turnoErr
     ? `<div style="padding:.55rem 1rem;font-size:.8rem;color:var(--rojo);font-weight:600">${esc(S.turnoErr)}</div>`
     : (S.turnoMsg ? `<div style="padding:.55rem 1rem;font-size:.8rem;color:var(--verde);font-weight:600">${esc(S.turnoMsg)}</div>` : '');
-  return `<div class="sec"><div class="sec-h">Turnos por videollamada</div>
+  return `<div class="sec"><div class="sec-h">Consultas por videollamada</div>
     <div class="card">${msgHTML}${paraSel}${franjasHTML}</div>
-    <div class="sec-h" style="margin-top:1rem">Mis turnos</div>
-    ${wa?`<div style="font-size:.72rem;color:var(--gris);margin:0 0 .5rem;padding:0 .2rem">La videollamada se realiza por WhatsApp con la línea de atención de MEDICAR, a la hora del turno.</div>`:''}
+    <div class="sec-h" style="margin-top:1rem">Mis consultas</div>
+    ${wa?`<div style="font-size:.72rem;color:var(--gris);margin:0 0 .5rem;padding:0 .2rem">La videollamada se realiza por WhatsApp con la línea de atención de MEDICAR, a la hora de la consulta.</div>`:''}
     <div class="card">${misHTML}</div>
   </div>`;
 }
@@ -2411,7 +2411,7 @@ function asistenteView(){
   const anim = iaWmAnim ? ' anim' : ''; iaWmAnim=false;
   const msgs = ia.msgs.map(iaBurbuja).join('');
   const prosp = esProspectoUI();
-  const chips = prosp ? ['Qué planes tienen','Qué cubre MEDICAR','No me siento bien','Cómo es la guardia 24hs'] : ['Sobre mi plan','Mis facturas','No me siento bien','Cómo pedir un turno'];
+  const chips = prosp ? ['Qué planes tienen','Qué cubre MEDICAR','No me siento bien','Cómo es la guardia 24hs'] : ['Sobre mi plan','Mis facturas','No me siento bien','Cómo hacer una consulta'];
   const empty = ia.msgs.length ? '' : `<div style="color:var(--gris);font-size:.85rem;text-align:center;margin:.6rem 0">Preguntame lo que quieras. Elegí un tema o escribí:</div>
     <div style="display:flex;flex-wrap:wrap;gap:.4rem;justify-content:center">
       ${chips.map(x=>`<button onclick="iaChip('${x}')" style="background:var(--nieve);border:1px solid var(--linea);border-radius:16px;padding:.45rem .8rem;font-size:.82rem;cursor:pointer">${x}</button>`).join('')}
@@ -2480,7 +2480,7 @@ function iaAccion(accion){
   }
   if(accion==='plan'){ abrirCambiarPlan(); return; }
   if(accion==='comprobantes'||accion==='pagar'){ abrirComprobantes(); return; }
-  if(accion==='turno'){ cerrarAsistente(); return; } // los turnos viven en el home
+  if(accion==='turno'){ S.tab='turnos'; cerrarAsistente(); return; } // el botón [Reservar una consulta] lleva al tab CONSULTAS (donde se reservan las franjas)
 }
 // Conversión del prospecto: marca el lead (CF, fire-and-forget) + abre el form AFILIARME de la landing.
 /* ===================== PUENTE DE COMPRA (checkout de afiliación del prospecto) =====================

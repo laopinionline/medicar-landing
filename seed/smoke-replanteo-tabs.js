@@ -162,6 +162,14 @@ t('chat: burbuja del USUARIO con overflow-wrap:anywhere + word-break', /m\.role=
 t('chat: burbuja de la IA con overflow-wrap:anywhere + word-break', /align-self:flex-start;max-width:90%;overflow-wrap:anywhere;word-break:break-word/.test(socio));
 t('chat: contenedor #ia-msgs con overflow-x:hidden + min-width:0 (nada empuja horizontal)', /id="ia-msgs"[\s\S]{0,120}overflow-x:hidden;min-width:0/.test(socio));
 
+// ── Chat: lenguaje de CONSULTA (turnos retirado) + botón hacia el tab Consultas ──
+t('chip de bienvenida renombrado "Cómo hacer una consulta" (no "pedir un turno")', /'Cómo hacer una consulta'/.test(socio) && !/'Cómo pedir un turno'/.test(socio));
+t('iaAccion(turno) lleva al tab Consultas (S.tab=turnos)', /if\(accion==='turno'\)\{ S\.tab='turnos'; cerrarAsistente\(\)/.test(socio));
+// C — copy de turnosBlock alineado a "consultas" (sec-h + empty states); no toca variables/claves/colección.
+t('C · turnosBlock: "Consultas por videollamada" + "Mis consultas"', /return `<div class="sec"><div class="sec-h">Consultas por videollamada<\/div>[\s\S]{0,180}sec-h" style="margin-top:1rem">Mis consultas</.test(socio));
+t('C · empty states en consultas: "No hay consultas disponibles" + "No tenés consultas reservadas"', /No hay consultas disponibles en los próximos 7 días/.test(socio) && /No tenés consultas reservadas/.test(socio));
+t('C · no se renombró el estado (S.tab=turnos) ni la colección (agenda_turnos intactos)', /S\.tab='turnos'/.test(socio) && /collection\('agenda_turnos'\)/.test(socio));
+
 // ── SW bump ──
 t('socio SW bumpeado (≥ v49)', /medicar-socio-v(49|[5-9]\d)/.test(sw));
 
