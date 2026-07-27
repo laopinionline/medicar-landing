@@ -1597,10 +1597,9 @@ function errorCargaView(){
   </div>`;
 }
 
-// Una tarjeta de credencial. d = {personaId, nombre, numero, dni?, plan?, tipo, activo, esVit, propia?}.
-// El CARNET (nombre/N°/tipo/estado) NO es dato de salud → el titular porta las tarjetas de TODO su grupo (menores,
-// sin cuenta e independientes por igual). El FLIP con QR queda SOLO en la tarjeta del PROPIO usuario logueado (d.propia):
-// el QR es identidad ACTIVA del portador; cada uno genera el suyo desde su app. Las demás tarjetas son estáticas.
+// Una tarjeta de credencial. d = {personaId, nombre, numero, dni?, plan?, tipo, activo, esVit}.
+// El CARNET (nombre/N°/DNI/tipo/estado + QR) NO es dato de salud → el titular porta las tarjetas de TODO su grupo, y
+// TODAS giran y muestran su QR (identidad, gateada a staff en resolverQR). La privacidad médica (turnos/salud/IA) es aparte.
 function credCardHTML(d, enCarrusel){
   const estadoLinea = d.activo ? `<div class="est">● Afiliado activo</div>` : `<div class="est off">● Inactivo</div>`;
   const front = `<div class="cred">
@@ -1613,16 +1612,14 @@ function credCardHTML(d, enCarrusel){
       ${d.esVit?'':`<div class="cell"><span>Plan</span><b>${esc(d.plan||'—')}</b></div>`}
       <div class="cell"><span>Tipo</span><b>${esc(d.tipo)}</b></div>
     </div>
-    ${d.propia?`<div class="cred-flip-hint">tocá para el QR ⟳</div>`:''}
+    <div class="cred-flip-hint">tocá para el QR ⟳</div>
   </div>`;
-  const slide = enCarrusel ? 'flex:0 0 100%;scroll-snap-align:start;' : '';
-  // Tarjeta de OTRO integrante (no propia): estática, sin flip ni QR (el QR lo genera cada uno desde su app).
-  if(!d.propia){ return `<div class="cred-flip" style="${slide}"><div class="cred-flip-inner"><div class="cred-face">${front}</div></div></div>`; }
   const back = `<div class="cred" style="display:flex;flex-direction:column;align-items:center;justify-content:center">
     <div style="font-size:.66rem;color:#fff;opacity:.85;font-weight:700;letter-spacing:.04em">${esc(d.nombre)}</div>
     <div class="cred-qr-slot" style="background:#fff;border-radius:12px;padding:.4rem;margin:.6rem 0;min-height:130px;min-width:130px;display:flex;align-items:center;justify-content:center"></div>
     <div style="font-size:.6rem;color:#fff;opacity:.7;text-align:center">Mostrá este QR en la atención · tocá para volver ⟳</div>
   </div>`;
+  const slide = enCarrusel ? 'flex:0 0 100%;scroll-snap-align:start;' : '';
   return `<div class="cred-flip" id="flip-${esc(d.personaId)}" style="${slide}" onclick="credFlip('${esc(d.personaId)}',this)"><div class="cred-flip-inner"><div class="cred-face">${front}</div><div class="cred-face cred-back">${back}</div></div></div>`;
 }
 // FLIP: togglea la clase en el DOM (sin re-render → no pierde el scroll) + renderiza el QR la 1ª vez.
@@ -1740,8 +1737,8 @@ function tabInicio(c){
   const depsDeMiSocio = (socio && !socio.titularSocioId ? (c.dependientes||[]) : []);
   // DOCTRINA (corrección Lucas): el CARNET no es dato de salud → el titular porta TODO su grupo (menores, sin cuenta E
   // independientes por igual). Se eliminó la exclusión del independiente SOLO acá; la privacidad de turnos/salud/IA (resolverDestino/selectores) NO se toca.
-  const credManaged = depsDeMiSocio.filter(d=> d.activo!==false).map(d=>({ personaId:d.personaId, nombre:d.nombreVista||'—', numero:d.numeroAfiliado||'—', dni:null, plan:'Cobertura familiar', tipo:tipoLbl(d.tipoAfiliado), activo:d.activo!==false, esVit:(d.vitalicio===true)||esVit, propia:false }));
-  const credTitular = { personaId:c.personaId, nombre, numero:(socio&&socio.numeroAfiliado)||'—', dni:per.dni, plan, tipo, activo, esVit, propia:true }; // la tarjeta del usuario logueado = ÚNICA con flip+QR
+  const credManaged = depsDeMiSocio.filter(d=> d.activo!==false).map(d=>({ personaId:d.personaId, nombre:d.nombreVista||'—', numero:d.numeroAfiliado||'—', dni:d.dni||null, plan:'Cobertura familiar', tipo:tipoLbl(d.tipoAfiliado), activo:d.activo!==false, esVit:(d.vitalicio===true)||esVit }));
+  const credTitular = { personaId:c.personaId, nombre, numero:(socio&&socio.numeroAfiliado)||'—', dni:per.dni, plan, tipo, activo, esVit };
   const credCards = [credTitular, ...credManaged];
   const credHTML = credCards.length<=1
     ? credCardHTML(credTitular, false)
@@ -1894,8 +1891,8 @@ function homeView(){
   // adultos SIN cuenta propia). Los adultos independientes (cuentaPropia) quedan AFUERA (su credencial vive en su app).
   // DOCTRINA (corrección Lucas): el CARNET no es dato de salud → el titular porta TODO su grupo (menores, sin cuenta E
   // independientes por igual). Se eliminó la exclusión del independiente SOLO acá; la privacidad de turnos/salud/IA (resolverDestino/selectores) NO se toca.
-  const credManaged = depsDeMiSocio.filter(d=> d.activo!==false).map(d=>({ personaId:d.personaId, nombre:d.nombreVista||'—', numero:d.numeroAfiliado||'—', dni:null, plan:'Cobertura familiar', tipo:tipoLbl(d.tipoAfiliado), activo:d.activo!==false, esVit:(d.vitalicio===true)||esVit, propia:false }));
-  const credTitular = { personaId:c.personaId, nombre, numero, dni:per.dni, plan, tipo, activo, esVit, propia:true }; // la tarjeta del usuario logueado = ÚNICA con flip+QR
+  const credManaged = depsDeMiSocio.filter(d=> d.activo!==false).map(d=>({ personaId:d.personaId, nombre:d.nombreVista||'—', numero:d.numeroAfiliado||'—', dni:d.dni||null, plan:'Cobertura familiar', tipo:tipoLbl(d.tipoAfiliado), activo:d.activo!==false, esVit:(d.vitalicio===true)||esVit }));
+  const credTitular = { personaId:c.personaId, nombre, numero, dni:per.dni, plan, tipo, activo, esVit };
   const credCards = [credTitular, ...credManaged];
   const credencialHTML = credCards.length<=1
     ? credCardHTML(credTitular, false) // socio sin grupo → una tarjeta idéntica a hoy (cero cambio visual)

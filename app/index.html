@@ -6028,8 +6028,9 @@ async function afGuardarNuevo(){
     // E-2: facturarA (destinatario de facturación) — SOLO titular (el dependiente factura por su titular). Ortogonal
     // a la membresía corporativa (empresaId): NO se sincronizan. Solo escribe si se eligió una empresa válida.
     if(modo!=='dependiente' && socioId){ const fa=leerFacturarA('af-facturara'); if(fa && !fa.__err){ try{ await db.collection('socios').doc(socioId).set({ facturarA:fa },{merge:true}); }catch(_){} } }
-    // Denorm del nombre para TODOS los socios (titular/dependiente/corporativo): generarAbonos lo lee de socios.nombreVista, NO de personas (clínico). El dependiente ya lo trae de la tx; el merge es idempotente.
-    if(socioId){ try{ await db.collection('socios').doc(socioId).set({ nombreVista: socioNombreDe(perData) },{merge:true}); }catch(_){} }
+    // Denorm del nombre + DNI para TODOS los socios (titular/dependiente/corporativo): nombreVista lo lee generarAbonos;
+    // DNI = dato de CARNET (no salud) para que la tarjeta del grupo lo muestre sin que el titular lea la persona ajena. Idempotente.
+    if(socioId){ try{ await db.collection('socios').doc(socioId).set({ nombreVista: socioNombreDe(perData), dni: (perData&&perData.dni)||null },{merge:true}); }catch(_){} }
     // Geocode-on-save: FUERA de la transacción de numeración (la tx no espera red). No bloquea el alta.
     if(geoParams){ try{ await afGeocodePersona(geoParams.personaId, geoParams.direccion, geoParams.sindir); }catch(_){} }
     // Espejo eager pacientes/{personaId} (Tramo 4): hace al socio BUSCABLE en el despacho. FUERA de la tx.

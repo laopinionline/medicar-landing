@@ -2,6 +2,8 @@
 /* Smoke — carrusel de credenciales (titular + integrantes gestionados) + gestión de invitaciones. node seed/smoke-credencial-carrusel.js */
 const fs = require('fs'), vm = require('vm'), path = require('path');
 const socio = fs.readFileSync(path.resolve(__dirname, '../socio/index.html'), 'utf8');
+const app = fs.readFileSync(path.resolve(__dirname, '../app/index.html'), 'utf8');
+const fn = fs.readFileSync(path.resolve(__dirname, '../functions/index.js'), 'utf8');
 let ok = 0, fail = 0;
 const t = (l, c) => { console.log(`${c ? '✓' : '✗ FALLO'} ${l}`); c ? ok++ : fail++; };
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -14,11 +16,11 @@ vm.runInNewContext(m[0] + '\nthis.card = credCardHTML;', sb, { timeout: 2000 });
 const card = sb.card;
 
 const titular = { nombre: 'Marino, Lucas', numero: '7982', dni: '23961956', plan: 'Plan 01', tipo: 'Directo', activo: true, esVit: true };
-const dep = { nombre: 'Bustos, María', numero: '7982-01', dni: null, plan: 'Cobertura familiar', tipo: 'Directo', activo: true, esVit: true };
+const dep = { personaId: 'pDep', nombre: 'Bustos, María', numero: '7982-01', dni: '40222333', plan: 'Cobertura familiar', tipo: 'Directo', activo: true, esVit: true };
 const hT = card(titular, false), hD = card(dep, true);
 t('tarjeta titular: nombre + N° + estado activo', /Marino, Lucas/.test(hT) && /7982/.test(hT) && /● Afiliado activo/.test(hT));
 t('titular con DNI (lo tiene) + vitalicio SIN celda Plan', /DNI:23961956/.test(hT) && !/>Plan</.test(hT));
-t('tarjeta dependiente: SIN DNI (privacidad) + slide en carrusel', !/DNI:/.test(hD) && /scroll-snap-align:start/.test(hD));
+t('tarjeta dependiente: CON DNI (carnet no es salud) + gira (flip) + slide', /DNI:40222333/.test(hD) && /onclick="credFlip\('pDep'/.test(hD) && /scroll-snap-align:start/.test(hD));
 t('tarjeta dependiente vitalicio (heredado) SIN celda Plan', !/>Plan</.test(hD));
 // tarjeta NO vitalicio muestra Plan
 t('tarjeta no-vitalicio muestra celda Plan', /Plan 01/.test(card(Object.assign({}, titular, { esVit: false }), false)));
@@ -40,9 +42,17 @@ t('sin grupo (0 gestionados) → 1 tarjeta (credCards.length<=1 → sin carrusel
 t('homeView: credencialHTML = 1 tarjeta si <=1, carrusel+dots si más', /credCards\.length<=1\s*\?\s*credCardHTML\(credTitular, false\)/.test(socio) && /id="cred-carrusel"[\s\S]{0,200}scroll-snap-type:x mandatory/.test(socio) && /id="cred-dots"/.test(socio));
 t('carrusel: swipe (onscroll actualiza puntitos) + ir a tarjeta', /function credCarruselScroll\(elm\)/.test(socio) && /function credCarruselIr\(i\)/.test(socio) && /scrollTo\(\{ left:i\*elm\.clientWidth/.test(socio));
 t('EMERGENCIAS inmediatamente bajo la credencial (no lo empuja el carrusel)', /\$\{credencialHTML\}\s*<a class="btn-emerg" href="tel:\$\{TEL_EMERG\}"/.test(socio));
-t('managed = TODO el grupo activo (sin exclusión del independiente) + hereda vitalicio + propia:false', /credManaged = depsDeMiSocio\.filter\(d=> d\.activo!==false\)\.map/.test(socio) && /esVit:\(d\.vitalicio===true\)\|\|esVit, propia:false/.test(socio) && !/!_indepCred\(d\)/.test(socio));
-t('flip+QR SOLO en la propia: titular propia:true, credCardHTML estático si !d.propia', /credTitular = \{ personaId:c\.personaId[\s\S]{0,140}propia:true \}/.test(socio) && /if\(!d\.propia\)\{ return `<div class="cred-flip" style="\$\{slide\}">/.test(socio) && /d\.propia\?`<div class="cred-flip-hint">/.test(socio));
-t('privacidad intacta: resolverDestino/selectores NO tocados (solo el carrusel)', /function resolverDestino/.test(socio) || true); // el cambio es puramente de credManaged/credCardHTML; resolverDestino sin cambios
+t('managed = TODO el grupo activo (sin exclusión) + DNI del denorm + hereda vitalicio', /credManaged = depsDeMiSocio\.filter\(d=> d\.activo!==false\)\.map/.test(socio) && /dni:d\.dni\|\|null/.test(socio) && /esVit:\(d\.vitalicio===true\)\|\|esVit \}/.test(socio) && !/!_indepCred\(d\)/.test(socio) && !/propia:false/.test(socio));
+t('flip+QR en TODAS las tarjetas (credCardHTML siempre gira, sin rama estática)', /id="flip-\$\{esc\(d\.personaId\)\}"[\s\S]{0,90}onclick="credFlip\('\$\{esc\(d\.personaId\)\}'/.test(socio) && !/if\(!d\.propia\)\{ return/.test(socio) && !/const credTitular = \{[^}]*propia:true/.test(socio));
+t('DNI en la tarjeta (cell DNI si d.dni, igual para todos)', /\$\{d\.dni\?`<div class="cell"><span>DNI<\/span><b>\$\{esc\(fmtDni\(d\.dni\)\)\}/.test(socio));
+t('hint "tocá para el QR" en TODAS (no condicionado a propia)', /<div class="cred-flip-hint">tocá para el QR ⟳<\/div>/.test(socio) && !/d\.propia\?`<div class="cred-flip-hint">/.test(socio));
+
+// --- DNI denorm en el WRITE (app) + backfill + miQR valida el grupo ---
+t('app: denorm de dni al crear/vincular socio (punto compartido)', /nombreVista: socioNombreDe\(perData\), dni: \(perData&&perData\.dni\)\|\|null/.test(app));
+t('CF canjearInvitacion denorma dni en el socio', /cuentaPropia: true, cuentaUid: uid, fechaNacimiento: per\.fechaNacimiento \|\| null, dni: per\.dni \|\| null/.test(fn));
+t('backfill de socios.dni existe (dry-run seguro + --apply)', fs.existsSync(path.resolve(__dirname, 'backfill-socio-dni.js')));
+t('miQR emite tokens del grupo validando el vínculo (titularPersonaId==caller, no personaId arbitrario)', /if \(!\(sd\.data\(\) \|\| \{\}\)\.titularSocioId\)[\s\S]{0,160}where\('titularPersonaId', '==', personaId\)[\s\S]{0,120}deps\.push/.test(fn));
+t('privacidad médica intacta: resolverDestino presente (server, carnet ≠ salud)', /resolverDestino/.test(fn));
 
 // --- gestión de invitaciones ---
 t('cargarCredencial trae invitaciones pendientes del titular', /invitaciones_afiliado.*where\('titularPersonaId','==',personaId\)[\s\S]{0,120}estado==='pendiente'/.test(socio) && /invitaciones,[\s\S]{0,40}facturas/.test(socio));
