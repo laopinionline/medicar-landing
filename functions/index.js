@@ -1937,8 +1937,54 @@ exports.gestionarProspecto = onCall(async (request) => {
     await ref.set({ gestion: { descartado: true, descartadoMotivo: motivo, descartadoEn: FV(), descartadoPor: quien } }, { merge: true });
   } else if (accion === 'reactivar') {
     await ref.set({ gestion: { descartado: false, descartadoMotivo: null, descartadoEn: null } }, { merge: true });
+  } else if (accion === 'pedir_doc') { // vinculacion-autodeclarados: el staff (marketing) pide documentación por el canal humano; se refleja in-app
+    const nota = String(d.nota || '').trim().slice(0, 200);
+    await ref.set({ docPedida: true, docPedidaEn: FV(), docPedidaPor: quien, docNota: nota || null }, { merge: true });
+  } else if (accion === 'quitar_doc') { // reversible
+    await ref.set({ docPedida: false, docPedidaEn: null, docNota: null }, { merge: true });
   } else throw new HttpsError('invalid-argument', 'Acción inválida.');
   logger.info('[gestionarProspecto]', { prospecto: prospectoId, accion, por: request.auth.uid });
+  return { ok: true };
+});
+
+/* vincularProspectoASocio — CANJE SERVER-SIDE DIRECTO (sin token) para el autodeclarado "DICE SER AFILIADO". Reusa el
+   CORE de canjearInvitacion (MISMOS guards) pero el STAFF (gestionar_afiliados) liga el uid del prospecto a un socio que
+   YA existe en el padrón, tras verificación HUMANA en la ficha. CERO-ORÁCULO: no devuelve datos del padrón, solo el
+   resultado de la operación al staff autorizado. prospectos sigue write:false → Admin SDK. */
+exports.vincularProspectoASocio = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const u = (await db.collection('usuarios').doc(request.auth.uid).get()).data() || {};
+  const roles = Array.isArray(u.roles) ? u.roles : (u.rol ? [u.rol] : []);
+  if (!(roles.includes('superadmin') || (u.permisos && u.permisos.gestionar_afiliados === true))) throw new HttpsError('permission-denied', 'Necesitás la habilidad Afiliados.');
+  const prospectoUid = String((request.data || {}).prospectoUid || '').trim();
+  const personaId = String((request.data || {}).personaId || '').trim();
+  if (!prospectoUid || !personaId) throw new HttpsError('invalid-argument', 'Faltan datos (prospecto o socio).');
+  // El uid a vincular DEBE ser un prospecto (no pisar un socio/staff existente por accidente).
+  const pSnap = await db.collection('prospectos').doc(prospectoUid).get();
+  if (!pSnap.exists) throw new HttpsError('not-found', 'Ese prospecto no existe.');
+  // Guards IDÉNTICOS a canjearInvitacion (anti-duplicado):
+  const uDoc = await db.collection('usuarios').doc(prospectoUid).get();
+  const uData = uDoc.exists ? (uDoc.data() || {}) : null;
+  if (uData && uData.personaId && uData.personaId !== personaId) throw new HttpsError('failed-precondition', 'Esa cuenta ya está vinculada a otro socio.');
+  if (await personaTieneLogin(personaId) && !(uData && uData.personaId === personaId)) throw new HttpsError('failed-precondition', 'Esa persona ya tiene su cuenta.');
+  const perSnap = await db.collection('personas').doc(personaId).get();
+  if (!perSnap.exists) throw new HttpsError('not-found', 'La persona no existe en el padrón.');
+  const per = perSnap.data() || {};
+  const nombre = nombreDe(per);
+  // Ligar el login (idéntico a canjearInvitacion 740-746): merge de roles si el uid ya tenía doc; si no, lo crea.
+  if (uData) {
+    const rolesU = Array.isArray(uData.roles) ? uData.roles.slice() : (uData.rol ? [uData.rol] : []);
+    if (!rolesU.includes('afiliado')) rolesU.push('afiliado');
+    await db.collection('usuarios').doc(prospectoUid).set({ personaId, roles: rolesU, bienvenidaVinculacion: true }, { merge: true });
+  } else {
+    const email = (pSnap.data() || {}).email || null;
+    await db.collection('usuarios').doc(prospectoUid).set({ personaId, rol: 'afiliado', roles: ['afiliado'], email, nombre, activo: true, bienvenidaVinculacion: true, creadoEn: FV() });
+  }
+  // Denorm en el socio (idéntico a canjearInvitacion 748): cuentaPropia + uid + fechaNac/dni para selector/privacidad.
+  try { const sq = await db.collection('socios').where('personaId', '==', personaId).get(); const sd = sq.docs.find((d) => d.data().activo !== false) || sq.docs[0]; if (sd) await sd.ref.set({ cuentaPropia: true, cuentaUid: prospectoUid, fechaNacimiento: per.fechaNacimiento || null, dni: per.dni || null }, { merge: true }); } catch (e) { logger.warn('[vincularProspectoASocio] denorm socio falló', { err: e.message }); }
+  // Higiene: el doc de prospecto queda HUÉRFANO trazable (cargarCredencial lee usuarios PRIMERO → rutea a socio pleno).
+  try { await db.collection('prospectos').doc(prospectoUid).set({ vinculado: true, vinculadoEn: FV(), vinculadoPersonaId: personaId, docPedida: false }, { merge: true }); } catch (_) {}
+  logger.info('[vincularProspectoASocio]', { prospectoUid, personaId, porUid: request.auth.uid });
   return { ok: true };
 });
 

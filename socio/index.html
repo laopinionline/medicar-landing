@@ -1745,6 +1745,20 @@ async function hydrateFull(desdeTab){
 }
 const cargandoTab = (msg)=>`<div style="padding:2.4rem 1rem;text-align:center;color:var(--gris);font-size:.85rem">${esc(msg||'Cargando…')}</div>`;
 
+// Bienvenida de UNA sola vez tras la vinculación de un autodeclarado (tramo/vinculacion-autodeclarados). La CF setea
+// usuarios/{uid}.bienvenidaVinculacion=true; el socio la ve una vez y se descarta con un flag local por dispositivo
+// (el socio NO puede escribir su usuarios doc → no se limpia server-side; el flag local evita re-mostrarla). Liviano, no bloquea.
+function bienvenidaVincHTML(c){
+  const u=c.u||{}; if(u.bienvenidaVinculacion!==true) return '';
+  let vista=false; try{ const uid=auth.currentUser&&auth.currentUser.uid; vista=!!uid && localStorage.getItem('medicar_bienv_'+uid)==='1'; }catch(_){}
+  if(vista) return '';
+  return `<div class="sec"><div class="card" style="border:1.5px solid var(--verde);padding:.95rem 1rem">
+    <div style="font-weight:800;color:var(--verde);font-size:.92rem">¡Bienvenido a MEDICAR! 🎉</div>
+    <div style="font-size:.8rem;color:var(--gris);margin-top:.25rem">Tu cuenta quedó activada. Ya tenés tu credencial, tus consultas y todo tu plan acá.</div>
+    <button onclick="cerrarBienvenidaVinc()" style="margin-top:.65rem;border:1.5px solid var(--linea);background:var(--blanco);color:var(--gris);border-radius:10px;padding:.45rem 1.1rem;font-size:.82rem;font-weight:700;font-family:inherit;cursor:pointer">Entendido</button>
+  </div></div>`;
+}
+function cerrarBienvenidaVinc(){ try{ const uid=auth.currentUser&&auth.currentUser.uid; if(uid) localStorage.setItem('medicar_bienv_'+uid,'1'); }catch(_){} render(); }
 // ---- Contenido por tab ----
 function tabInicio(c){
   const per=c.per||{}, u=c.u||{}, socio=c.socio||null;
@@ -1765,6 +1779,7 @@ function tabInicio(c){
     : `<div id="cred-carrusel" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory" onscroll="credCarruselScroll(this)">${credCards.map(d=>credCardHTML(d,true)).join('')}</div>`;
   const dots = credCards.length>1 ? `<div id="cred-dots" style="display:flex;gap:.4rem;justify-content:center;margin:.55rem 0">${credCards.map((_,i)=>`<button onclick="credCarruselIr(${i})" style="width:8px;height:8px;border-radius:50%;border:none;padding:0;cursor:pointer;background:${i===0?'var(--rojo)':'var(--linea)'}"></button>`).join('')}</div>` : '';
   return `<div style="padding:1rem 1rem 0">
+    ${bienvenidaVincHTML(c)}
     ${credHTML}${dots}
     ${calificacionCardHTML(c)}
     ${estadoCardsInicio(c)}
@@ -1976,6 +1991,8 @@ function cerrarCartelAsociate(){ const s=el('cartel-slot'); if(s) s.innerHTML=''
 // cae en freemium: NO es el embudo comercial. En 2 puntas (cartel de la banda + credencial gris). Un tap, sin pedir datos.
 // Antes de marcar = link secundario; después = leyenda (reflejo en las 2 puntas). El estado sale de S.prospecto.yaAfiliado.
 function yaAfiliadoLink(){
+  // El staff pidió documentación (prospectos/{uid}.docPedida) → mensaje accionable, sin datos del padrón (cero-oráculo).
+  if(S.prospecto && S.prospecto.docPedida===true) return `<div style="margin-top:.7rem;font-size:.76rem;color:var(--ambar);font-weight:600;text-align:center;line-height:1.4">📄 Para completar tu activación necesitamos documentación. Comunicate con MEDICAR${S.prospecto.docNota?(': '+esc(S.prospecto.docNota)):'.'}</div>`;
   if(S.prospecto && S.prospecto.yaAfiliado) return `<div style="margin-top:.7rem;font-size:.76rem;color:var(--verde);font-weight:600;text-align:center">✓ Registramos tu aviso: nos vamos a comunicar con vos</div>`;
   return `<button onclick="marcarYaAfiliado()" ${S.yaAfiBusy?'disabled':''} style="margin-top:.7rem;width:100%;background:none;border:none;color:var(--gris);font-size:.8rem;font-weight:600;font-family:inherit;text-decoration:underline;cursor:pointer;padding:.35rem">${S.yaAfiBusy?'Registrando…':'Ya soy afiliado'}</button>`;
 }

@@ -6818,7 +6818,10 @@ function mktProspFicha(id){
   const descBox=g.descartado
     ? `<div style="font-size:.75rem;color:var(--ink3)">✕ Descartado${g.descartadoMotivo?(' · '+esc(g.descartadoMotivo)):''} · ${prospFecha(g.descartadoEn)} <button class="btn-o" style="width:auto;padding:.2rem .5rem;margin:.35rem 0 0" onclick="mktProspAccion('${p.id}','reactivar')">Reactivar</button></div>`
     : `<div class="card" style="margin-top:.6rem;background:var(--bg)"><div style="font-size:.74rem;font-weight:700;margin-bottom:.3rem">Descartar</div><div class="field"><label>Motivo</label><input id="mkt-p-desc" placeholder="fuera de zona / no interesa / duplicado"></div><button class="btn-o" onclick="mktProspDescartar('${p.id}')">Descartar</button></div>`;
-  const activar=(p.estado==='afiliacion_en_proceso')?`<div style="margin-top:.7rem;border-top:1px solid var(--border);padding-top:.6rem"><button class="btn-r" style="width:auto;padding:.45rem .9rem;margin-top:0" onclick="mktActivarProspecto('${p.id}')">Activar → alta precargada</button><div style="font-size:.7rem;color:var(--ink3);margin-top:.3rem">Abre el alta de Afiliados con nombre y teléfono precargados. La activación real es el alta de siempre.</div></div>`:'';
+  // Alta precargada = crea un socio NUEVO. En fichas DICE SER AFILIADO se DESPLAZA (btn-o secundario + advertencia): el
+  // camino natural es "Vincular a su socio" (arriba); el alta solo si el humano verificó que NO existe en el padrón.
+  const altaEsSecundaria=p.yaAfiliado===true;
+  const activar=(p.estado==='afiliacion_en_proceso')?`<div style="margin-top:.7rem;border-top:1px solid var(--border);padding-top:.6rem"><button class="${altaEsSecundaria?'btn-o':'btn-r'}" style="width:auto;padding:.45rem .9rem;margin-top:0" onclick="mktActivarProspecto('${p.id}')">Activar → alta precargada${altaEsSecundaria?' (crea socio nuevo)':''}</button><div style="font-size:.7rem;color:var(--ink3);margin-top:.3rem">Abre el alta de Afiliados con nombre y teléfono precargados. La activación real es el alta de siempre.</div>${altaEsSecundaria?'<div style="font-size:.68rem;color:var(--r);margin-top:.25rem">⚠️ Dice ser afiliado: usá <b>Vincular a su socio</b> arriba. El alta precargada crea un socio NUEVO — solo si verificaste que NO existe en el padrón.</div>':''}</div>`:'';
   return `<button class="btn-o" onclick="mktProspVolver()" style="width:auto;padding:.3rem .6rem;margin-bottom:.6rem">← Volver</button>
     <div id="mkt-err" class="err" style="display:none;margin-bottom:.5rem"></div>
     <div class="card">
@@ -6830,10 +6833,77 @@ function mktProspFicha(id){
       ${p.estado==='afiliacion_en_proceso'?prospFotosHTML(p,'titular'):''}
     </div>
     ${integ?`<div style="font-weight:700;font-size:.82rem;margin:.8rem 0 .2rem">Integrantes del grupo</div>${integ}`:''}
-    <div class="card" style="margin-top:.8rem"><div style="font-weight:700;font-size:.82rem;margin-bottom:.4rem">Gestión</div>${contactadoBox}<div style="margin-top:.6rem">${descBox}</div>${activar}</div>
+    <div class="card" style="margin-top:.8rem"><div style="font-weight:700;font-size:.82rem;margin-bottom:.4rem">Gestión</div>${vincBloque(p)}${docBloque(p)}${contactadoBox}<div style="margin-top:.6rem">${descBox}</div>${activar}</div>
     ${prospFotoModalHTML()}`;
 }
 async function mktProspAccion(id,accion){ if(!puede('marketing')) return; mktErr(''); try{ await fnsCall('gestionarProspecto',{prospectoId:id,accion}); }catch(e){ mktErr((e&&e.message)||'No se pudo.'); } }
+
+// ── tramo/vinculacion-autodeclarados — bloques de la ficha (solo fichas DICE SER AFILIADO) ──
+// (a) Vincular a su socio (cap gestionar_afiliados): buscar por DNI en el padrón → confirmación FUERTE → CF vincularProspectoASocio.
+function vincBloque(p){
+  if(p.yaAfiliado!==true) return '';
+  if(p.vinculado===true) return `<div style="background:var(--g,#1D9E75);color:#fff;border-radius:8px;padding:.5rem .65rem;font-size:.76rem;font-weight:700;margin-bottom:.6rem">✓ Vinculado a su socio · ${prospFecha(p.vinculadoEn)}</div>`;
+  if(!puede('gestionar_afiliados')) return `<div style="font-size:.72rem;color:var(--ink3);margin-bottom:.6rem">🪪 Para vincularlo a su socio hace falta la habilidad <b>Afiliados</b>.</div>`;
+  const V=(S.vinc&&S.vinc.pid===p.id)?S.vinc:null;
+  if(!V) return `<div style="border:1.5px solid #C7CCF5;border-radius:10px;padding:.6rem .7rem;margin-bottom:.6rem;background:#F7F8FF"><div style="font-weight:800;font-size:.8rem;color:#4338CA;margin-bottom:.15rem">Vincular a su socio</div><div style="font-size:.72rem;color:var(--ink3);margin-bottom:.5rem">Buscá al afiliado por DNI en el padrón y confirmá antes de ligar esta cuenta. Es el camino recomendado (NO crea un socio nuevo).</div><button class="btn-r" style="width:auto;padding:.4rem .9rem;margin-top:0" onclick="mktVincAbrir('${p.id}')">Buscar afiliado…</button></div>`;
+  const err=V.err?`<div class="err" style="display:block;margin-bottom:.4rem">${esc(V.err)}</div>`:'';
+  if(!V.r){
+    return `<div style="border:1.5px solid #C7CCF5;border-radius:10px;padding:.6rem .7rem;margin-bottom:.6rem;background:#F7F8FF">
+      <div style="font-weight:800;font-size:.8rem;color:#4338CA;margin-bottom:.4rem">Vincular a su socio — buscar en el padrón</div>${err}
+      <div class="field"><label>DNI del afiliado</label><input id="vinc-q" value="${esc(V.q||'')}" placeholder="Ej. 30123456" oninput="mktVincQ(this.value)" autocomplete="off"></div>
+      <button class="btn-r" style="width:auto;padding:.4rem .9rem;margin-top:0" onclick="mktVincBuscar()" ${V.busy?'disabled':''}>${V.busy?'Buscando…':'Buscar'}</button>
+      <button class="btn-o" style="width:auto;padding:.4rem .9rem;margin:.4rem 0 0" onclick="mktVincCerrar()">Cancelar</button>
+    </div>`;
+  }
+  const r=V.r;
+  const integ = r.esTitular
+    ? (r.integrantes.length ? `<div style="margin-top:.4rem;font-size:.74rem;color:var(--ink2)"><b>Portará su grupo (${r.integrantes.length}):</b> ${r.integrantes.map(esc).join(', ')}</div>` : `<div style="margin-top:.4rem;font-size:.72rem;color:var(--ink3)">Titular sin dependientes en el grupo.</div>`)
+    : `<div style="margin-top:.4rem;font-size:.74rem;color:var(--ink2)">Es <b>dependiente</b> — obtendrá su cuenta propia (no porta grupo).</div>`;
+  const yaLogin = r.tieneLogin ? `<div class="err" style="display:block;margin-top:.4rem">⚠️ Ese socio YA tiene una cuenta. La vinculación va a fallar (evita duplicar login).</div>` : '';
+  return `<div style="border:2px solid #4338CA;border-radius:10px;padding:.7rem .8rem;margin-bottom:.6rem;background:#F7F8FF">
+    <div style="font-weight:800;font-size:.82rem;color:#4338CA;margin-bottom:.4rem">Confirmá la vinculación</div>${err}
+    <div style="font-size:.9rem;font-weight:800;color:var(--ink)">${esc(r.nombre)}</div>
+    <div style="font-size:.78rem;color:var(--ink2);margin-top:.15rem">DNI <b>${esc(r.dni)}</b> · N° socio <b>${esc(r.numero)}</b> · ${r.esTitular?'Titular del grupo':'Dependiente'}</div>
+    ${integ}${yaLogin}
+    <div style="font-size:.72rem;color:var(--ink3);margin:.55rem 0">Vas a ligar la cuenta autodeclarada${p.email?(' ('+esc(p.email)+')'):''} a este socio. Verificá que sea la MISMA persona.</div>
+    <button class="btn-r" style="width:auto;padding:.45rem 1rem;margin-top:0" onclick="mktVincConfirmar()" ${(V.busy||r.tieneLogin)?'disabled':''}>${V.busy?'Vinculando…':'Sí, vincular'}</button>
+    <button class="btn-o" style="width:auto;padding:.45rem 1rem;margin:.4rem 0 0" onclick="mktVincCerrar()">Cancelar</button>
+  </div>`;
+}
+// (b) Pedir documentación (cap marketing): escribe docPedida en prospectos/{uid} → mensaje in-app. Reversible.
+function docBloque(p){
+  if(p.yaAfiliado!==true || p.vinculado===true || !puede('marketing')) return '';
+  if(p.docPedida===true) return `<div style="font-size:.75rem;color:var(--ink2);margin-bottom:.6rem;background:var(--bg);border-radius:8px;padding:.5rem .65rem">📄 Documentación pedida${p.docNota?(' · "'+esc(p.docNota)+'"'):''} · ${prospFecha(p.docPedidaEn)} <button class="btn-o" style="width:auto;padding:.2rem .5rem;margin:.35rem 0 0" onclick="mktProspAccion('${p.id}','quitar_doc')">Quitar pedido</button></div>`;
+  return `<div style="margin-bottom:.6rem"><div class="field" style="margin-bottom:.35rem"><label style="font-size:.72rem">Pedir documentación (nota opcional, la ve el socio)</label><input id="vinc-docnota" placeholder="Ej. Traé DNI y último recibo" autocomplete="off"></div><button class="btn-o" style="width:auto;padding:.4rem .8rem;margin-top:0" onclick="mktPedirDoc('${p.id}')">📄 Pedir documentación</button></div>`;
+}
+function mktVincAbrir(id){ if(!puede('gestionar_afiliados')) return; S.vinc={ pid:id, q:'', r:null, busy:false, err:'' }; render(); }
+function mktVincCerrar(){ S.vinc=null; render(); }
+function mktVincQ(v){ if(S.vinc) S.vinc.q=v; }
+async function mktVincBuscar(){
+  const V=S.vinc; if(!V) return; const q=(V.q||'').trim(); const dni=q.replace(/\D/g,'');
+  if(dni.length<7){ V.err='Ingresá un DNI válido (7 u 8 dígitos).'; render(); return; }
+  V.busy=true; V.err=''; V.r=null; render();
+  try{
+    const ps=await db.collection('personas').where('dni','==',dni).limit(1).get();
+    if(ps.empty){ V.err='No encontré a nadie con ese DNI en el padrón.'; V.busy=false; render(); return; }
+    const per=ps.docs[0].data(); const personaId=ps.docs[0].id;
+    const sq=await db.collection('socios').where('personaId','==',personaId).get();
+    const sd=sq.docs.find(d=>d.data().activo!==false)||sq.docs[0];
+    if(!sd){ V.err='Esa persona no tiene un socio activo en el padrón.'; V.busy=false; render(); return; }
+    const s=sd.data(); const esTitular=!s.titularSocioId;
+    let integrantes=[];
+    if(esTitular){ const dq=await db.collection('socios').where('titularPersonaId','==',personaId).get(); integrantes=dq.docs.map(d=>d.data()).filter(x=>x.activo!==false && x.personaId!==personaId).map(x=>x.nombreVista||'—'); }
+    const tieneLogin = s.cuentaPropia===true || !!s.cuentaUid;
+    V.r={ personaId, nombre:((per.apellido||'')+', '+(per.nombre||'')).replace(/^, /,'').replace(/, $/,'')||'—', dni:per.dni||'—', numero:s.numeroAfiliado||'—', esTitular, integrantes, tieneLogin };
+    V.busy=false; render();
+  }catch(e){ V.err=(e&&e.message)||'No se pudo buscar en el padrón.'; V.busy=false; render(); }
+}
+async function mktVincConfirmar(){
+  const V=S.vinc; if(!V||!V.r) return; V.busy=true; V.err=''; render();
+  try{ await fnsCall('vincularProspectoASocio',{ prospectoUid:V.pid, personaId:V.r.personaId }); S.vinc=null; if(S.mkt) S.mkt.pedit=null; render(); }
+  catch(e){ V.busy=false; V.err=(e&&e.message)||'No se pudo vincular.'; render(); }
+}
+async function mktPedirDoc(id){ if(!puede('marketing')) return; mktErr(''); const nota=(document.getElementById('vinc-docnota')?.value||'').trim(); try{ await fnsCall('gestionarProspecto',{prospectoId:id,accion:'pedir_doc',nota}); }catch(e){ mktErr((e&&e.message)||'No se pudo.'); } }
 async function mktProspDescartar(id){ if(!puede('marketing')) return; const motivo=(document.getElementById('mkt-p-desc')?.value||'').trim(); if(!motivo){ mktErr('Ingresá el motivo del descarte.'); return; } try{ await fnsCall('gestionarProspecto',{prospectoId:id,accion:'descartar',motivo}); }catch(e){ mktErr((e&&e.message)||'No se pudo.'); } }
 // DNI (afiliación online): badge de verificación por integrante + completitud de fotos (para el aviso-override de Activar).
 // Marketing ve el BADGE (dato en Firestore); las FOTOS solo admin/superadmin (Storage rules) — acá no se muestran imágenes.
