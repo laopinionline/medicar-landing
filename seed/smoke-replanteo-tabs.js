@@ -20,7 +20,7 @@ t('núcleo hace early-return con _lazy:true (sin las ~16 colecciones)', /if\(nuc
 t('el boot pasa el modo núcleo (tabsBootPref)', /cargarCredencial\(user\.uid, tabsBootPref\(\)\)/.test(socio));
 
 // ── EMERGENCIAS: header rojo persistente (tel:, sticky, nunca scrollea) — NO 6º tab ──
-t('header EMERGENCIAS tel:443044 sticky (persistente)', /href="tel:\$\{TEL_EMERG\}"[\s\S]{0,220}position:sticky[\s\S]{0,320}EMERGENCIAS · \$\{TEL_EMERG\}/.test(socio));
+t('banda EMERGENCIAS variante C: tel: + sticky + pulso + EMERGENCIAS + 443044 (32px)', /href="tel:\$\{TEL_EMERG\}"[\s\S]{0,180}position:sticky[\s\S]{0,60}height:32px[\s\S]{0,200}ICN_PULSO[\s\S]{0,120}EMERGENCIAS[\s\S]{0,160}\$\{TEL_EMERG\}/.test(socio));
 t('EMERGENCIAS usa el rojo de marca (var(--rojo))', /EMERGENCIAS[\s\S]{0,0}|background:var\(--rojo\)[\s\S]{0,400}EMERGENCIAS/.test(socio) || /position:sticky[\s\S]{0,120}background:var\(--rojo\)/.test(socio));
 
 // ── 5 tabs exactos + tab bar fija ──
@@ -52,12 +52,14 @@ t('prospecto NO entra al shell (socioShellElegible exige socio)', /c\.estado==='
     const grab=(re)=>{ const m=re.exec(socio); return m?m[0]:''; };
     const TABS=grab(/const TABS = \[[\s\S]*?\];/);
     const shell=grab(/function tabShellView\(\)\{[\s\S]*?\n\}/);
-    const src=`const TEL_EMERG='443044'; const IC={phone:'📞'}; const S={tab:'inicio',cred:{}}; function tabContent(){return '<!--c-->';} const esc=x=>String(x==null?'':x);\n${TABS}\n${shell}\n; globalThis.__h=tabShellView();`;
+    const ICNblk=grab(/const _IS=[\s\S]*?const TABS = \[/).replace(/const TABS = \[$/,'');
+    const src=`const TEL_EMERG='443044'; const IC={phone:'📞'}; const S={tab:'inicio',cred:{}}; function tabContent(){return '<!--c-->';} const esc=x=>String(x==null?'':x);\n${ICNblk}\n${TABS}\n${shell}\n; globalThis.__h=tabShellView();`;
     const sb={ globalThis:{} }; sb.globalThis=sb;
     vm.runInNewContext(src, sb, {timeout:3000});
     const h=sb.__h||'';
-    t('render shell: header EMERGENCIAS presente', /tel:443044/.test(h) && /EMERGENCIAS · 443044/.test(h));
+    t('render shell: banda EMERGENCIAS (tel:443044 + pulso SVG + número)', /tel:443044/.test(h) && /EMERGENCIAS/.test(h) && /443044/.test(h) && /<svg/.test(h));
     t('render shell: 5 botones de tab', (h.match(/data-tab="/g)||[]).length===5);
+    t('render shell: tab bar con SVG propios, SIN emojis', (h.match(/data-tabic="/g)||[]).length===5 && !/🏠|💬|🩺|📅|☰/.test(h));
     t('render shell: contenedor #tab-content', /id="tab-content"/.test(h));
   }catch(e){ t('render shell (vm) sin throw', false); console.log('   ',e.message.split('\n')[0]); }
 })();
@@ -122,6 +124,23 @@ t('aplicarParamTabs se llama en el boot antes de render()', /aplicarParamTabs\(\
     t('sin ?tabs → NO toca nada (flag ni URL)', c.store.medicar_tabs==='1' && c.cleaned===null);
   }catch(e){ t('atajo ?tabs (vm) sin throw', false); console.log('   ', e.message.split('\n')[0]); }
 })();
+
+// ── PIEL aprobada: set de íconos propio + banda C + feed en Inicio + flip fix ──
+t('set de íconos ICN: 5 line-icons propios (inicio/ia/salud/turnos/mas)', /const ICN = \{[\s\S]{0,900}inicio:`<svg[\s\S]{0,900}mas:`<svg viewBox="0 0 24 24"[\s\S]{0,80}M7 8l4 4-4 4[\s\S]{0,40}M13 8l4 4-4 4/.test(socio));
+t('íconos con el trazo del chevrón (stroke 2 round, currentColor)', /const _IS='stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'/.test(socio));
+t('"Más" = doble chevrón » (isotipo Bidondo)', /mas:`<svg[\s\S]{0,120}M7 8l4 4-4 4[\s\S]{0,30}M13 8l4 4-4 4/.test(socio));
+t('IA = burbuja con chevrón › adentro', /ia:`<svg[\s\S]{0,220}M10 9\.5 12\.5 11 10 12\.5/.test(socio));
+t('pulso de la banda EMERGENCIAS (ICN_PULSO, blanco)', /const ICN_PULSO='<svg[\s\S]{0,120}stroke="#fff"[\s\S]{0,200}M2 12h4l2-5 3 10/.test(socio));
+t('TABS ya no lleva emojis (solo id+lbl)', !/\{ id:'inicio', ic:'🏠'/.test(socio) && /\{ id:'inicio', +lbl:'Inicio' \}/.test(socio));
+t('tab bar renderiza ICN[x.id] (no x.ic)', /\$\{ICN\[x\.id\]\}/.test(socio) && !/font-size:1\.2rem;line-height:1">\$\{x\.ic\}/.test(socio));
+
+// FEED en Inicio (para TODOS los perfiles) + retirado de Más
+t('FEED en Inicio (homeFeedBlock al pie de tabInicio)', /function tabInicio[\s\S]{0,2400}estadoCardsInicio\(c\)\}[\s\S]{0,40}\$\{homeFeedBlock\(c\)\}/.test(socio));
+t('FEED retirado de "Más" (tabMas ya no llama homeFeedBlock)', /function tabMas\(c\)\{[\s\S]*?\n\}/.test(socio) && !/function tabMas[\s\S]{0,900}homeFeedBlock/.test(socio));
+
+// FIX del flip del QR en móvil (backface en el card hijo + rotateY explícito + overflow)
+t('flip fix: backface-visibility en el card hijo .cred (no sangra el frente)', /\.cred-face \.cred\{[^}]*backface-visibility:hidden/.test(socio));
+t('flip fix: rotateY explícito en cada cara + dorso overflow contenido', /\.cred-face\{[^}]*transform:rotateY\(0deg\)/.test(socio) && /\.cred-back\{position:absolute[^}]*transform:rotateY\(180deg\)/.test(socio) && /\.cred-face \.cred\{[^}]*overflow:hidden/.test(socio));
 
 // ── SW bump ──
 t('socio SW bumpeado (≥ v49)', /medicar-socio-v(49|[5-9]\d)/.test(sw));
