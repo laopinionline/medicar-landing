@@ -2435,9 +2435,9 @@ function asistenteView(){
     ${ia.busy?`<div style="color:var(--gris);font-size:.82rem;padding:.3rem .2rem">Escribiendo…</div>`:''}
     ${ia.err?`<div class="err on" style="margin:.3rem 0">${esc(ia.err)}</div>`:''}
     <div style="position:sticky;bottom:0;background:var(--fondo,#fff);padding:.5rem 0 .3rem">
-      ${prosp
-        ? `` /* ENCUADRE: sin botón de afiliación permanente en el chat (no upsell). La oferta llega por chip [Quiero afiliarme] cuando el tema la trae. */
-        : `<button onclick="iaAccion('turno')" style="width:100%;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:800;padding:.6rem;border-radius:12px;cursor:pointer;margin-bottom:.5rem">🩺 Pedir un turno con un médico</button>`}
+      ${/* Pie SIN chip fijo de turno (doctrina: MEDICAR = emergencias + consultas online, NO policonsultorio; el pie fijo
+           transmitía el modelo equivocado). Los chips CONTEXTUALES (whitelist en las respuestas del modelo) siguen intactos
+           en ${msgs} — aparecen solo cuando el pipeline los amerita. Prospecto tampoco tenía botón fijo (encuadre no-upsell). */''}
       <div style="display:flex;gap:.4rem">
         <input id="ia-input" placeholder="Escribí tu consulta…" autocomplete="off" ${ia.busy?'disabled':''} style="flex:1;border:1.5px solid var(--linea);border-radius:12px;padding:.6rem .8rem;font-size:.9rem;background:var(--nieve)">
         <button onclick="iaEnviar()" ${ia.busy?'disabled':''} style="background:var(--rojo);color:#fff;border:none;border-radius:12px;padding:0 1.1rem;font-weight:800;cursor:pointer">Enviar</button>

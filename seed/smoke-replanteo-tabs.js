@@ -151,6 +151,12 @@ t('2d · placeholder de foto = ícono line (no emoji) + input capture cámara', 
 t('2e · botón "Cerrar sesión" rediseñado con tokens (no btn-o pelado)', /onclick="salir\(\)" style="border:1\.5px solid var\(--linea\);background:var\(--blanco\)[\s\S]{0,200}Cerrar sesión<\/button>/.test(socio));
 t('WhatsApp de turnos INTACTO (a Lucas le gustó): "Iniciar videollamada" 25D366', /Iniciar videollamada[\s\S]{0,40}25D366|25D366[\s\S]{0,80}Iniciar videollamada/.test(socio));
 
+// ── Chat MEDICAR IA: pie SIN chip fijo de turno (doctrina emergencias, no policonsultorio) ──
+t('chat: chip fijo "Pedir un turno con un médico" ELIMINADO del pie', !/Pedir un turno con un médico/.test(socio) && !/iaAccion\('turno'\)/.test(socio));
+t('chat: el pie sticky conserva el input + Enviar (no se rompió el layout)', /position:sticky;bottom:0[\s\S]{0,600}id="ia-input"[\s\S]{0,280}onclick="iaEnviar\(\)"/.test(socio));
+t('chat: chips CONTEXTUALES (whitelist del modelo, m.botones) INTACTOS', /const botones = \(m\.botones\|\|\[\]\)\.map\(b=>[\s\S]{0,120}iaAccion\('\$\{b\.accion\}'\)/.test(socio));
+t('chat: una sola superficie (tabIA + view asistente usan asistenteView)', /function tabIA\(c\)\{[\s\S]{0,140}return asistenteView\(\)/.test(socio) && /case 'asistente': html=asistenteView\(\)/.test(socio));
+
 // ── SW bump ──
 t('socio SW bumpeado (≥ v49)', /medicar-socio-v(49|[5-9]\d)/.test(sw));
 
