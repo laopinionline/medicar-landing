@@ -745,7 +745,7 @@ exports.canjearInvitacion = onCall(async (request) => {
     await db.collection('usuarios').doc(uid).set({ personaId, rol: 'afiliado', roles: ['afiliado'], email, nombre, activo: true, creadoEn: FV() });
   }
   // Denorm en el socio del integrante (para el selector del titular + privacidad): cuentaPropia + fechaNacimiento + uid.
-  try { const sq = await db.collection('socios').where('personaId', '==', personaId).get(); const sd = sq.docs.find((d) => d.data().activo !== false) || sq.docs[0]; if (sd) await sd.ref.set({ cuentaPropia: true, cuentaUid: uid, fechaNacimiento: per.fechaNacimiento || null }, { merge: true }); } catch (e) { logger.warn('[canjearInvitacion] denorm socio falló', { err: e.message }); }
+  try { const sq = await db.collection('socios').where('personaId', '==', personaId).get(); const sd = sq.docs.find((d) => d.data().activo !== false) || sq.docs[0]; if (sd) await sd.ref.set({ cuentaPropia: true, cuentaUid: uid, fechaNacimiento: per.fechaNacimiento || null, dni: per.dni || null }, { merge: true }); } catch (e) { logger.warn('[canjearInvitacion] denorm socio falló', { err: e.message }); }
   await ref.set({ estado: 'usado', canjeadoPor: uid, canjeadoEn: FV() }, { merge: true }); // consumir (post-creación: un-uso lo garantiza también personaTieneLogin)
   logger.info('[canjearInvitacion]', { uid, personaId });
   return { ok: true, personaId };
