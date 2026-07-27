@@ -1667,7 +1667,7 @@ const TABS = [
   { id:'inicio', lbl:'Inicio' },
   { id:'ia',     lbl:'MEDICAR IA' },
   { id:'salud',  lbl:'Mi salud' },
-  { id:'turnos', lbl:'Turnos' },
+  { id:'turnos', lbl:'Consultas' },
   { id:'mas',    lbl:'Más' },
 ];
 function tabShellView(){
@@ -1779,22 +1779,89 @@ function tabSalud(c){
     ${homeParamsBlock(c)}
   </div>`;
 }
-function tabTurnos(c){
-  if(c._lazy) return cargandoTab('Cargando tus turnos…');
-  const mis=(c.misTurnos||[]).filter(t=>t.estado!=='cancelado').sort((a,b)=>((tsMs(a.fecha)||0)-(tsMs(b.fecha)||0)));
-  const misHTML = mis.length ? mis.map(t=>`<div class="card" style="padding:.7rem .9rem;margin-bottom:.5rem"><div style="font-weight:700;font-size:.85rem">${esc(fechaTurno(t.fecha))} · ${esc(t.hora||'')}</div><div style="font-size:.74rem;color:var(--gris)">${esc(t.nombreVista||'')}${t.medicoNombre?(' · '+esc(t.medicoNombre)):''}</div></div>`).join('') : `<div style="font-size:.82rem;color:var(--gris)">No tenés turnos reservados.</div>`;
-  const ag=(c.agenda||[]);
-  const dispHTML = ag.length ? `<div style="font-size:.78rem;color:var(--gris);margin-bottom:.4rem">Hay franjas disponibles para reservar tu videollamada.</div>` : `<div style="font-size:.82rem;color:var(--gris)">Por ahora no hay franjas disponibles.</div>`;
-  return `<div style="padding:1rem">
-    <div class="sec-h">Mis turnos</div>${misHTML}
-    <div class="sec-h" style="margin-top:1rem">Turnos por videollamada</div>${dispHTML}
-    ${c.waAtencion?`<a class="btn-o" href="https://wa.me/${esc(c.waAtencion)}" target="_blank" rel="noopener" style="margin-top:.6rem">Coordinar por WhatsApp</a>`:''}
+// Bloque de CONSULTAS (turnos por videollamada) — franjas clickeables (reservarSlot), para-quién, mis turnos, WhatsApp.
+// Reconstruye lo derivado desde c (self-contained) para reusarlo en el tab. Mismo motor que el homeView (fallback).
+function turnosBlock(c){
+  const socio=c.socio||null; if(!socio) return '';
+  const per=c.per||{}, u=c.u||{};
+  const esDependiente = !!(socio && socio.titularSocioId);
+  const depsDeMiSocio = (socio && !socio.titularSocioId ? (c.dependientes||[]) : []);
+  const pad2 = n => String(n).padStart(2,'0');
+  const fstr = d => d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+  const hoyF = fstr(new Date()); const finD = new Date(); finD.setDate(finD.getDate()+7); const finF = fstr(finD);
+  const toMin = s => { const p=String(s||'').split(':'); return (Number(p[0])||0)*60+(Number(p[1])||0); };
+  const fromMin = m => pad2(Math.floor(m/60))+':'+pad2(m%60);
+  const franjas = (c.agenda||[]).filter(f=> f.activa!==false && f.fecha>=hoyF && f.fecha<=finF).slice().sort((a,b)=> (a.fecha+a.horaInicio).localeCompare(b.fecha+b.horaInicio));
+  const esIndependienteDep = (d)=> d.cuentaPropia===true && (edadDe(d.fechaNacimiento)||0) >= 18;
+  const activeDeps = depsDeMiSocio.filter(d=> d.activo!==false && d.personaId && !esIndependienteDep(d));
+  const paraActual = S.turnoPara || c.personaId;
+  const paraSel = (!esDependiente && activeDeps.length)
+    ? `<div style="padding:.6rem 1rem;border-bottom:1px solid var(--linea)"><label style="font-size:.75rem;color:var(--gris);display:block;margin-bottom:.25rem">¿Para quién?</label>
+       <select onchange="turnoSetPara(this.value)" style="width:100%;padding:.5rem;border:1px solid var(--linea);border-radius:8px;font-size:.85rem">
+         <option value="${esc(c.personaId)}" ${paraActual===c.personaId?'selected':''}>${esc(nombreDe(c.per,c.u))} (yo)</option>
+         ${activeDeps.map(d=>`<option value="${esc(d.personaId)}" ${paraActual===d.personaId?'selected':''}>${esc(d.nombreVista||'—')}</option>`).join('')}
+       </select></div>` : '';
+  const franjasHTML = franjas.length ? franjas.map(f=>{
+    const dur = Number(f.duracionSlotMin)||15; const ini=toMin(f.horaInicio), fin=toMin(f.horaFin);
+    const tomados = Array.isArray(f.slotsTomados)?f.slotsTomados:[];
+    let slots='';
+    for(let m=ini; m+dur<=fin; m+=dur){ const h=fromMin(m); const ocupado=tomados.includes(h);
+      slots += ocupado
+        ? `<span style="padding:.4rem .55rem;border-radius:8px;background:var(--bg2,#f0ede7);color:var(--gris);font-size:.78rem;opacity:.55">${h}</span>`
+        : `<button onclick="reservarSlot('${esc(f.id)}','${h}')" ${S.turnoBusy?'disabled':''} style="padding:.4rem .55rem;border-radius:8px;border:1.5px solid var(--rojo);background:#fff;color:var(--rojo);font-size:.78rem;font-weight:700;cursor:pointer">${h}</button>`;
+    }
+    return `<div style="padding:.7rem 1rem;border-bottom:1px solid var(--linea)"><div style="font-weight:700;font-size:.85rem;color:var(--tinta)">${esc(fechaTurno(f.fecha))} · ${esc(f.horaInicio)}–${esc(f.horaFin)}</div><div style="font-size:.72rem;color:var(--gris);margin-bottom:.45rem">${esc(f.medicoNombre||'Médico de guardia')}</div><div style="display:flex;flex-wrap:wrap;gap:.35rem">${slots}</div></div>`;
+  }).join('') : `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">No hay turnos disponibles en los próximos 7 días.</div>`;
+  const mis = (c.misTurnos||[]).filter(t=>!['ausente','sin_registrar'].includes(t.estado)).slice().sort((a,b)=> (b.fecha+b.hora).localeCompare(a.fecha+a.hora));
+  const wa = waLink(c.waAtencion||'');
+  const misHTML = mis.length ? mis.map(t=>{
+    const activo = t.estado==='creado';
+    const propio = t.personaId===c.personaId;
+    const deQuien = !propio && t.nombreVista ? ` <span style="font-size:.66rem;color:var(--rojo);font-weight:700">· para ${esc(t.nombreVista)}</span>` : '';
+    const estadoLbl = activo ? 'Reservado' : (t.estado==='atendido' ? '<span style="color:var(--verde)">Atendida ✓</span>' : 'Cancelada');
+    const acciones = activo ? `<div style="display:flex;flex-direction:column;gap:.35rem;align-items:flex-end">${wa?`<a href="${wa}" target="_blank" rel="noopener" style="font-size:.75rem;color:#fff;background:#25D366;padding:.3rem .6rem;border-radius:8px;text-decoration:none;font-weight:700">Iniciar videollamada</a>`:''}<button onclick="cancelarTurnoUI('${esc(t.id)}')" ${S.turnoBusy?'disabled':''} style="font-size:.75rem;color:var(--rojo);background:none;border:none;font-weight:700;cursor:pointer">Cancelar</button></div>` : '';
+    return `<div class="row"><div><div style="font-weight:700;font-size:.85rem;color:var(--tinta)">${esc(fechaTurno(t.fecha))} · ${esc(t.hora)}${deQuien}</div><div style="font-size:.72rem;color:var(--gris)">${esc(t.medicoNombre||'Médico de guardia')} · ${estadoLbl}</div></div>${acciones}</div>`;
+  }).join('') : `<div style="padding:.9rem 1rem;font-size:.82rem;color:var(--gris)">No tenés turnos reservados.</div>`;
+  const msgHTML = S.turnoErr
+    ? `<div style="padding:.55rem 1rem;font-size:.8rem;color:var(--rojo);font-weight:600">${esc(S.turnoErr)}</div>`
+    : (S.turnoMsg ? `<div style="padding:.55rem 1rem;font-size:.8rem;color:var(--verde);font-weight:600">${esc(S.turnoMsg)}</div>` : '');
+  return `<div class="sec"><div class="sec-h">Turnos por videollamada</div>
+    <div class="card">${msgHTML}${paraSel}${franjasHTML}</div>
+    <div class="sec-h" style="margin-top:1rem">Mis turnos</div>
+    ${wa?`<div style="font-size:.72rem;color:var(--gris);margin:0 0 .5rem;padding:0 .2rem">La videollamada se realiza por WhatsApp con la línea de atención de MEDICAR, a la hora del turno.</div>`:''}
+    <div class="card">${misHTML}</div>
   </div>`;
 }
+function tabTurnos(c){
+  if(c._lazy) return cargandoTab('Cargando tus consultas…');
+  return `<div style="padding:1rem 1rem 0">${turnosBlock(c)}</div>`;
+}
+// Foto de perfil (Storage perfiles/{uid}/foto.jpg — la regla ya permite al dueño escribir imágenes <3MB). Sin write a Firestore.
+async function cargarFotoPerfil(){
+  if(S.fotoUrl!==undefined) return; S.fotoUrl='';
+  try{ const u=auth.currentUser; if(!u) return; const url=await firebase.storage().ref('perfiles/'+u.uid+'/foto.jpg').getDownloadURL(); S.fotoUrl=url; if(S.view==='home'&&S.tab==='mas') pintarTab('mas'); }catch(_){ /* sin foto cargada */ }
+}
+async function subirFotoPerfil(input){
+  const f=input&&input.files&&input.files[0]; if(!f) return;
+  const u=auth.currentUser; if(!u) return;
+  S.fotoBusy=true; if(S.tab==='mas') pintarTab('mas');
+  try{
+    const ref=firebase.storage().ref('perfiles/'+u.uid+'/foto.jpg');
+    await ref.put(f, { contentType: f.type||'image/jpeg' });
+    S.fotoUrl=await ref.getDownloadURL();
+  }catch(e){ alert('No se pudo subir la foto: '+((e&&e.message)||e)); }
+  S.fotoBusy=false; if(S.tab==='mas') pintarTab('mas');
+}
+const ICN_USER='<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="var(--ink3)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6"/></svg>';
 function tabMas(c){
   if(c._lazy) return cargandoTab('Cargando…');
+  if(S.fotoUrl===undefined) setTimeout(cargarFotoPerfil,0); // fetch la foto una vez (lazy)
   const item=(ic,lbl,onclick)=>`<button onclick="${onclick}" style="width:100%;display:flex;align-items:center;gap:.7rem;background:var(--blanco);border:none;border-bottom:1px solid var(--linea);padding:.95rem 1rem;font-size:.9rem;color:var(--tinta);cursor:pointer;text-align:left"><span style="font-size:1.05rem">${ic}</span><span style="flex:1;font-weight:600">${lbl}</span><span style="color:var(--ink3)">${chv(11)}</span></button>`;
   const nFact=(c.facturas||[]).length;
+  const foto = `<div style="display:flex;align-items:center;gap:.9rem;padding-bottom:.85rem;margin-bottom:.35rem;border-bottom:1px solid var(--linea)">
+    <div style="width:60px;height:60px;border-radius:50%;overflow:hidden;background:var(--nieve);border:1.5px solid var(--linea);display:flex;align-items:center;justify-content:center;flex:none">${S.fotoUrl?`<img src="${esc(S.fotoUrl)}" alt="Foto de perfil" style="width:100%;height:100%;object-fit:cover">`:ICN_USER}</div>
+    <label style="display:inline-block;border:1.5px solid var(--rojo);color:var(--rojo);border-radius:10px;padding:.5rem .9rem;font-size:.78rem;font-weight:700;cursor:pointer">${S.fotoBusy?'Subiendo…':(S.fotoUrl?'Cambiar foto':'Subir o sacar foto')}<input type="file" accept="image/*" capture="user" onchange="subirFotoPerfil(this)" style="display:none"></label>
+  </div>`;
   return `<div style="padding:1rem 0 0">
     ${solicitudesBandejaBlock ? solicitudesBandejaBlock(c) : ''}
     <div style="border-radius:14px;overflow:hidden;margin:0 .8rem;box-shadow:var(--sombra)">
@@ -1804,9 +1871,10 @@ function tabMas(c){
       ${item('👤','Seguir a un familiar',"set({view:'referente-seguir'})")}
     </div>
     <div class="sec"><div class="sec-h">Mis datos de contacto</div><div class="card" style="padding:.9rem 1rem">
+      ${foto}
       ${[['Teléfono',(c.per||{}).telefono],['Domicilio',(c.per||{}).direccion],['Email',(c.per||{}).email||(c.u||{}).email]].filter(r=>r[1]).map(r=>`<div class="row"><span class="rl">${r[0]}</span><span class="rv">${esc(r[1])}</span></div>`).join('')||'<div style="font-size:.8rem;color:var(--gris)">Sin datos cargados</div>'}
     </div></div>
-    <div style="padding:0 1rem 1.5rem"><button class="btn-o" onclick="salir()">Cerrar sesión</button></div>
+    <div style="padding:.6rem 1rem 1.8rem;text-align:center"><button onclick="salir()" style="border:1.5px solid var(--linea);background:var(--blanco);color:var(--gris);border-radius:11px;padding:.7rem 1.6rem;font-size:.85rem;font-weight:700;font-family:inherit;cursor:pointer">Cerrar sesión</button></div>
   </div>`;
 }
 // Estado "bloqueado" (Tramo 4 freemium): el shell YA sabe renderizarlo; hoy no se cablea (prospecto usa prospectoView).
@@ -2148,8 +2216,11 @@ function homeFeedBlock(){
 function homeChequeoBlock(c){
   const st=chequeoEstado(c);
   if(!st.activo) return ''; // sin cuestionario activo → no se muestra nada
-  const prefSel=`<select onchange="guardarPref(this.value)">`+
-    DIAS.map((d,i)=>`<option value="${i}" ${((c.prefDay||0)===i)?'selected':''}>${d}</option>`).join('')+`</select>`;
+  // Selector de día = fila de pills con tokens del manual (rediseño Tramo shell-retoques; antes era un <select> nativo).
+  const D3=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const prefSel=`<div style="display:flex;gap:.3rem">${D3.map((d,i)=>{ const on=(c.prefDay||0)===i;
+    return `<button onclick="guardarPref('${i}')" aria-label="${DIAS[i]}" style="flex:1;min-width:0;border:1.5px solid ${on?'var(--rojo)':'var(--linea)'};background:${on?'var(--rojo)':'var(--blanco)'};color:${on?'#fff':'var(--gris)'};border-radius:9px;padding:.42rem .1rem;font-size:.66rem;font-weight:${on?'800':'600'};cursor:pointer">${d}</button>`;
+  }).join('')}</div>`;
   let body;
   if(st.pending){
     body=`<div class="hero">
@@ -2173,7 +2244,7 @@ function homeChequeoBlock(c){
     <div class="sec-h">Chequeo semanal</div>
     ${body}
     ${regBanner}
-    <div class="pref-row"><span style="font-size:.76rem;color:var(--gris)">Día de recordatorio</span>${prefSel}</div>
+    <div style="margin-top:.75rem"><div style="font-size:.72rem;color:var(--gris);margin-bottom:.38rem">Día de recordatorio</div>${prefSel}</div>
   </div>`;
 }
 async function guardarPref(v){

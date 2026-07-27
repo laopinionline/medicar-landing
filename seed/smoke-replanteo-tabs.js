@@ -142,6 +142,15 @@ t('FEED retirado de "Más" (tabMas ya no llama homeFeedBlock)', /function tabMas
 t('flip fix: backface-visibility en el card hijo .cred (no sangra el frente)', /\.cred-face \.cred\{[^}]*backface-visibility:hidden/.test(socio));
 t('flip fix: rotateY explícito en cada cara + dorso overflow contenido', /\.cred-face\{[^}]*transform:rotateY\(0deg\)/.test(socio) && /\.cred-back\{position:absolute[^}]*transform:rotateY\(180deg\)/.test(socio) && /\.cred-face \.cred\{[^}]*overflow:hidden/.test(socio));
 
+// ── RETOQUES de la recorrida de Lucas ──
+t('2a · selector de día = pills con tokens (no <select> nativo)', /const D3=\['Dom','Lun'[\s\S]{0,400}on\?'var\(--rojo\)':'var\(--linea\)'/.test(socio) && !/const prefSel=`<select onchange="guardarPref/.test(socio));
+t('2b · tab renombrado a "Consultas" (id turnos, ícono calendario)', /\{ id:'turnos', +lbl:'Consultas' \}/.test(socio) && /turnos:`<svg viewBox="0 0 24 24"[\s\S]{0,120}rect x="4" y="5\.5"/.test(socio));
+t('2c · tabTurnos compone la UI REAL de reserva (turnosBlock con slots clickeables)', /function turnosBlock\(c\)[\s\S]{0,2600}reservarSlot\('\$\{esc\(f\.id\)\}'/.test(socio) && /function tabTurnos\(c\)\{[\s\S]{0,120}turnosBlock\(c\)/.test(socio));
+t('2d · foto de perfil: sube a Storage perfiles/{uid} (regla existente, sin tocar rules)', /firebase\.storage\(\)\.ref\('perfiles\/'\+u\.uid\+'\/foto\.jpg'\)/.test(socio) && /function subirFotoPerfil/.test(socio) && /function cargarFotoPerfil/.test(socio));
+t('2d · placeholder de foto = ícono line (no emoji) + input capture cámara', /const ICN_USER='<svg/.test(socio) && /accept="image\/\*" capture="user" onchange="subirFotoPerfil/.test(socio));
+t('2e · botón "Cerrar sesión" rediseñado con tokens (no btn-o pelado)', /onclick="salir\(\)" style="border:1\.5px solid var\(--linea\);background:var\(--blanco\)[\s\S]{0,200}Cerrar sesión<\/button>/.test(socio));
+t('WhatsApp de turnos INTACTO (a Lucas le gustó): "Iniciar videollamada" 25D366', /Iniciar videollamada[\s\S]{0,40}25D366|25D366[\s\S]{0,80}Iniciar videollamada/.test(socio));
+
 // ── SW bump ──
 t('socio SW bumpeado (≥ v49)', /medicar-socio-v(49|[5-9]\d)/.test(sw));
 
