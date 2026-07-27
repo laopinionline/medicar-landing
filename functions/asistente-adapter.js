@@ -17,6 +17,13 @@ const TIMEOUT_OLLAMA = 25000, TIMEOUT_CLAUDE = 18000; // presupuesto por rama; c
 async function viaOllama(cfg, { system, contexto, historia, mensaje }) {
   if (!cfg.url) throw new Error('ollama: falta url del túnel (asistente_secreto/config.url)');
   const messages = [{ role: 'system', content: system + '\n\n' + contexto }, ...(Array.isArray(historia) ? historia : []), { role: 'user', content: String(mensaje || '') }];
+  // Medición para vigilar el truncado silencioso: ollama SIN num_ctx usa su default (~2048) → system+contexto+historia
+  // se caía fuera de la ventana. num_ctx=12288 (llama3.1 soporta 128k nativo; 12288 da margen holgado sobre el peor caso
+  // ~7.9k y no infla el KV cache del box local). Estimación conservadora ~4 chars/token; si estTokens se acerca a num_ctx, subirlo o recortar.
+  const NUM_CTX = Number(cfg.numCtx) || 12288; // override por config; default 12288 (margen para el crecimiento del SYSTEM; el 8B lo soporta, KV cache cómodo)
+  const promptChars = messages.reduce((n, m) => n + ((m && m.content) ? m.content.length : 0), 0);
+  const estTokens = Math.round(promptChars / 4);
+  try { console.info('[ia:ollama] prompt ~' + estTokens + ' tokens (' + promptChars + ' chars) · num_ctx=' + NUM_CTX + ' · turnos_historia=' + (Array.isArray(historia) ? historia.length : 0)); } catch (_) {}
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), Number(cfg.timeoutMs) || TIMEOUT_OLLAMA);
   try {
@@ -25,7 +32,7 @@ async function viaOllama(cfg, { system, contexto, historia, mensaje }) {
     if (cfg.accessClientId && cfg.accessClientSecret) { headers['CF-Access-Client-Id'] = cfg.accessClientId; headers['CF-Access-Client-Secret'] = cfg.accessClientSecret; }
     const r = await fetch(cfg.url.replace(/\/$/, '') + '/api/chat', {
       method: 'POST', headers,
-      body: JSON.stringify({ model: cfg.model || 'llama3.1:8b', messages, stream: false, options: { temperature: 0.1 } }),
+      body: JSON.stringify({ model: cfg.model || 'llama3.1:8b', messages, stream: false, options: { temperature: 0.1, num_ctx: NUM_CTX } }),
       signal: ctrl.signal,
     });
     if (!r.ok) throw new Error('ollama HTTP ' + r.status);

@@ -2576,7 +2576,7 @@ async function iaMandar(mensaje){
   if(S.ia.busy) return;
   S.ia.msgs.push({role:'user', texto:mensaje}); S.ia.busy=true; S.ia.err=''; render();
   try{
-    const historia = S.ia.msgs.slice(0,-1).map(m=>({ role:(m.role==='user'?'user':'assistant'), content:m.texto })).slice(-6);
+    const historia = S.ia.msgs.slice(0,-1).map(m=>({ role:(m.role==='user'?'user':'assistant'), content:m.texto })).slice(-12);
     const r = await fnsCall('asistenteChat', { mensaje, historia });
     S.ia.msgs.push({ role:'ia', texto:(r&&r.respuesta)||'', rojo:!!(r&&r.rojo), botones:(r&&r.botones)||[] });
     if(r&&r.olvidado){ S.ia.olvidado=true; S.ia.resumido=true; } // la CF borró la memoria: no resumir esta sesión
