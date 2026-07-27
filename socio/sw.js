@@ -1,7 +1,7 @@
 /* MEDICAR — app del socio (PWA). Service worker mínimo: cachea el shell para
    arranque offline. SIN push en esta etapa. Firebase (auth/firestore) y el CDN
    gstatic son cross-origin → se dejan pasar a la red (nunca se cachean). */
-const CACHE = 'medicar-socio-v60'; // Chat memoria: fix del olvido conversacional — tope de historia 6→12 en el payload (num_ctx ollama + prompt del hilo son server-side)
+const CACHE = 'medicar-socio-v61'; // Chat recall: backstop de resumen en modo tab (irTab + visibilitychange enChatVivo) — el chat-tab resume el hilo al salir, no solo con "Volver"
 const SHELL = [
   './',
   './index.html',

@@ -35,19 +35,40 @@ const COMERCIAL = new RegExp([
   '\\bjoven\\b|familiar|\\bsenior\\b|corporativo|area protegida',
 ].join('|'));
 
-// Categoría del mensaje (usa el resultado del escaneo de banderas para lo rojo).
-function clasificar(mensaje, scan) {
+// RECUERDO de SESIONES PREVIAS → claude. El 8B IGNORA el bloque "DE CHARLAS ANTERIORES" inyectado (hallazgo 27-jul):
+// las preguntas de recuerdo de OTRA sesión van al mejor modelo. Doctrina intacta: el HILO ACTUAL casual sigue en ollama
+// (el hilo ya funciona en ollama, verificado). Patrones sobre texto NORMALIZADO (sin acentos/ñ).
+// FUERTE = marcadores EXPLÍCITOS de otra sesión (inter-sesión inequívoco) → claude SIEMPRE, haya o no hilo abierto.
+const RECUERDO_FUERTE = new RegExp([
+  'de que (hablamos|charlamos|hablabamos|veniamos hablando)',
+  'la ultima vez|la otra vez|la vez pasada|la vez anterior',
+  'charlas? anterior(es)?|conversacion(es)? anterior(es)?|charlas pasadas',
+  'hablamos (antes|ayer|la semana pasada|el otro dia|recien no)',
+  'que te conte|lo que te dije|lo que hablamos|lo que veniamos hablando',
+  'te acordas de lo que|acordate de lo que',
+].join('|'));
+// AMBIGUO = "te acordas (de)…" SIN marcador de sesión: intra-hilo si HAY historia (ollama lo maneja, verificado),
+// inter-sesión si la sesión es FRESCA (historia vacía) → recién ahí va a claude. La historia la pasa la CF (opts.hayHistoria).
+const RECUERDO_AMBIGUO = /\bte acord|\bacordas de\b|\brecordas\b|\bte acordabas/;
+
+// Categoría del mensaje (usa el resultado del escaneo de banderas para lo rojo). opts.hayHistoria = ¿el hilo actual ya
+// tiene mensajes? (para desambiguar el recuerdo intra-hilo del inter-sesión sin heurística frágil).
+function clasificar(mensaje, scan, opts) {
+  opts = opts || {};
   if (scan && scan.rojo) {
     return { categoria: (scan.matched || []).includes('urgencia_declarada') ? 'urgencia' : 'rojo' };
   }
   const n = norm(mensaje);
   if (SALUD.test(n)) return { categoria: 'salud' };       // salud primero (ante duda de salud, al mejor modelo)
   if (COMERCIAL.test(n)) return { categoria: 'comercial' }; // planes/cuota/afiliación → claude (sales-sensitive)
+  // RECUERDO (solo rescata lo que iría a 'resto'/ollama): marcador fuerte SIEMPRE; "te acordas" ambiguo solo en sesión fresca.
+  if (RECUERDO_FUERTE.test(n)) return { categoria: 'recuerdo' };
+  if (!opts.hayHistoria && RECUERDO_AMBIGUO.test(n)) return { categoria: 'recuerdo' };
   return { categoria: 'resto' };
 }
 
 // MAPA categoría→proveedor + cascada. DEFAULTS en código; config.ruteo.{mapa,cascada} overridea (DATA, sin redeploy).
-const MAPA_DEFAULT = { rojo: 'claude', urgencia: 'claude', salud: 'claude', comercial: 'claude', resto: 'ollama' };
+const MAPA_DEFAULT = { rojo: 'claude', urgencia: 'claude', salud: 'claude', comercial: 'claude', recuerdo: 'claude', resto: 'ollama' };
 
 // Orden de ramas a intentar (cascada = respaldo mutuo). Devuelve [elegida] o [elegida, otra].
 // esProspecto → FUERZA claude: el prospecto no tiene cuenta que alucinar y es el funnel de ventas; va al mejor modelo.
@@ -59,4 +80,4 @@ function ramas(categoria, ruteoCfg, esProspecto) {
   return cascada ? [elegida, otra] : [elegida];
 }
 
-module.exports = { clasificar, ramas, SALUD, COMERCIAL, MAPA_DEFAULT };
+module.exports = { clasificar, ramas, SALUD, COMERCIAL, RECUERDO_FUERTE, RECUERDO_AMBIGUO, MAPA_DEFAULT };
