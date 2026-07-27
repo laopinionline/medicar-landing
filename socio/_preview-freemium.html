@@ -173,7 +173,7 @@ const CONTENT={
 };
 
 function pintarTabs(){ document.getElementById('tabbar').innerHTML=TABS.map(([id,lbl])=>`<button class="${id===tab?'on':''}" onclick="irTab('${id}')"><span class="ic">${ICN[id]}</span><span class="tl">${lbl}</span></button>`).join(''); }
-function irTab(t){ tab=t; document.getElementById('body').innerHTML=CONTENT[t](); document.getElementById('body').scrollTop=0; pintarTabs(); sincScenes(); }
+function irTab(t){ tab=t; document.getElementById('sheet').innerHTML=''; document.getElementById('body').innerHTML=CONTENT[t](); document.getElementById('body').scrollTop=0; pintarTabs(); sincScenes(); }
 function abrirCartel(){
   document.getElementById('sheet').innerHTML=`<div class="sheet-bg" onclick="cerrarCartel(event)"><div class="sheet" onclick="event.stopPropagation()">
     <div class="em">🚑</div><h3>La cobertura es para socios</h3>
