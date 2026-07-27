@@ -630,6 +630,7 @@ const set=p=>{
 function cleanSession(){ return {user:null,tab:'home',sub:'directos',step:0}; }
 function resetSession(keepErr){
   const err=keepErr?S.loginErr:'';
+  const reb=keepErr?S.reboteStaff:false; // preserva el rebote del afiliado a través del signOut (onAuthStateChanged→resetSession)
   if(typeof spDetach==='function') spDetach(); // corta listeners onSnapshot del panel antes de limpiar
   if(typeof dashDetach==='function') dashDetach(); // ídem dashboard del superadmin
   if(typeof movDetach==='function') movDetach(); // ídem sección móviles
@@ -645,10 +646,11 @@ function resetSession(keepErr){
   if(S.mapaVivo){ try{S.mapaVivo.remove();}catch(_){} S.mapaVivo=null; } // mapa vivo Leaflet
   S=cleanSession();
   if(err) S.loginErr=err; // preserva el mensaje de login (ej. "cuenta sin rol")
+  if(reb) S.reboteStaff=reb; // preserva el rebote del afiliado (app/ es el SISTEMA, no la app del socio)
 }
 
 const render=()=>{
-  document.getElementById('app').innerHTML=S.user?(S.roleSelect?roleSelectView():shell()):login();
+  document.getElementById('app').innerHTML=S.reboteStaff?reboteStaffView():(S.user?(S.roleSelect?roleSelectView():shell()):login());
   bind();
 };
 
@@ -673,7 +675,7 @@ function navDesc(){
   else if(S.af && S.af.emp){ d.open='emp'; }                              // ABM de empresas (Tramo 2a)
   else if(S.af && S.af.edit){ d.open='af'; d.openId=String(S.af.edit); }
   else if(S.fac && S.fac.fedit){ d.open='fac'; d.openId=String(S.fac.fedit); }
-  else if(S.tab==='despacho' && S.dsp && S.dsp.stage){ d.stage=S.dsp.stage; } // despacho: 'buscar'/'form'/'creado' son entries apilados
+  else if((S.tab==='despacho' || S.user.rol==='medico') && S.dsp && S.dsp.stage){ d.stage=S.dsp.stage; } // despacho: 'buscar'/'form'/'creado' son entries apilados · médico: la ficha del escaneo QR
   if(S.step){ d.step=S.step; }
   return d;
 }
@@ -721,7 +723,7 @@ function navRestore(desc){
     if(S.af && S.af.emp && desc.open!=='emp') empCerrar();          // ABM empresas (Tramo 2a)
     if(S.af && S.af.edit && desc.open!=='af' && desc.open!=='emp') afCancelar();
     if(S.fac && S.fac.fedit && desc.open!=='fac') facFacturaCerrar();
-    if(S.tab==='despacho' && S.dsp && S.dsp.stage && S.dsp.stage!=='buscar' && (desc.stage||'buscar')==='buscar') dspReset(); // form/creado -> buscar (back)
+    if((S.tab==='despacho' || S.user.rol==='medico') && S.dsp && S.dsp.stage && S.dsp.stage!=='buscar' && (desc.stage||'buscar')==='buscar') dspReset(); // form/creado -> buscar (back) · médico: cierra la ficha del escaneo QR
     // ABRIR lo que pide el descriptor (dirección "adelante"). GRACIA: solo si el id sigue en la data
     // cargada; si no existe / la data no está -> NO se abre (queda la base, sin error card).
     const existe=(arr,id)=>Array.isArray(arr)&&arr.some(x=>x.id===id);
@@ -761,6 +763,29 @@ function login(){
   </div>
 </div>`;
 }
+// GATE DE PUERTA (app/ es el SISTEMA, no la app del socio): un uid 'afiliado' SIN rol de staff NO entra al panel.
+// Mensaje claro + link al PWA de socios. El DOBLE SOMBRERO (afiliado + rol staff) entra como staff (nunca llega acá,
+// porque 'afiliado' se filtra del array de sesión y quedan sus roles de staff). Es puro UI/ruteo: la seguridad de datos
+// ya vive en las reglas Firestore por colección. Mismo espíritu que el rebote del prospecto sin rol.
+function reboteStaffView(){
+  return `<div style="min-height:100svh;display:flex;flex-direction:column;background:var(--dark);position:relative;overflow:hidden">
+  <div class="login-bg">40»</div>
+  <div class="login-top">
+    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:1.3rem">
+      <svg class="chev" width="38" height="46" viewBox="0 0 1794 2190"><use href="#cw"/></svg>
+      <span style="font-style:italic;font-weight:800;font-size:2.5rem;letter-spacing:-.02em;color:#fff;line-height:1">medicar</span>
+    </div>
+    <div class="login-sub">Panel operativo · Emergencias médicas · Pergamino</div>
+  </div>
+  <div class="sheet">
+    <h2>Este es el acceso del sistema</h2>
+    <p style="font-size:.9rem;color:var(--ink2);line-height:1.5;margin:.2rem 0 1.2rem">Los socios usan la app de MEDICAR. Desde ahí tenés tu credencial, tus consultas y tu plan.</p>
+    <a href="../socio/" class="btn-r" style="display:flex;align-items:center;justify-content:center;gap:.5rem;text-decoration:none">Ir a la app de MEDICAR<svg class="chev chev-adv" width="12" height="15" viewBox="0 0 1794 2190"><use href="#cw"/></svg></a>
+    <button class="btn-o" onclick="salirRebote()" style="margin-top:.6rem">Volver al ingreso del sistema</button>
+  </div>
+</div>`;
+}
+function salirRebote(){ S.reboteStaff=false; render(); }
 async function doLogin(){
   const e=document.getElementById('em').value.trim();
   const p=document.getElementById('pw').value;
@@ -809,7 +834,8 @@ async function enterWithFbUser(fbUser){
   const roles=rolesRaw.filter(r=>r!=='afiliado');
   if(!roles.length){
     try{ sessionStorage.removeItem('medicar_rol'); }catch(_){}
-    window.location.replace('../socio/'); // afiliado puro -> PWA
+    S.reboteStaff=true;    // app/ es el SISTEMA (staff): el afiliado puro NO entra — rebote con mensaje claro + link al PWA (antes: redirect silencioso)
+    await auth.signOut();  // corta la sesión; onAuthStateChanged(null) → resetSession(true) preserva el rebote → reboteStaffView()
     return;
   }
   const u={
@@ -986,7 +1012,7 @@ function pg(){
   if(capRoute[t]) return capRoute[t]();
   // estructurales del rol (lo que no es cap-tab):
   if(r==='afiliado') return ''; // PWA; inalcanzable (redirigido antes)
-  if(r==='medico'){if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='guardia')return bandejaAlertas();return mHome();}
+  if(r==='medico'){if(t==='home' && S.dsp && S.dsp.stage && S.dsp.stage!=='buscar')return dDesp(); /* enganche QR: la ficha del escaneo, misma vista que el despachante */ if(t==='episodios')return bandeja();if(t==='alertas')return medAlertas();if(t==='guardia')return bandejaAlertas();return mHome();}
   if(r==='despachante'){if(t==='despacho')return dDesp();if(t==='guardia')return bandejaAlertas();return bandeja();}
   if(r==='contable') return facPanel();
   if(r==='superadmin') return superView();
@@ -1282,6 +1308,8 @@ function mHome(){
        : `<div style="font-size:.8rem;color:var(--ink3);padding:.4rem 0">Sin atenciones cerradas aún.</div>`)
   }</div>`;
   return`
+  ${/* Enganche QR (tramo/qr-medico-enganche): entrada del médico al escáner ya construido (dspEscanearQR). Target grande, un tap. */''}
+  <button onclick="dspEscanearQR()" aria-label="Escanear credencial del socio" style="width:100%;background:var(--rojo,#ED1C24);color:#fff;border:none;border-radius:14px;padding:1.05rem 1rem;font-size:1.05rem;font-weight:800;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:.55rem;cursor:pointer;box-shadow:0 4px 14px rgba(237,28,36,.28);margin-bottom:.85rem">📷 Escanear credencial</button>
   <div class="card card-dk">
     <div style="display:flex;justify-content:space-between;align-items:flex-start">
       <div><div class="ch">Guardia activa</div><div style="font-size:1rem;font-weight:600;color:#fff;margin-bottom:.18rem">${u.nombre}</div><div style="font-size:.8rem;color:rgba(255,255,255,.38)">${sub}</div></div>
@@ -1939,15 +1967,16 @@ async function dspEscanearQR(){
     ov=document.createElement('div'); ov.id='qr-scan-ov';
     ov.style.cssText='position:fixed;inset:0;z-index:9999;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center';
     ov.innerHTML='<video id="qr-video" playsinline muted style="width:100%;max-width:480px;max-height:70vh;object-fit:cover;border-radius:12px"></video>'
-      +'<div id="qr-scan-msg" style="color:#fff;font-size:.9rem;margin-top:1rem;text-align:center;padding:0 1rem">Apuntá al QR de la credencial…</div>'
-      +'<button onclick="dspScanStop()" style="margin-top:1.2rem;background:#fff;color:#000;border:none;border-radius:10px;padding:.7rem 1.6rem;font-weight:700;font-size:.9rem">Cancelar</button>';
+      +'<div id="qr-scan-msg" style="color:#fff;font-size:.9rem;margin-top:1rem;text-align:center;padding:0 1rem;line-height:1.4">Apuntá al QR de la credencial…</div>'
+      +'<button id="qr-scan-retry" onclick="dspScanReintentar()" style="display:none;margin-top:1rem;background:#fff;color:#000;border:none;border-radius:10px;padding:.7rem 1.6rem;font-weight:800;font-size:.9rem">Reintentar</button>'
+      +'<button onclick="dspScanStop()" style="margin-top:.7rem;background:none;color:#fff;border:1px solid rgba(255,255,255,.5);border-radius:10px;padding:.6rem 1.6rem;font-weight:700;font-size:.9rem">Cancelar</button>';
     document.body.appendChild(ov);
-  } else { ov.style.display='flex'; dspScanMsg('Apuntá al QR de la credencial…'); }
+  } else { ov.style.display='flex'; dspScanRetryShow(false); dspScanMsg('Apuntá al QR de la credencial…'); }
   const vid=document.getElementById('qr-video');
   try{
     _qrStream=await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }, audio:false });
     vid.srcObject=_qrStream; await vid.play();
-  }catch(e){ dspScanMsg('No se pudo abrir la cámara. Revisá los permisos.'); return; }
+  }catch(e){ dspScanErr('Necesitás permitir el acceso a la cámara para escanear la credencial. Revisá los permisos del navegador y reintentá.'); return; }
   if(typeof ZXingWASM!=='undefined' && ZXingWASM.setZXingModuleOverrides){
     try{ ZXingWASM.setZXingModuleOverrides({ locateFile:(p)=> (p&&p.endsWith('.wasm')) ? './vendor/zxing/zxing_reader.wasm' : p }); }catch(_){}
   }
@@ -1970,6 +1999,9 @@ async function dspEscanearQR(){
   _qrRaf=requestAnimationFrame(tick);
 }
 function dspScanMsg(m){ const el=document.getElementById('qr-scan-msg'); if(el) el.textContent=m; }
+function dspScanRetryShow(on){ const b=document.getElementById('qr-scan-retry'); if(b) b.style.display=on?'inline-block':'none'; } // muestra/oculta el botón Reintentar
+function dspScanErr(m){ dspScanMsg(m); dspScanRetryShow(true); } // fricción con el loop DETENIDO (cámara denegada): mensaje claro + Reintentar (no error mudo ni pantalla congelada)
+function dspScanReintentar(){ dspScanRetryShow(false); dspEscanearQR(); } // reabre cámara + reanuda el escaneo
 function dspScanStop(){
   _qrDone=true;
   if(_qrRaf){ cancelAnimationFrame(_qrRaf); _qrRaf=null; }
@@ -1982,7 +2014,7 @@ async function dspQRDecodificado(token){
   dspScanMsg('Credencial leída. Buscando…');
   let r;
   try{ r=await fnsCall('resolverQR',{ token }); }
-  catch(e){ _qrDone=false; dspScanMsg('QR no reconocido. Volvé a intentar.'); return; }
+  catch(e){ _qrDone=false; const off=(navigator.onLine===false)||(e&&['unavailable','deadline-exceeded','internal'].includes(e.code)); dspScanMsg(off?'Sin conexión — acercá el celu a mejor señal y reintentá.':'QR no reconocido. Volvé a intentar.'); return; }
   let pac=null;
   try{ const p=await db.collection('pacientes').doc(r.personaId).get(); if(p.exists) pac={id:p.id,...p.data()}; }catch(_){}
   if(!pac) pac={ id:r.personaId, apellido:'', nombre:(r.nombre||'—'), numeroAfiliado:(r.numeroAfiliado||'') };
