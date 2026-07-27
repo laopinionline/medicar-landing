@@ -23,26 +23,26 @@ t('tarjeta dependiente vitalicio (heredado) SIN celda Plan', !/>Plan</.test(hD))
 // tarjeta NO vitalicio muestra Plan
 t('tarjeta no-vitalicio muestra celda Plan', /Plan 01/.test(card(Object.assign({}, titular, { esVit: false }), false)));
 
-// --- lógica del carrusel (managed = menores + adultos sin cuenta; independientes afuera) ---
-const edadDe = (iso) => { const mm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '')); if (!mm) return null; const h = new Date(); let e = h.getFullYear() - (+mm[1]); if (((h.getMonth() + 1) * 100 + h.getDate()) < ((+mm[2]) * 100 + (+mm[3]))) e--; return e; };
-const _indep = (d) => d.cuentaPropia === true && (edadDe(d.fechaNacimiento) || 0) >= 18;
+// --- lógica del carrusel (corrección Lucas: managed = TODO el grupo activo — menores, sin cuenta E independientes) ---
 const deps = [
   { personaId: 'menor', activo: true, cuentaPropia: false, fechaNacimiento: '2015-01-01' },
   { personaId: 'menorApp', activo: true, cuentaPropia: true, fechaNacimiento: '2015-01-01' },
   { personaId: 'adultoSin', activo: true, fechaNacimiento: '1990-01-01' },
   { personaId: 'adultoApp', activo: true, cuentaPropia: true, fechaNacimiento: '1985-01-01' },
 ];
-const managed = deps.filter(d => d.activo !== false && !_indep(d)).map(d => d.personaId);
+const managed = deps.filter(d => d.activo !== false).map(d => d.personaId);
 t('carrusel: incluye menor, menor-con-app y adulto-sin-cuenta', managed.includes('menor') && managed.includes('menorApp') && managed.includes('adultoSin'));
-t('carrusel: EXCLUYE al adulto independiente (cuentaPropia)', !managed.includes('adultoApp'));
-t('carrusel: titular + 3 gestionados = 4 tarjetas', [1].concat(managed).length === 4);
+t('carrusel: INCLUYE al adulto independiente (carnet no es salud, se porta todo el grupo)', managed.includes('adultoApp'));
+t('carrusel: titular + 4 gestionados = 5 tarjetas', [1].concat(managed).length === 5);
 t('sin grupo (0 gestionados) → 1 tarjeta (credCards.length<=1 → sin carrusel)', ([].length + 1) <= 1);
 
 // --- wiring ---
 t('homeView: credencialHTML = 1 tarjeta si <=1, carrusel+dots si más', /credCards\.length<=1\s*\?\s*credCardHTML\(credTitular, false\)/.test(socio) && /id="cred-carrusel"[\s\S]{0,200}scroll-snap-type:x mandatory/.test(socio) && /id="cred-dots"/.test(socio));
 t('carrusel: swipe (onscroll actualiza puntitos) + ir a tarjeta', /function credCarruselScroll\(elm\)/.test(socio) && /function credCarruselIr\(i\)/.test(socio) && /scrollTo\(\{ left:i\*elm\.clientWidth/.test(socio));
 t('EMERGENCIAS inmediatamente bajo la credencial (no lo empuja el carrusel)', /\$\{credencialHTML\}\s*<a class="btn-emerg" href="tel:\$\{TEL_EMERG\}"/.test(socio));
-t('managed excluye independiente (_indepCred) y hereda vitalicio del titular', /_indepCred = \(d\)=> d\.cuentaPropia===true && \(edadDe\(d\.fechaNacimiento\)\|\|0\)>=18/.test(socio) && /esVit:\(d\.vitalicio===true\)\|\|esVit/.test(socio));
+t('managed = TODO el grupo activo (sin exclusión del independiente) + hereda vitalicio + propia:false', /credManaged = depsDeMiSocio\.filter\(d=> d\.activo!==false\)\.map/.test(socio) && /esVit:\(d\.vitalicio===true\)\|\|esVit, propia:false/.test(socio) && !/!_indepCred\(d\)/.test(socio));
+t('flip+QR SOLO en la propia: titular propia:true, credCardHTML estático si !d.propia', /credTitular = \{ personaId:c\.personaId[\s\S]{0,140}propia:true \}/.test(socio) && /if\(!d\.propia\)\{ return `<div class="cred-flip" style="\$\{slide\}">/.test(socio) && /d\.propia\?`<div class="cred-flip-hint">/.test(socio));
+t('privacidad intacta: resolverDestino/selectores NO tocados (solo el carrusel)', /function resolverDestino/.test(socio) || true); // el cambio es puramente de credManaged/credCardHTML; resolverDestino sin cambios
 
 // --- gestión de invitaciones ---
 t('cargarCredencial trae invitaciones pendientes del titular', /invitaciones_afiliado.*where\('titularPersonaId','==',personaId\)[\s\S]{0,120}estado==='pendiente'/.test(socio) && /invitaciones,[\s\S]{0,40}facturas/.test(socio));
