@@ -86,5 +86,14 @@ t('MSG · bienvenida se descarta con flag local (cerrarBienvenidaVinc)', /functi
 t('MSG · bienvenida montada en el Inicio del socio (tabInicio)', /return `<div style="padding:1rem 1rem 0">\s*\$\{bienvenidaVincHTML\(c\)\}/.test(socio));
 t('MSG · SW socio v62', /medicar-socio-v(6[2-9]|[7-9]\d)/.test(sw));
 
+// ── mini-fix (a): botón alta-precargada en fichas yaAfiliado sin importar el estado (test CONDUCTUAL de la lógica real) ──
+const mkActivar = new Function('p',
+  line(app, /const altaEsSecundaria=p\.yaAfiliado===true;/) + '\n' +
+  line(app, /const activar=\(p\.estado[^\n]*:'';/) + '\n return activar;');
+t('FIX(a) · yaAfiliado + estado nuevo → botón VISIBLE, desplazado (btn-o) + advertencia', (() => { const a = mkActivar({ id: 'x', yaAfiliado: true, estado: 'nuevo' }); return a.includes("mktActivarProspecto('x')") && a.includes('btn-o') && a.includes('usá <b>Vincular a su socio</b>'); })());
+t('FIX(a) · yaAfiliado + afiliacion_en_proceso → VISIBLE + advertencia, SIN duplicar botón', (() => { const a = mkActivar({ id: 'x', yaAfiliado: true, estado: 'afiliacion_en_proceso' }); return (a.match(/mktActivarProspecto/g) || []).length === 1 && a.includes('usá <b>Vincular a su socio</b>') && a.includes('btn-o'); })());
+t('FIX(a) · NO-yaAfiliado + estado nuevo → botón AUSENTE (gate original intacto)', mkActivar({ id: 'x', yaAfiliado: false, estado: 'nuevo' }) === '');
+t('FIX(a) · NO-yaAfiliado + afiliacion_en_proceso → VISIBLE (btn-r, SIN advertencia)', (() => { const a = mkActivar({ id: 'x', yaAfiliado: false, estado: 'afiliacion_en_proceso' }); return a.includes("mktActivarProspecto('x')") && a.includes('btn-r') && !a.includes('Vincular a su socio'); })());
+
 console.log(`\n${fail ? '✗' : '✓'} smoke-panel-prospectos: ${ok} ok, ${fail} fallo(s)`);
 process.exit(fail ? 1 : 0);
