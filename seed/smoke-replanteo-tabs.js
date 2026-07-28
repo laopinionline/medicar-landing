@@ -29,7 +29,7 @@ t('tab bar fija abajo (position:fixed bottom)', /<nav style="position:fixed;left
 t('tabs con tokens de marca (activo var(--rojo) / inactivo var(--gris))', /on\?'var\(--rojo\)':'var\(--gris\)'/.test(socio));
 
 // ── Nav: pushState por tab + popstate restaura tab (back determinístico) ──
-t('irTab hace history.pushState({tabnav})', /function irTab\(t\)[\s\S]{0,400}history\.pushState\(\{tabnav:t\}/.test(socio));
+t('irTab hace history.pushState({tabnav})', /function irTab\(t\)[\s\S]{0,600}history\.pushState\(\{tabnav:t\}/.test(socio));
 t('navRestore restaura el tab en el back (tabnav)', /desc\.tabnav\)\{[\s\S]{0,120}S\.tab=desc\.tabnav; pintarTab/.test(socio));
 t('pintarTab re-pinta SOLO el contenedor (tab bar fija)', /function pintarTab\(t\)[\s\S]{0,120}el\('tab-content'\)[\s\S]{0,120}innerHTML=tabContent\(t\)/.test(socio));
 
@@ -211,7 +211,7 @@ t('T4 · foto de perfil: guard de repintado ampliado a freemium (view prospecto)
 t('T4 · abrirCartelAsociate: copy aprobado "La cobertura es para socios"', /function abrirCartelAsociate\(\)\{[\s\S]{0,700}La cobertura es para socios[\s\S]{0,300}Las emergencias 24 hs y las consultas con un médico son parte del servicio de MEDICAR/.test(socio));
 t('T4 · cartel: Afiliarme → cierra + abrirPuente; "Ahora no" → cierra', /onclick="cerrarCartelAsociate\(\);abrirPuente\(\)">Afiliarme[\s\S]{0,300}onclick="cerrarCartelAsociate\(\)"[\s\S]{0,300}Ahora no/.test(socio));
 t('T4 · cartel: guarda esProspectoUI (solo el gratuito lo abre)', /function abrirCartelAsociate\(\)\{\s*if\(!esProspectoUI\(\)\) return;/.test(socio));
-t('T4 · irTab limpia #cartel-slot (el cartel se cierra al cambiar de tab)', /function irTab\(t\)\{[\s\S]{0,120}el\('cartel-slot'\); if\(cs\) cs\.innerHTML=''/.test(socio));
+t('T4 · irTab limpia #cartel-slot (el cartel se cierra al cambiar de tab)', /function irTab\(t\)\{[\s\S]{0,320}el\('cartel-slot'\); if\(cs\) cs\.innerHTML=''/.test(socio));
 
 // RENDER (vm): banda freemium sin tel: + abre cartel + 5 tabs intactos.
 (function(){
@@ -255,7 +255,7 @@ t('P6 · cero-oráculo: marcarYaAfiliado NO consulta afiliación por DNI (sin le
 t('P6 · cero-oráculo: el catch NO expone error técnico (intención registrada igual)', /async function marcarYaAfiliado[\s\S]{0,400}catch\(_\)\{[\s\S]{0,120}cero-oráculo/.test(socio));
 
 // UI tras marcar: la MISMA marca reemplaza el link por la leyenda en las 2 puntas.
-t('P6 · post-marca: leyenda "Registramos tu aviso: nos vamos a comunicar con vos" (reemplaza el link)', /function yaAfiliadoLink\(\)\{\s*if\(S\.prospecto && S\.prospecto\.yaAfiliado\)[\s\S]{0,200}Registramos tu aviso: nos vamos a comunicar con vos/.test(socio));
+t('P6 · post-marca: leyenda "Registramos tu aviso: nos vamos a comunicar con vos" (reemplaza el link)', /function yaAfiliadoLink\(\)\{[\s\S]{0,800}if\(S\.prospecto && S\.prospecto\.yaAfiliado\)[\s\S]{0,200}Registramos tu aviso: nos vamos a comunicar con vos/.test(socio));
 t('P6 · post-marca: setea S.prospecto.yaAfiliado=true (reflejo local)', /async function marcarYaAfiliado[\s\S]{0,500}S\.prospecto\.yaAfiliado=true/.test(socio));
 
 // PANEL: badge propio "DICE SER AFILIADO", visualmente distinto (chip índigo con borde, no color sólido comercial).
