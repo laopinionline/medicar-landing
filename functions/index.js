@@ -1988,6 +1988,80 @@ exports.vincularProspectoASocio = onCall(async (request) => {
   return { ok: true };
 });
 
+/* moverDeGrupo — STAFF (gestionar_afiliados) mueve un socio a otro grupo o lo independiza, desde el Padrón.
+   Regla de negocio: dentro del grupo el plan es ÚNICO (el del titular, heredado); no hay planes por integrante.
+   Es el ÚNICO camino de escritura de titularPersonaId/titularSocioId (las rules los blindan inmutables por cliente).
+     · modo 'grupo'       → reescribe titularPersonaId+titularSocioId al destino y LIMPIA planId (queda heredado del nuevo titular).
+     · modo 'independizar'→ copia como plan PROPIO el que venía heredando del titular y limpia titularPersonaId+titularSocioId.
+   Guards: socio activo; titular con dependientes → rechazo (no se mueve el grupo entero de una); en modo grupo el destino
+   existe, está activo y es titular real (sin titularSocioId); no mover al mismo grupo. Auditoría: ultimoMovimientoGrupo en
+   el doc + entrada inmutable en 'auditoria' (mismo shape que audit() del panel). Admin SDK (bypassa rules). */
+exports.moverDeGrupo = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Login requerido.');
+  const u = (await db.collection('usuarios').doc(request.auth.uid).get()).data() || {};
+  const roles = Array.isArray(u.roles) ? u.roles : (u.rol ? [u.rol] : []);
+  if (!(roles.includes('superadmin') || (u.permisos && u.permisos.gestionar_afiliados === true))) throw new HttpsError('permission-denied', 'Necesitás la habilidad Afiliados.');
+  const socioId = String((request.data || {}).socioId || '').trim();
+  const modo = String((request.data || {}).modo || '').trim();
+  const titularDestinoId = String((request.data || {}).titularDestinoId || '').trim();
+  if (!socioId) throw new HttpsError('invalid-argument', 'Falta el socio.');
+  if (modo !== 'grupo' && modo !== 'independizar') throw new HttpsError('invalid-argument', 'Modo inválido.');
+
+  const socioRef = db.collection('socios').doc(socioId);
+  const socioSnap = await socioRef.get();
+  if (!socioSnap.exists) throw new HttpsError('not-found', 'Ese socio no existe.');
+  const socio = socioSnap.data() || {};
+  if (socio.activo === false) throw new HttpsError('failed-precondition', 'El socio está inactivo.');
+
+  // Titular con dependientes activos → rechazo (primero mover/independizar a sus integrantes).
+  const depsSnap = await db.collection('socios').where('titularSocioId', '==', socioId).get();
+  const deps = depsSnap.docs.map((d) => d.data()).filter((x) => x.activo !== false);
+  if (deps.length > 0) throw new HttpsError('failed-precondition', 'Es titular de un grupo con dependientes. Primero mové o independizá a sus integrantes: no se mueve el grupo entero de una.');
+
+  const actorEmail = (request.auth.token && request.auth.token.email) || u.email || '';
+  const origenTitularSocioId = socio.titularSocioId || null;
+  let update;
+  let detalle;
+  let destinoTitularSocioId = null;
+
+  if (modo === 'grupo') {
+    if (!titularDestinoId) throw new HttpsError('invalid-argument', 'Falta el titular destino.');
+    if (titularDestinoId === socioId) throw new HttpsError('invalid-argument', 'No podés mover un socio a su propio grupo.');
+    if (origenTitularSocioId === titularDestinoId) throw new HttpsError('failed-precondition', 'El socio ya pertenece a ese grupo.');
+    const destSnap = await db.collection('socios').doc(titularDestinoId).get();
+    if (!destSnap.exists) throw new HttpsError('not-found', 'El titular destino no existe.');
+    const dest = destSnap.data() || {};
+    if (dest.activo === false) throw new HttpsError('failed-precondition', 'El titular destino está inactivo.');
+    if (dest.titularSocioId) throw new HttpsError('failed-precondition', 'El destino no es un titular (es dependiente de otro grupo).');
+    destinoTitularSocioId = titularDestinoId;
+    update = {
+      titularPersonaId: dest.personaId || null,
+      titularSocioId: titularDestinoId,
+      planId: null, // plan heredado del nuevo titular (regla: plan único del titular; no planes por integrante)
+      ultimoMovimientoGrupo: { modo: 'grupo', por: request.auth.uid, porEmail: actorEmail || null, origenTitularSocioId, destinoTitularSocioId, en: FV() },
+    };
+    detalle = 'socio ' + socioId + ' → grupo ' + titularDestinoId + ' (desde ' + (origenTitularSocioId || 'sin grupo') + ')';
+  } else { // independizar
+    if (!origenTitularSocioId) throw new HttpsError('failed-precondition', 'El socio ya es independiente (no pertenece a un grupo).');
+    // Plan que venía heredando del titular → se copia como plan propio.
+    let planHeredado = socio.planId || null;
+    try { const ts = await db.collection('socios').doc(origenTitularSocioId).get(); if (ts.exists && (ts.data() || {}).planId) planHeredado = ts.data().planId; } catch (_) {}
+    update = {
+      titularPersonaId: admin.firestore.FieldValue.delete(),
+      titularSocioId: admin.firestore.FieldValue.delete(),
+      planId: planHeredado,
+      ultimoMovimientoGrupo: { modo: 'independizar', por: request.auth.uid, porEmail: actorEmail || null, origenTitularSocioId, destinoTitularSocioId: null, en: FV() },
+    };
+    detalle = 'socio ' + socioId + ' independizado de ' + origenTitularSocioId + ' (plan propio ' + (planHeredado || '—') + ')';
+  }
+
+  await socioRef.set(update, { merge: true });
+  // Auditoría (mismo shape que audit() del panel): entrada inmutable en 'auditoria'.
+  try { await db.collection('auditoria').add({ accion: modo === 'grupo' ? 'mover_de_grupo' : 'independizar_grupo', entidad: 'socio', refId: socioId, detalle: detalle.slice(0, 200), uid: request.auth.uid, email: actorEmail, en: FV() }); } catch (e) { logger.warn('[moverDeGrupo] auditoría falló', { err: e.message }); }
+  logger.info('[moverDeGrupo]', { socioId, modo, destinoTitularSocioId, porUid: request.auth.uid });
+  return { ok: true, modo, socioId, titularDestinoId: destinoTitularSocioId };
+});
+
 /* PUENTE DE COMPRA — checkoutAfiliacion: el prospecto eligió plan y "pagó" (SIMULADO, client-side). La CF persiste el
    LEAD ENRIQUECIDO (plan/integrantes/total recomputado server-side + datos de alta) y deja estado 'afiliacion_en_proceso'.
    A5: la activación REAL la hace el admin desde este lead (el pago simulado NO da de alta al socio). */

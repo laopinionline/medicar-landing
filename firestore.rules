@@ -538,7 +538,13 @@ service cloud.firestore {
                                && ( resource == null || !('origen' in resource.data)
                                     || request.resource.data.get('origen', null) == resource.data.get('origen', null) )
                                && ( resource == null || !('empresaId' in resource.data)
-                                    || request.resource.data.get('empresaId', null) == resource.data.get('empresaId', null) );
+                                    || request.resource.data.get('empresaId', null) == resource.data.get('empresaId', null) )
+                               // GRUPO: titularPersonaId/titularSocioId se SETEAN en el alta (create) pero son INMUTABLES por
+                               // cliente en update. Cambiar de grupo o independizar = SOLO la CF moverDeGrupo (Admin SDK).
+                               && ( resource == null
+                                    || request.resource.data.get('titularPersonaId', null) == resource.data.get('titularPersonaId', null) )
+                               && ( resource == null
+                                    || request.resource.data.get('titularSocioId', null) == resource.data.get('titularSocioId', null) );
     }
 
     // empresas/{id}: raíz corporativa / área protegida (alta de socio) + convenio de cobro (E-1).
