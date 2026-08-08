@@ -606,6 +606,13 @@ function socioShellElegible(){ const c=S.cred; return !!(c && c.estado==='ok' &&
 // Tramo 4 FREEMIUM: el gratuito (prospecto) entra al MISMO shell en modo degradado, gated por el flip de tabs. Flag off → prospectoView legacy intacto (misma doctrina que el socio).
 function esFreemium(){ return tabsOn() && esProspectoUI(); }
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// Markdown MÍNIMO sobre texto YA escapado (nunca sobre HTML crudo): **negrita** → <strong>, *cursiva* → <em>.
+// Bold primero para no colisionar con ** ; los marcadores sin cierre quedan literales (no matchean).
+const mdMin = s => String(s==null?'':s).replace(/\*\*([^*]+?)\*\*/g,'<strong>$1</strong>').replace(/\*([^*]+?)\*/g,'<em>$1</em>');
+// Capitalización por palabra, réplica de capitalizarNombre() de functions (partículas en minúscula salvo al inicio).
+// Cubre prospectos ya guardados sin tocar datos: normaliza en el pintado. "juan perez" → "Juan Perez".
+const PARTICULAS_NOMBRE = new Set(['de','del','la','las','los','y','da','do','van']);
+const capNombre = s => String(s||'').trim().replace(/\s+/g,' ').toLowerCase().split(' ').filter(Boolean).map((w,i)=>(i>0 && PARTICULAS_NOMBRE.has(w)) ? w : (w.charAt(0).toUpperCase()+w.slice(1))).join(' ').slice(0,80);
 
 /* ── F5 Turnos: Cloud Functions (mismo patrón que el panel), recarga y acciones ── */
 const FNS_REGION='southamerica-east1';
@@ -1939,7 +1946,7 @@ function credGrisHTML(nombre){
 }
 // Inicio del gratuito: credencial gris + feed "Para vos" abierto (feed_posts es legible por autenticado; homeFeedBlock se autocarga). Sin calificación ni card de chequeo.
 function tabInicioFreemium(){
-  const nombre=(S.prospecto&&S.prospecto.nombre)||'Tu credencial';
+  const nombre=(S.prospecto&&S.prospecto.nombre) ? capNombre(S.prospecto.nombre) : 'Tu credencial';
   return `<div style="padding:1rem 1rem 0">
     ${credGrisHTML(nombre)}
     ${homeFeedBlock()}
@@ -2544,7 +2551,7 @@ function iaBurbuja(m){
         : `<a href="tel:${TEL_EMERG}" style="display:flex;align-items:center;justify-content:center;gap:.4rem;margin-top:.55rem;background:var(--rojo);color:#fff;font-weight:800;padding:.6rem;border-radius:10px;text-decoration:none">🚑 Emergencias ${TEL_EMERG}</a>`)
     : '';
   const botones = (m.botones||[]).map(b=>`<button onclick="iaAccion('${b.accion}')" style="display:block;width:100%;margin-top:.4rem;background:#fff;border:1.5px solid var(--rojo);color:var(--rojo);font-weight:700;padding:.5rem;border-radius:10px;cursor:pointer">${esc(b.label)}</button>`).join('');
-  return `<div style="align-self:flex-start;max-width:90%;overflow-wrap:anywhere;word-break:break-word;background:var(--nieve);border:1px solid var(--linea);border-radius:14px 14px 14px 4px;padding:.55rem .8rem;font-size:.9rem;line-height:1.45">${esc(m.texto).replace(/\n/g,'<br>')}${banner}${botones}</div>`;
+  return `<div style="align-self:flex-start;max-width:90%;overflow-wrap:anywhere;word-break:break-word;background:var(--nieve);border:1px solid var(--linea);border-radius:14px 14px 14px 4px;padding:.55rem .8rem;font-size:.9rem;line-height:1.45">${mdMin(esc(m.texto)).replace(/\n/g,'<br>')}${banner}${botones}</div>`;
 }
 let iaWmAnim=true; // la animación de construcción del wordmark corre solo en la 1ª apertura del chat en esta sesión
 function asistenteView(){
@@ -2570,7 +2577,7 @@ function asistenteView(){
         <button class="btn-o" style="margin-top:.5rem;width:100%;border:none;color:var(--gris)" onclick="iaCerrarEscalar()">Cancelar</button>
       </div></div>` : '';
   return `<div class="home" style="display:flex;flex-direction:column;min-height:100dvh">
-    <div class="topbar">${chv(16)}<div class="ia-wm${anim}" style="margin-left:.4rem">MED<span class="l lI">I</span>C<span class="l lA">A</span>R</div><div class="tb-sp"></div><button class="mini" onclick="cerrarAsistente()">Volver</button></div>
+    <div class="topbar">${chv(16)}<div class="ia-wm${anim}" style="margin-left:.4rem">MED<span class="l lI">I</span>C<span class="l lA">A</span>R</div><div class="tb-sp"></div>${S.view==='asistente'?`<button class="mini" onclick="cerrarAsistente()">Volver</button>`:''}</div>
     <div style="background:#fff3f3;border:1px solid #f3c9c9;border-radius:10px;padding:.5rem .7rem;font-size:.72rem;color:#7a1f1f;margin:.1rem 0 .6rem;line-height:1.4">Este chat funciona con inteligencia artificial. Orienta, pero no reemplaza a un médico. ${prosp?'Ante una urgencia, buscá atención médica de inmediato en una guardia u hospital.':`Ante una urgencia, llamá al <b>${TEL_EMERG}</b>.`}</div>
     <div id="ia-msgs" style="flex:1;display:flex;flex-direction:column;gap:.5rem;padding-bottom:.5rem;overflow-y:auto;overflow-x:hidden;min-width:0">${msgs}${empty}</div>
     ${ia.busy?`<div style="color:var(--gris);font-size:.82rem;padding:.3rem .2rem">Escribiendo…</div>`:''}
