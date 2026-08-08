@@ -599,7 +599,7 @@ const TAB_DETACH = {
   cronograma:   ()=>{ cronoDetach(); S.crono=null; },
   agendaturnos: ()=>{ agtDetach();   S.agt=null;   }, // cap-only: ni superNav lo cubría
   catalogo:     ()=>{ catDetach();   S.cat=null;   },
-  afiliados:    ()=>{ afDetach(); if(!(S.af && S.af.altaDraft)) S.af=null; }, // PRESERVA el ALTA en curso (altaDraft) → sobrevive silenciosa el ida-vuelta de tab (afDetach solo corta el listener, no toca S.af). El resto se nulea.
+  afiliados:    ()=>{ afDetach(); S.mvg=null; if(!(S.af && S.af.altaDraft)) S.af=null; }, // PRESERVA el ALTA en curso (altaDraft) → sobrevive silenciosa el ida-vuelta de tab (afDetach solo corta el listener, no toca S.af). El resto se nulea.
   facturacion:  ()=>{ facDetach();   S.fac=null;   },
   cobranza:     ()=>{ cobDetach();   S.cob=null;   },
   novedades:    ()=>{ novDetach();   S.nov=null;   }, // NO toca el badge
@@ -5754,8 +5754,10 @@ function afPanel(){
     const meta=['N° '+esc(s.numeroAfiliado||'—'), '· '+afPlanNom(s.planId), '· desde '+afFmtFecha(s.vigenteDesde), '· '+esc(s.tipoAfiliado||'—'), inact?'· inactivo':''].filter(Boolean).join(' ');
     const invBtn = (!inact && s.cuentaPropia!==true && s.personaId) ? `<button class="${btn}" onclick="afInvitar('${s.personaId}')">Invitar</button>` : '';
     const cuentaChip = s.cuentaPropia===true ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:var(--verde-hondo);color:#fff">Con app</span>` : '';
-    const acts=`<div style="display:flex;gap:.4rem">${invBtn}<button class="${btn}" onclick="afEditar('${s.id}')">Editar</button><button class="${btn}" onclick="afBaja('${s.id}',${inact})">${inact?'Alta':'Baja'}</button></div>`;
-    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${vitalicioChip(s)} ${bonificadoChip(s)} ${afGrupoChip(s)} ${cuentaChip} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}</div>`;
+    const mvgBtn = !inact ? `<button class="btn-o" style="width:auto;padding:.3rem .6rem;margin-top:0;border-color:#C7CCF5;color:#4338CA" onclick="mvgAbrir('${s.id}')">Mover de grupo</button>` : '';
+    const acts=`<div style="display:flex;gap:.4rem;flex-wrap:wrap">${invBtn}<button class="${btn}" onclick="afEditar('${s.id}')">Editar</button><button class="${btn}" onclick="afBaja('${s.id}',${inact})">${inact?'Alta':'Baja'}</button>${mvgBtn}</div>`;
+    const mvgSlot = (S.mvg && S.mvg.socioId===s.id) ? `<div style="flex:1 1 100%">${mvgPanel(s)}</div>` : '';
+    return `<div class="lr" style="flex-wrap:wrap${inact?';opacity:.5':''}"><div class="lrb" style="flex:1 1 100%"><div class="lrn">${afNombre(s.personaId)} ${vitalicioChip(s)} ${bonificadoChip(s)} ${afGrupoChip(s)} ${cuentaChip} ${facturarAChip(s.facturarA)}</div><div class="lrs">${meta}</div></div>${acts}${mvgSlot}</div>`;
   }).join('') : `<div style="font-size:.78rem;color:var(--ink3)">Sin socios${showInact?'':' activos'}</div>`;
   const toggle=`<label style="display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:var(--ink3);margin-bottom:.6rem;cursor:pointer"><input type="checkbox" onchange="afShowInact(this.checked)" ${showInact?'checked':''}>Ver inactivos${nInact?(' ('+nInact+')'):''}</label>`;
   const head=`<div class="panel-h"><b>Afiliados</b><span class="live-tag">en vivo</span></div>`;
@@ -5806,8 +5808,8 @@ async function asignarSufijo(raizRef, targetRef, buildDoc){
     return { sufijo, numeroAfiliado };
   });
 }
-function afNuevo(){ if(!puedeAfil())return; S.af.flash=null; S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.af.altaDraft={tipo:'directo',empresaId:null,modo:'individual'}; afEnsureCalles(); render(); navPush(); }
-function afEditar(id){ if(!puedeAfil())return; S.af.edit=id; S.af.lk=null; afEnsureCalles(); render(); navPush(); }
+function afNuevo(){ if(!puedeAfil())return; S.af.flash=null; S.mvg=null; S.af.edit='new'; S.af.lk={dni:'',searched:false,persona:null}; S.af.altaDraft={tipo:'directo',empresaId:null,modo:'individual'}; afEnsureCalles(); render(); navPush(); }
+function afEditar(id){ if(!puedeAfil())return; S.mvg=null; S.af.edit=id; S.af.lk=null; afEnsureCalles(); render(); navPush(); }
 function afCancelar(){ if(S.af){ S.af.edit=null; S.af.lk=null; S.af.altaDraft=null; } S.convLeadId=null; S.convPrefill=null; S.convOpenAlta=false; render(); } // cancelar conversión: el lead queda como estaba
 function afForm(){ return S.af.edit==='new' ? afFormNew() : afFormEdit(); }
 
@@ -6451,6 +6453,85 @@ function vitalicioChip(s){ const propio=!!(s && s.vitalicio===true); const t=pro
 // BONIFICADO (Área Protegida): rótulo INTERNO distinto del vitalicio. Nombra el área (empresa) si la resuelve en memoria. El socio NO lo ve.
 function bonificadoChip(s){ if(!(s && s.bonificado===true)) return ''; const emp=(S.af&&S.af.empresas||[]).find(x=>x.id===s.empresaId); const nom=emp?(' '+(emp.razonSocial||'')):''; return `<span style="font-size:.6rem;font-weight:800;letter-spacing:.04em;padding:.06rem .4rem;border-radius:6px;background:var(--verde-hondo);color:#fff" title="Bonificado por área${esc(nom)}">BONIFICADO${nom?(' · '+esc((emp.razonSocial||'').slice(0,18))):''}</span>`; }
 function afGrupoChip(s){ const t=afTitularDe(s); return t ? `<span style="font-size:.6rem;font-weight:700;padding:.06rem .4rem;border-radius:6px;background:#6B7280;color:#fff">Grupo ${esc(t.nombreVista||afNombre(t.personaId)||'—')}</span>` : ''; }
+
+/* ===================== MOVER DE GRUPO (Padrón, cap gestionar_afiliados) =====================
+   UI de la acción "Mover de grupo": segmento A otro grupo / Independizar + buscador de titular destino (SOLO titulares) +
+   confirmación fuerte estilo Vincular con el cambio de plan visible; rechazo para titular con dependientes. La escritura la
+   hace SIEMPRE la CF moverDeGrupo (Admin SDK); esta UI solo la dispara. Copy sin nombres técnicos de campos. */
+function mvgEsTitularCand(x,excluirId){ return !!(x && x.activo!==false && !x.titularSocioId && !x.empresaId && x.tipoAfiliado==='directo' && x.id!==excluirId); }
+function mvgPlanActualId(s){ const t=afTitularDe(s); return t ? (t.planId||null) : (s.planId||null); } // plan efectivo: heredado del titular o propio
+function mvgAbrir(id){ if(!puedeAfil()) return; S.af.flash=null; const hasDeps=(S.af.socios||[]).some(x=>x.titularSocioId===id && x.activo!==false); S.mvg = hasDeps ? {socioId:id,stage:'reject'} : {socioId:id,stage:'form',modo:'grupo',q:'',hits:null,r:null,busy:false,err:''}; render(); }
+function mvgCerrar(){ S.mvg=null; render(); }
+function mvgSeg(modo){ if(!S.mvg) return; S.mvg.modo=modo; S.mvg.q=''; S.mvg.hits=null; S.mvg.r=null; S.mvg.err=''; render(); }
+function mvgQ(v){ if(S.mvg) S.mvg.q=v; } // oninput, sin re-render (no perder foco del input)
+function mvgBuscar(){ const M=S.mvg; if(!M) return; const q=normNombre(M.q); const dniQ=(M.q||'').replace(/\D/g,''); if(q.length<2 && dniQ.length<6){ M.err='Escribí al menos 2 letras o un DNI.'; M.hits=null; render(); return; }
+  const cands=(S.af.socios||[]).filter(x=>mvgEsTitularCand(x,M.socioId));
+  M.hits=cands.filter(x=>{ const per=afPersona(x.personaId)||{}; const nom=normNombre(((per.apellido||'')+' '+(per.nombre||''))); const dni=String(per.dni||''); return (q.length>=2 && nom.includes(q)) || (dniQ.length>=6 && dni.includes(dniQ)) || String(x.numeroAfiliado||'').includes((M.q||'').trim()); }).slice(0,6);
+  M.err=M.hits.length?'':'Sin titulares que coincidan (el buscador excluye dependientes).'; render(); }
+function mvgPick(destId){ const M=S.mvg; if(!M) return; const x=(S.af.socios||[]).find(y=>y.id===destId); if(!x) return; const per=afPersona(x.personaId)||{}; M.r={ id:x.id, personaId:x.personaId, nombre:afNombre(x.personaId), dni:per.dni||'—', numero:x.numeroAfiliado||'—', planId:x.planId||null }; M.err=''; render(); }
+function mvgVolver(){ const M=S.mvg; if(!M) return; if(M.stage==='confirm'){ M.stage='form'; } else { M.r=null; M.hits=null; M.q=''; } M.err=''; render(); }
+function mvgIrConfirm(){ if(!S.mvg) return; S.mvg.stage='confirm'; S.mvg.err=''; render(); }
+async function mvgConfirmar(){ const M=S.mvg; if(!M) return; M.busy=true; M.err=''; render();
+  try{ const payload={ socioId:M.socioId, modo:M.modo }; if(M.modo==='grupo') payload.titularDestinoId=M.r.id;
+    await fnsCall('moverDeGrupo', payload);
+    if(S.af) S.af.flash = M.modo==='grupo' ? 'Socio movido de grupo.' : 'Socio independizado (plan propio copiado).';
+    S.mvg=null; render();
+  }catch(e){ M.busy=false; M.err=(e&&e.message)||'No se pudo completar el movimiento.'; render(); } }
+function mvgPanel(s){
+  const M=S.mvg; if(!M||M.socioId!==s.id) return '';
+  const err=M.err?`<div class="err" style="display:block;margin:.4rem 0">${esc(M.err)}</div>`:'';
+  const tit=afTitularDe(s); const grupoActual = tit ? (tit.nombreVista||afNombre(tit.personaId)) : 'sin grupo';
+  const planActual = afPlanNom(mvgPlanActualId(s));
+  if(M.stage==='reject'){
+    return `<div style="border:2px solid var(--rojo);border-radius:10px;padding:.7rem .8rem;margin:.5rem 0 .2rem;background:#FDECEC">
+      <div style="font-weight:800;font-size:.82rem;color:var(--rojo-hondo);margin-bottom:.3rem">No se puede mover a este socio</div>
+      <div style="font-size:.9rem;font-weight:800;color:var(--ink)">${afNombre(s.personaId)}</div>
+      <div style="font-size:.78rem;color:var(--ink2);margin-top:.15rem">N° socio <b>${esc(s.numeroAfiliado||'—')}</b> · titular del grupo</div>
+      <div style="font-size:.76rem;color:var(--ink2);margin:.5rem 0;line-height:1.5">Es <b>titular de un grupo con dependientes</b>. Primero <b>mové o independizá</b> a sus integrantes: <b>no se mueve el grupo entero de una</b>.</div>
+      <button class="btn-o" style="width:auto;padding:.45rem 1rem;margin:0" onclick="mvgCerrar()">Entendido</button>
+    </div>`;
+  }
+  if(M.stage==='confirm'){
+    if(M.modo==='grupo'){
+      const planDest=afPlanNom(M.r?M.r.planId:null);
+      return `<div style="border:2px solid #4338CA;border-radius:10px;padding:.7rem .8rem;margin:.5rem 0 .2rem;background:#F7F8FF">
+        <div style="font-weight:800;font-size:.82rem;color:#4338CA;margin-bottom:.4rem">Confirmá el cambio de grupo</div>${err}
+        <div style="font-size:.9rem;font-weight:800;color:var(--ink)">${afNombre(s.personaId)}</div>
+        <div style="font-size:.78rem;color:var(--ink2);margin-top:.15rem">N° socio <b>${esc(s.numeroAfiliado||'—')}</b> · dependiente</div>
+        <div style="font-size:.78rem;color:var(--ink2);margin:.5rem 0 .3rem;border-top:1px solid #E0E3Fb;padding-top:.5rem">Grupo <b>${esc(grupoActual)}</b> (${planActual}) → <b>${esc(M.r?M.r.nombre:'—')}</b> (${planDest})</div>
+        <div style="font-size:.74rem;color:var(--ink3);margin-bottom:.55rem;line-height:1.5">Queda en el nuevo grupo y <b>hereda su plan</b>. La facturación agrupa en el nuevo titular desde el próximo ciclo; las facturas ya emitidas no cambian. Turnos, QR y referentes se revalidan solos.</div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn-r" style="width:auto;padding:.45rem 1rem;margin:0" onclick="mvgConfirmar()" ${M.busy?'disabled':''}>${M.busy?'Moviendo…':'Sí, mover de grupo'}</button><button class="btn-o" style="width:auto;padding:.45rem 1rem;margin:0" onclick="mvgVolver()">Volver</button></div>
+      </div>`;
+    }
+    return `<div style="border:2px solid #4338CA;border-radius:10px;padding:.7rem .8rem;margin:.5rem 0 .2rem;background:#F7F8FF">
+      <div style="font-weight:800;font-size:.82rem;color:#4338CA;margin-bottom:.4rem">Confirmá independizar del grupo</div>${err}
+      <div style="font-size:.9rem;font-weight:800;color:var(--ink)">${afNombre(s.personaId)}</div>
+      <div style="font-size:.78rem;color:var(--ink2);margin-top:.15rem">N° socio <b>${esc(s.numeroAfiliado||'—')}</b> · hoy dependiente de <b>${esc(grupoActual)}</b></div>
+      <div style="font-size:.78rem;color:var(--ink2);margin:.5rem 0 .3rem;border-top:1px solid #E0E3Fb;padding-top:.5rem">Queda como <b>socio independiente</b>. Se le copia como <b>plan propio</b> el que venía heredando: <b>${planActual}</b>.</div>
+      <div style="font-size:.74rem;color:var(--ink3);margin-bottom:.55rem;line-height:1.5">Ajustes de plan posteriores, por su ficha como cualquier socio.</div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn-r" style="width:auto;padding:.45rem 1rem;margin:0" onclick="mvgConfirmar()" ${M.busy?'disabled':''}>${M.busy?'Independizando…':'Sí, independizar'}</button><button class="btn-o" style="width:auto;padding:.45rem 1rem;margin:0" onclick="mvgVolver()">Volver</button></div>
+    </div>`;
+  }
+  // stage 'form'
+  const seg=`<div style="display:flex;gap:.4rem;margin-bottom:.6rem"><button onclick="mvgSeg('grupo')" style="flex:1;padding:.5rem;border-radius:8px;border:1.5px solid ${M.modo==='grupo'?'#4338CA':'var(--border2)'};background:${M.modo==='grupo'?'#F7F8FF':'#fff'};color:${M.modo==='grupo'?'#4338CA':'var(--ink2)'};font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em">A otro grupo</button><button onclick="mvgSeg('independizar')" style="flex:1;padding:.5rem;border-radius:8px;border:1.5px solid ${M.modo==='independizar'?'#4338CA':'var(--border2)'};background:${M.modo==='independizar'?'#F7F8FF':'#fff'};color:${M.modo==='independizar'?'#4338CA':'var(--ink2)'};font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em">Independizar</button></div>`;
+  let body;
+  if(M.modo==='independizar'){
+    body=`<div style="font-size:.76rem;color:var(--ink2);line-height:1.5;margin-bottom:.5rem">Queda como <b>socio independiente</b> (sale de <b>${esc(grupoActual)}</b>). Se le copia como <b>plan propio</b> el que venía heredando: <b>${planActual}</b>.</div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn-r" style="width:auto;padding:.45rem 1rem;margin:0" onclick="mvgIrConfirm()">Continuar</button><button class="btn-o" style="width:auto;padding:.45rem 1rem;margin:0" onclick="mvgCerrar()">Cancelar</button></div>`;
+  } else if(M.r){
+    const planDest=afPlanNom(M.r.planId);
+    body=`<div style="padding:.4rem .5rem;border:1px solid var(--linea);border-radius:8px;background:#fff;margin-bottom:.5rem;display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap"><span style="font-size:.78rem;color:var(--ink)"><b>${esc(M.r.nombre)}</b> · DNI ${esc(M.r.dni)} · N° ${esc(M.r.numero)}</span><span style="font-size:.72rem;color:var(--verde-hondo);font-weight:700">${planDest}</span></div>
+      <div style="font-size:.74rem;color:var(--ink2);margin-bottom:.5rem">Hereda el <b>plan del nuevo titular</b> (${planActual} → <b>${planDest}</b>). Rige desde el próximo ciclo de facturación.</div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn-r" style="width:auto;padding:.45rem 1rem;margin:0" onclick="mvgIrConfirm()">Continuar</button><button class="btn-o" style="width:auto;padding:.45rem 1rem;margin:0" onclick="mvgVolver()">Cambiar</button><button class="btn-o" style="width:auto;padding:.45rem 1rem;margin:0" onclick="mvgCerrar()">Cancelar</button></div>`;
+  } else {
+    const hits=(M.hits||[]).map(x=>{ const per=afPersona(x.personaId)||{}; return `<button onclick="mvgPick('${x.id}')" style="display:block;width:100%;text-align:left;padding:.45rem .55rem;border:1px solid var(--linea);border-radius:8px;background:#fff;margin-bottom:.3rem;cursor:pointer"><span style="font-size:.8rem;color:var(--ink);font-weight:600">${afNombre(x.personaId)}</span><span style="font-size:.72rem;color:var(--ink3)"> · DNI ${esc(per.dni||'—')} · N° ${esc(x.numeroAfiliado||'—')} · ${afPlanNom(x.planId)}</span></button>`; }).join('');
+    body=`<div style="margin-bottom:.4rem"><label style="display:block;font-size:.65rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);font-weight:600;margin-bottom:.35rem">Titular destino (buscar — solo titulares)</label><div style="display:flex;gap:.4rem"><input value="${esc(M.q||'')}" placeholder="Nombre o DNI del titular…" oninput="mvgQ(this.value)" autocomplete="off" style="flex:1;padding:.6rem .8rem;background:var(--bg2);border:1.5px solid transparent;border-radius:10px;font-size:.9rem;color:var(--ink);outline:none"><button class="btn-r" style="width:auto;padding:.4rem .9rem;margin:0" onclick="mvgBuscar()">Buscar</button></div></div>
+      ${hits?`<div style="margin-bottom:.4rem">${hits}</div>`:''}
+      <button class="btn-o" style="width:auto;padding:.4rem .9rem;margin:0" onclick="mvgCerrar()">Cancelar</button>`;
+  }
+  return `<div style="border:1.5px solid #C7CCF5;border-radius:10px;padding:.7rem .8rem;margin:.5rem 0 .2rem;background:#F7F8FF">
+    <div style="font-weight:800;font-size:.82rem;color:#4338CA;margin-bottom:.5rem">Mover de grupo — ${afNombre(s.personaId)}</div>${err}${seg}${body}</div>`;
+}
 // Invitar a un socio a su propia app (mismo generador que el titular; el admin invita a cualquiera sin cuenta).
 async function afInvitar(personaId){
   try{ const r=await fnsCall('generarInvitacionAfiliado',{ personaId }); const link=r.link||'';
